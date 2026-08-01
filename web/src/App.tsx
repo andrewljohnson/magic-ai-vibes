@@ -487,27 +487,15 @@ function FaceUpHand({
   discardRequiredCount?: number;
   onDiscardToggle?: (index: number) => void;
 }) {
-  const playableCount = cards.filter((card) =>
-    playableCardIds?.has(String(card.id)),
-  ).length;
   return (
     <section
       className={`face-hand ${debug ? "debug-hand" : ""}`}
-      aria-label={`${label}, ${cards.length} cards`}
+      aria-label={`${label}, ${cards.length} cards${
+        discardRequiredCount !== undefined
+          ? `, discard ${discardRequiredCount}`
+          : ""
+      }`}
     >
-      <div className="hand-label">
-        {debug && <span className="debug-pill">DEBUG REVEAL</span>}
-        <span>{label}</span>
-        <strong>{cards.length}</strong>
-        {!debug && playableCount > 0 && (
-          <small>{playableCount} playable</small>
-        )}
-        {!debug && discardRequiredCount !== undefined && (
-          <small>
-            {selectedDiscardIndices?.size ?? 0}/{discardRequiredCount} selected
-          </small>
-        )}
-      </div>
       <div className="hand-fan" role="list" aria-label="Cards in your hand">
         {cards.map((card, index) => {
           const playable =
@@ -533,11 +521,11 @@ function FaceUpHand({
               style={
                 {
                   "--fan-angle": `${
-                    (index - (cards.length - 1) / 2) * 1.25
+                    (index - (cards.length - 1) / 2) * 2.2
                   }deg`,
                   "--fan-lift": `${Math.min(
-                    Math.abs(index - (cards.length - 1) / 2) * 1.2,
-                    8,
+                    Math.abs(index - (cards.length - 1) / 2) * 2.4,
+                    16,
                   )}px`,
                 } as CSSProperties
               }
@@ -1124,34 +1112,35 @@ function BattlefieldSide({
       onDragOver={(event) => onPriorityDragOver?.("play", event)}
       onDrop={(event) => onPriorityDrop?.("play", event)}
     >
-      <PlayerHud
-        player={player}
-        seat={seat}
-        label={playerLabel(snapshot, seat)}
-        deck={deckLabel(snapshot, meta, seat)}
-        policy={policyLabel(snapshot, meta, seat)}
-        active={active}
-        opponent={opponent}
-        priorityTarget={priorityPlayerTargets?.has(seat)}
-        draggingPriority={draggingPriority}
-        onChoosePriorityTarget={() => onChoosePriorityPlayer?.(seat)}
-        onDropPriorityTarget={() => {
-          onEndPriorityDrag?.();
-          onChoosePriorityPlayer?.(seat);
-        }}
-        onPriorityDragOver={onPriorityDragOver}
-        onPriorityDrop={onPriorityDrop}
-      />
       {opponent && (
         <div className="opponent-hand-space">
-          <HiddenHand count={player.handSize} />
           {(player.revealedHand ?? player.hand)?.length ? (
             <FaceUpHand
               cards={(player.revealedHand ?? player.hand) as Card[]}
               label="Opponent hand"
               debug
             />
-          ) : null}
+          ) : (
+            <HiddenHand count={player.handSize} />
+          )}
+          <PlayerHud
+            player={player}
+            seat={seat}
+            label={playerLabel(snapshot, seat)}
+            deck={deckLabel(snapshot, meta, seat)}
+            policy={policyLabel(snapshot, meta, seat)}
+            active={active}
+            opponent={opponent}
+            priorityTarget={priorityPlayerTargets?.has(seat)}
+            draggingPriority={draggingPriority}
+            onChoosePriorityTarget={() => onChoosePriorityPlayer?.(seat)}
+            onDropPriorityTarget={() => {
+              onEndPriorityDrag?.();
+              onChoosePriorityPlayer?.(seat);
+            }}
+            onPriorityDragOver={onPriorityDragOver}
+            onPriorityDrop={onPriorityDrop}
+          />
         </div>
       )}
       <div className="permanent-zone">
@@ -4211,6 +4200,25 @@ export default function App() {
                     : ""
                 }`}
               >
+                <PlayerHud
+                  player={state.players[nearSeat]}
+                  seat={nearSeat}
+                  label={playerLabel(snapshot, nearSeat)}
+                  deck={deckLabel(snapshot, meta, nearSeat)}
+                  policy={policyLabel(snapshot, meta, nearSeat)}
+                  active={state.activePlayer === nearSeat}
+                  priorityTarget={priorityPlayerTargets?.has(nearSeat)}
+                  draggingPriority={Boolean(draggedPriorityOrigin)}
+                  onChoosePriorityTarget={() =>
+                    choosePriorityDestination(`player:${nearSeat}`)
+                  }
+                  onDropPriorityTarget={() => {
+                    finishPriorityDrag();
+                    choosePriorityDestination(`player:${nearSeat}`);
+                  }}
+                  onPriorityDragOver={dragOverPriorityDestination}
+                  onPriorityDrop={dropPriorityDestination}
+                />
                 <FaceUpHand
                   cards={state.players[nearSeat].hand ?? []}
                   label={`${playerLabel(snapshot, nearSeat)} · hand`}

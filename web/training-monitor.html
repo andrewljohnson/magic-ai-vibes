@@ -90,10 +90,31 @@
   </section>
 
   <section>
-    <h2>Mulligan rate</h2>
-    <p class="desc">Mulligans per hand dealt across the iteration's self-play games. The value-based keep/mulligan decision sharpens as the net learns hand quality — a flat zero early is normal (an indifferent net never clears the decision margin).</p>
+    <h2>Behavior emergence</h2>
+    <p class="desc">Hand-built probe situations checked at every strength probe: does the net play its land, keep burn off its own face, Giant Growth a dying blocked attacker, Force Spike the caster who cannot pay — and hold the Spike against open mana? Each line is the pass rate; watch for the iteration where a behavior locks in at 1.</p>
+    <div class="chartwrap"><svg id="behaviors" viewBox="0 0 960 240"></svg><div class="tooltip" id="tip-behaviors"></div></div>
+    <div class="legend">
+      <span style="--c: var(--s1)">land drop</span>
+      <span style="--c: var(--s2)">no self-bolt</span>
+      <span style="--c: var(--s3)">growth save</span>
+      <span style="--c: var(--s4)">spike (works)</span>
+      <span style="--c: var(--s5)">spike restraint</span>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mulligan depth rates</h2>
+    <p class="desc">Share of hands mulliganed exactly once, twice, … up to seven times each iteration. The value-based keep/mulligan decision sharpens as the net learns hand quality — a noisy net mulls on noise, an indifferent one never clears the margin.</p>
     <div class="chartwrap"><svg id="mulligans" viewBox="0 0 960 220"></svg><div class="tooltip" id="tip-mulligans"></div></div>
-    <div class="legend"><span style="--c: var(--s2)">mulligans per hand</span></div>
+    <div class="legend">
+      <span style="--c: var(--s1)">×1</span>
+      <span style="--c: var(--s2)">×2</span>
+      <span style="--c: var(--s3)">×3</span>
+      <span style="--c: var(--s4)">×4</span>
+      <span style="--c: var(--s5)">×5</span>
+      <span style="--c: var(--s6)">×6</span>
+      <span style="--c: var(--s7)">×7</span>
+    </div>
   </section>
 
   <section>
@@ -260,12 +281,47 @@ function render() {
       [Math.min(0, -0.05), bound], v => fmtDelta(v), 0);
   }
 
-  const mullRows = rows.filter(r => r.mulligan_rate !== undefined);
+  const behaviorRows = rows
+    .filter(r => r.behaviors)
+    .map(r => ({ iteration: r.iteration, games: r.games, ...r.behaviors }));
+  if (behaviorRows.length) {
+    drawChart("behaviors", "tip-behaviors", behaviorRows,
+      [{ key: "land_drop", label: "land drop", color: "--s1", dots: true },
+       { key: "no_self_bolt", label: "no self-bolt", color: "--s2", dots: true },
+       { key: "growth_save", label: "growth save", color: "--s3", dots: true },
+       { key: "spike_good", label: "spike (works)", color: "--s4", dots: true },
+       { key: "spike_restraint", label: "spike restraint", color: "--s5", dots: true }],
+      [0, 1.05], v => v.toFixed(2), null);
+  }
+
+  const mullRows = rows
+    .filter(r => Array.isArray(r.mulligan_depths))
+    .map(r => {
+      const row = { iteration: r.iteration, games: r.games };
+      r.mulligan_depths.forEach((rate, index) => {
+        row["mull_" + (index + 1)] = rate;
+      });
+      return row;
+    });
   if (mullRows.length) {
-    const mullMax = Math.max(0.1, ...mullRows.map(r => r.mulligan_rate));
-    drawChart("mulligans", "tip-mulligans", mullRows,
-      [{ key: "mulligan_rate", label: "mulligans per hand", color: "--s2", dots: false }],
+    const depthKeys = [1, 2, 3, 4, 5, 6, 7].map(depth => ({
+      key: "mull_" + depth,
+      label: "\u00d7" + depth,
+      color: "--s" + depth,
+      dots: false,
+    }));
+    const mullMax = Math.max(0.05, ...mullRows.flatMap(r =>
+      depthKeys.map(k => r[k.key] ?? 0)));
+    drawChart("mulligans", "tip-mulligans", mullRows, depthKeys,
       [0, mullMax * 1.15], v => v.toFixed(3), null);
+  } else {
+    const flatRows = rows.filter(r => r.mulligan_rate !== undefined);
+    if (flatRows.length) {
+      const mullMax = Math.max(0.1, ...flatRows.map(r => r.mulligan_rate));
+      drawChart("mulligans", "tip-mulligans", flatRows,
+        [{ key: "mulligan_rate", label: "mulligans per hand", color: "--s2", dots: false }],
+        [0, mullMax * 1.15], v => v.toFixed(3), null);
+    }
   }
 
   const hasPolicy = rows.some(r => r.policy_loss > 0);

@@ -886,7 +886,7 @@ textarea:focus-visible,
 .battlefield-side {
   min-height: 0;
   display: grid;
-  grid-template-columns: 218px 1fr;
+  grid-template-columns: 1fr;
   position: relative;
   border-radius: 8px;
   border: 1px solid transparent;
@@ -1581,16 +1581,31 @@ textarea:focus-visible,
 
 .opponent-hand-space {
   min-width: 0;
-  min-height: 40px;
+  min-height: 172px;
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  position: absolute;
-  left: 225px;
-  right: 15px;
-  top: -4px;
+  position: relative;
   z-index: 2;
-  pointer-events: none;
+}
+
+/* MTG-Arena style: the opponent placard sits centered at the top with
+   the hand arcing over it; cards paint above, placard peeks below. */
+.opponent-hand-space .player-hud {
+  position: absolute;
+  top: 55px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+.opponent-hand-space .face-hand,
+.opponent-hand-space .hidden-hand {
+  position: relative;
+  z-index: 2;
+  background: none;
+  border: 0;
+  overflow: visible;
 }
 
 .hidden-hand {
@@ -1643,7 +1658,8 @@ textarea:focus-visible,
   min-width: 0;
   overflow: hidden;
   display: grid;
-  grid-template-columns: 80px 1fr;
+  grid-template-columns: 1fr;
+  justify-items: center;
   align-items: end;
   border-top: 1px solid var(--line);
   background:
@@ -1660,6 +1676,7 @@ textarea:focus-visible,
   grid-template-rows:
     var(--player-hand-height)
     var(--player-decision-height);
+  --player-hand-height: 200px;
   border-top: 0;
   background: rgba(6, 10, 9, 0.94);
   position: relative;
@@ -1678,6 +1695,26 @@ textarea:focus-visible,
   height: 100%;
   border-top: 0;
   border-bottom: 1px solid var(--line);
+  grid-row: 1;
+  position: relative;
+  z-index: 2;
+  background: none;
+  align-items: start;
+  padding-top: 4px;
+}
+
+.player-console > .face-hand .hand-fan {
+  height: 144px;
+  align-items: flex-start;
+}
+
+/* Your placard: centered at the bottom, hand arcing above it. */
+.player-console > .player-hud {
+  position: absolute;
+  top: 85px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
 }
 
 .hand-label {
@@ -3503,16 +3540,8 @@ select {
     box-shadow: -15px 0 40px rgba(0, 0, 0, 0.5);
   }
 
-  .battlefield-side {
-    grid-template-columns: 185px 1fr;
-  }
-
   .player-hud {
     width: 175px;
-  }
-
-  .opponent-hand-space {
-    left: 190px;
   }
 
   .simulation-settings {

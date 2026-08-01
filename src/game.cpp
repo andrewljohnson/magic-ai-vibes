@@ -702,7 +702,14 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                 if (dual == duals && !player.lands[index].tapped &&
                     !plan.tap_lands[index] &&
                     land_provides(land, color)) {
-                    tap_land(index);
+                    if (dual) {
+                        // A dual makes the face we ask of it, not the
+                        // fixed land_mana() face.
+                        plan.tap_lands[index] = true;
+                        plan.remaining_pool.*color += 1;
+                    } else {
+                        tap_land(index);
+                    }
                     --remaining;
                 }
             }

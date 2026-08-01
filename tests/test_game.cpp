@@ -4115,6 +4115,27 @@ TEST(dual_lands_pay_either_face_and_wheel_refills_both_hands) {
     CHECK(old_school::land_provides(CardId::VolcanicIsland,
                                     &old_school::ManaCost::red));
 
+    // A dual pays the face that is asked of it, not a fixed face.
+    {
+        old_school::PlayerState lone;
+        lone.lands = {{.card = CardId::Plateau}};
+        CHECK(old_school::pay_mana(lone, {.white = 1}));
+    }
+    {
+        old_school::PlayerState pair;
+        pair.lands = {{.card = CardId::Plateau},
+                      {.card = CardId::Tundra}};
+        CHECK(old_school::pay_mana(pair, {.white = 2}));
+    }
+    {
+        old_school::PlayerState mixed;
+        mixed.lands = {{.card = CardId::Tundra},
+                       {.card = CardId::VolcanicIsland},
+                       {.card = CardId::Plains}};
+        CHECK(old_school::pay_mana(mixed,
+                                   {.generic = 1, .blue = 2}));
+    }
+
     old_school::GameState state;
     auto& caster = state.players[0];
     caster.lands = {

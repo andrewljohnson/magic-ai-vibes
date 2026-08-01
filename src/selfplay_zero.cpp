@@ -4271,6 +4271,290 @@ HumanController make_spz_controller(
 }
 
 // ---------------------------------------------------------------------------
+// Behavior-emergence probes: tiny hand-built situations checked against
+// the current net at probe time, so training telemetry shows the
+// iteration at which each competence appears.
+
+namespace {
+
+struct SpzBehaviorRates {
+    double land_drop = 0.0;
+    double no_self_bolt = 0.0;
+    double growth_save = 0.0;
+    double spike_good = 0.0;
+    double spike_restraint = 0.0;
+};
+
+// Move every card visible in the seat's zones plus its hand out of the
+// deck; the remainder becomes the library, keeping conservation exact
+// for the determinizer.
+std::vector<CardId> behavior_library(
+    std::vector<CardId> deck, const PlayerState& seat_state) {
+    const auto remove_one = [&deck](CardId card) {
+        const auto found =
+            std::find(deck.begin(), deck.end(), card);
+        if (found != deck.end()) {
+            deck.erase(found);
+        }
+    };
+    for (const CardId card : seat_state.hand) {
+        remove_one(card);
+    }
+    for (const CardId card : seat_state.graveyard) {
+        remove_one(card);
+    }
+    for (const auto& land : seat_state.lands) {
+        remove_one(land.card);
+    }
+    for (const auto& creature : seat_state.creatures) {
+        remove_one(creature.card);
+    }
+    for (const auto& artifact : seat_state.artifacts) {
+        remove_one(artifact.card);
+    }
+    return deck;
+}
+
+struct BehaviorFixture {
+    GameState state;
+    std::array<std::vector<CardId>, 2> decks;
+    TurnPhase phase = TurnPhase::FirstMain;
+    bool sorcery = true;
+    std::optional<GameEvent> pre_event;
+    std::function<bool(const PriorityAction&)> emerged;
+};
+
+void finish_behavior_fixture(BehaviorFixture& fixture,
+                             std::size_t stack_deduction_seat =
+                                 static_cast<std::size_t>(-1)) {
+    for (std::size_t seat = 0; seat < 2; ++seat) {
+        auto library = behavior_library(
+            fixture.decks[seat], fixture.state.players[seat]);
+        if (seat == stack_deduction_seat) {
+            for (const auto& object : fixture.state.stack) {
+                if (object.controller == seat &&
+                    object.kind == StackObjectKind::Spell) {
+                    const auto found = std::find(
+                        library.begin(), library.end(), object.card);
+                    if (found != library.end()) {
+                        library.erase(found);
+                    }
+                }
+            }
+        }
+        fixture.state.players[seat].library = std::move(library);
+    }
+}
+
+bool run_behavior_fixture(const BehaviorFixture& fixture,
+                          const std::shared_ptr<const SpzNet>& net,
+                          std::uint64_t seed) {
+    SpzPolicyConfig policy;
+    policy.worlds = 4;
+    policy.block_prediction_worlds = 4;
+    policy.rollout = true;
+    policy.gamma_per_turn = 0.98;
+    policy.seed = seed;
+    HumanController controller = make_spz_controller(
+        net, fixture.decks, 0, policy, nullptr, nullptr, nullptr);
+    const PlayerObservation observation =
+        observe_game_state(fixture.state, 0);
+    if (fixture.pre_event.has_value()) {
+        controller.observe(observation, *fixture.pre_event);
+    }
+    const auto actions = legal_priority_actions(
+        fixture.state, 0, fixture.sorcery);
+    if (actions.empty()) {
+        return false;
+    }
+    const std::size_t chosen = controller.choose_priority_action(
+        observation, fixture.phase, actions);
+    if (chosen >= actions.size()) {
+        return false;
+    }
+    return fixture.emerged(actions[chosen]);
+}
+
+SpzBehaviorRates run_behavior_probes(
+    const std::shared_ptr<const SpzNet>& net, std::uint64_t seed) {
+    SpzBehaviorRates rates;
+    const auto red = red_deck();
+    const auto green = green_deck();
+    const auto blue = blue_deck();
+
+    // 1. Land drop: only a land and pass are on offer.
+    {
+        int hits = 0;
+        const std::array<CardId, 2> land_cards = {CardId::Mountain,
+                                                  CardId::Forest};
+        const std::array<const std::vector<CardId>*, 2> pools = {
+            &red, &green};
+        for (std::size_t variant = 0; variant < 2; ++variant) {
+            BehaviorFixture fixture;
+            fixture.decks = {*pools[variant], red};
+            fixture.state.turn_number = 5;
+            auto& self = fixture.state.players[0];
+            self.hand = {land_cards[variant]};
+            self.lands.assign(
+                3, LandPermanent{.card = land_cards[variant]});
+            fixture.state.players[1].lands.assign(
+                3, LandPermanent{.card = CardId::Mountain});
+            fixture.state.players[1].hand.assign(
+                4, CardId::Mountain);
+            fixture.emerged = [](const PriorityAction& action) {
+                return action.kind == PriorityActionKind::PlayLand;
+            };
+            finish_behavior_fixture(fixture);
+            hits += run_behavior_fixture(fixture, net,
+                                         mix_seed(seed, variant))
+                        ? 1
+                        : 0;
+        }
+        rates.land_drop = hits / 2.0;
+    }
+
+    // 2. Never aim burn at ourselves when we are nearly dead.
+    {
+        int hits = 0;
+        for (const int life : {4, 2}) {
+            BehaviorFixture fixture;
+            fixture.decks = {red, red};
+            fixture.state.turn_number = 7;
+            auto& self = fixture.state.players[0];
+            self.life = life;
+            self.hand = {CardId::LightningBolt};
+            self.lands.assign(
+                1, LandPermanent{.card = CardId::Mountain});
+            self.creatures = {CreaturePermanent{
+                .id = 11,
+                .card = CardId::GrizzlyBears,
+                .tapped = false,
+                .summoning_sick = false,
+                .damage = 0,
+            }};
+            fixture.state.players[1].life = 18;
+            fixture.state.players[1].lands.assign(
+                2, LandPermanent{.card = CardId::Mountain,
+                                 .tapped = true});
+            fixture.emerged = [](const PriorityAction& action) {
+                if (action.kind !=
+                    PriorityActionKind::CastLightningBolt) {
+                    return true;
+                }
+                return action.target.has_value() &&
+                       action.target->player == 1;
+            };
+            finish_behavior_fixture(fixture);
+            hits += run_behavior_fixture(fixture, net,
+                                         mix_seed(seed, 10 + life))
+                        ? 1
+                        : 0;
+        }
+        rates.no_self_bolt = hits / 2.0;
+    }
+
+    // 3. Giant Growth saves a blocked attacker that otherwise dies.
+    {
+        BehaviorFixture fixture;
+        fixture.decks = {green, red};
+        fixture.state.turn_number = 6;
+        fixture.state.active_player = 0;
+        fixture.phase = TurnPhase::DeclareBlockers;
+        fixture.sorcery = false;
+        auto& self = fixture.state.players[0];
+        self.hand = {CardId::GiantGrowth};
+        self.lands.assign(
+            3, LandPermanent{.card = CardId::Forest});
+        self.creatures = {CreaturePermanent{
+            .id = 21,
+            .card = CardId::GrizzlyBears,
+            .tapped = true,
+            .summoning_sick = false,
+            .damage = 0,
+        }};
+        auto& enemy = fixture.state.players[1];
+        enemy.lands.assign(
+            3, LandPermanent{.card = CardId::Mountain,
+                             .tapped = true});
+        enemy.creatures = {CreaturePermanent{
+            .id = 22,
+            .card = CardId::GrayOgre,
+            .tapped = false,
+            .summoning_sick = false,
+            .damage = 0,
+        }};
+        GameEvent blocks;
+        blocks.kind = GameEventKind::BlockersDeclared;
+        blocks.player = 1;
+        blocks.phase = TurnPhase::DeclareBlockers;
+        blocks.attackers = {21};
+        blocks.blocks = {{21, 22}};
+        fixture.pre_event = blocks;
+        fixture.emerged = [](const PriorityAction& action) {
+            return action.kind ==
+                       PriorityActionKind::CastGiantGrowth &&
+                   action.target.has_value() &&
+                   action.target->player == 0 &&
+                   action.target->creature == PermanentId{21};
+        };
+        finish_behavior_fixture(fixture);
+        rates.growth_save =
+            run_behavior_fixture(fixture, net, mix_seed(seed, 30))
+                ? 1.0
+                : 0.0;
+    }
+
+    // 4/5. Force Spike: fire it when the caster cannot pay, hold it
+    // when the caster has mana open.
+    for (const bool payable : {false, true}) {
+        BehaviorFixture fixture;
+        fixture.decks = {blue, red};
+        fixture.state.turn_number = 6;
+        fixture.state.active_player = 1;
+        fixture.sorcery = false;
+        auto& self = fixture.state.players[0];
+        self.hand = {CardId::ForceSpike};
+        self.lands.assign(
+            2, LandPermanent{.card = CardId::Island});
+        auto& enemy = fixture.state.players[1];
+        enemy.lands.assign(
+            3, LandPermanent{.card = CardId::Mountain,
+                             .tapped = true});
+        if (payable) {
+            enemy.lands.push_back(
+                LandPermanent{.card = CardId::Mountain});
+            enemy.lands.push_back(
+                LandPermanent{.card = CardId::Mountain});
+        }
+        enemy.hand.assign(3, CardId::Mountain);
+        fixture.state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = 71,
+            .card = CardId::GrayOgre,
+            .controller = 1,
+        });
+        fixture.state.next_stack_object_id = 72;
+        const bool want_spike = !payable;
+        fixture.emerged = [want_spike](const PriorityAction& action) {
+            const bool spiked =
+                action.kind == PriorityActionKind::CastForceSpike;
+            return spiked == want_spike;
+        };
+        finish_behavior_fixture(fixture, 1);
+        const bool hit = run_behavior_fixture(
+            fixture, net, mix_seed(seed, 40 + (payable ? 1 : 0)));
+        if (payable) {
+            rates.spike_restraint = hit ? 1.0 : 0.0;
+        } else {
+            rates.spike_good = hit ? 1.0 : 0.0;
+        }
+    }
+    return rates;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
 // Training
 
 namespace {
@@ -4560,11 +4844,17 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
         std::size_t decisive = 0;
         std::size_t total_turns = 0;
         std::size_t total_mulligans = 0;
+        std::array<std::size_t, 8> mulligan_depths{};
         for (const GameRecord& record : records) {
             decisive += record.result.winner == -1 ? 0 : 1;
             total_turns += record.turns;
             total_mulligans += record.result.player_stats[0].mulligans +
                                record.result.player_stats[1].mulligans;
+            for (std::size_t seat = 0; seat < 2; ++seat) {
+                const std::size_t depth = std::min<std::size_t>(
+                    record.result.player_stats[seat].mulligans, 7);
+                ++mulligan_depths[depth];
+            }
             for (std::size_t seat = 0; seat < 2; ++seat) {
                 auto& seat_recorder = record.recorders[seat];
                 for (std::size_t row_index = 0;
@@ -4842,6 +5132,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             double vs_random = -1.0;
             std::array<double, kSpzDeckCount> deck_lift{};
             bool have_deck_lift = false;
+            SpzBehaviorRates behavior_rates;
+            bool have_behaviors = false;
             if (config.probe_interval > 0 &&
                 (iteration + 1) % config.probe_interval == 0) {
                 const auto probe_net =
@@ -4865,6 +5157,24 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         random_probe.baseline_deck_win_rate(deck);
                 }
                 have_deck_lift = true;
+                behavior_rates = run_behavior_probes(
+                    probe_net, mix_seed(config.seed, 9500 + iteration));
+                have_behaviors = true;
+                if (config.log) {
+                    std::ostringstream behavior_line;
+                    behavior_line
+                        << "behaviors iteration " << (iteration + 1)
+                        << std::fixed << std::setprecision(2)
+                        << " land-drop " << behavior_rates.land_drop
+                        << " no-self-bolt "
+                        << behavior_rates.no_self_bolt
+                        << " growth-save "
+                        << behavior_rates.growth_save
+                        << " spike-good " << behavior_rates.spike_good
+                        << " spike-restraint "
+                        << behavior_rates.spike_restraint;
+                    config.log(behavior_line.str());
+                }
                 vs_handcrafted =
                     run_spz_benchmark(
                         probe_net, BotKind::Handcrafted,
@@ -4916,6 +5226,22 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                          static_cast<double>(
                                              config
                                                  .games_per_iteration)))
+                          << ",\"mulligan_depths\":[";
+                for (std::size_t depth = 1; depth <= 7; ++depth) {
+                    if (depth != 1) {
+                        telemetry << ',';
+                    }
+                    telemetry
+                        << (config.games_per_iteration == 0
+                                ? 0.0
+                                : static_cast<double>(
+                                      mulligan_depths[depth]) /
+                                      (2.0 *
+                                       static_cast<double>(
+                                           config
+                                               .games_per_iteration)));
+                }
+                telemetry << "]"
                           << ",\"avg_turns\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0
@@ -4937,6 +5263,19 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 if (vs_baseline >= 0.0) {
                     telemetry << ",\"vs_deep_monte_carlo\":"
                               << vs_baseline;
+                }
+                if (have_behaviors) {
+                    telemetry
+                        << ",\"behaviors\":{\"land_drop\":"
+                        << behavior_rates.land_drop
+                        << ",\"no_self_bolt\":"
+                        << behavior_rates.no_self_bolt
+                        << ",\"growth_save\":"
+                        << behavior_rates.growth_save
+                        << ",\"spike_good\":"
+                        << behavior_rates.spike_good
+                        << ",\"spike_restraint\":"
+                        << behavior_rates.spike_restraint << '}';
                 }
                 if (have_deck_lift) {
                     telemetry << ",\"deck_lift\":{";
