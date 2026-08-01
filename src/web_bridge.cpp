@@ -205,6 +205,18 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "cast_force_spike";
     case PriorityActionKind::ActivateMillstone:
         return "activate_millstone";
+    case PriorityActionKind::CastPsionicBlast:
+        return "cast_psionic_blast";
+    case PriorityActionKind::CastSwordsToPlowshares:
+        return "cast_swords_to_plowshares";
+    case PriorityActionKind::CastDisenchant:
+        return "cast_disenchant";
+    case PriorityActionKind::ActivateLibrary:
+        return "activate_library";
+    case PriorityActionKind::ActivateMishrasFactory:
+        return "activate_mishras_factory";
+    case PriorityActionKind::ActivateStripMine:
+        return "activate_strip_mine";
     }
     throw std::logic_error("unknown priority action");
 }
@@ -1634,7 +1646,22 @@ int run_bridge_session(std::istream& input, std::ostream& output,
     game_config.human_controllers[0] =
         controller.controller();
 
-    if (config.opponent_spz) {
+    bool opponent_spz = config.opponent_spz;
+    if (opponent_spz &&
+        !std::ifstream(config.spz_artifact_path).good()) {
+        // No champion on disk (mid-retrain window): degrade to the
+        // handcrafted opponent instead of dying on load.
+        opponent_spz = false;
+        game_config.bots[1] = {
+            .kind = BotKind::Handcrafted,
+            .rollouts_per_action = 1,
+        };
+        write_model_status(
+            output,
+            "Champion artifact unavailable; handcrafted opponent",
+            "handcrafted", 0, 0, 0, "fallback", "");
+    }
+    if (opponent_spz) {
         // Self-Play Zero drives the opponent seat through the same
         // perspective-safe controller interface a human uses; its engine
         // BotConfig is never consulted for decisions.
@@ -1657,7 +1684,7 @@ int run_bridge_session(std::istream& input, std::ostream& output,
             const std::filesystem::path advantage_path =
                 std::filesystem::path(config.spz_artifact_path)
                     .parent_path() /
-                "spz-advantage-v8.txt";
+                "spz-advantage.txt";
             std::ifstream probe(advantage_path);
             if (probe.good()) {
                 spz_advantage = std::make_shared<

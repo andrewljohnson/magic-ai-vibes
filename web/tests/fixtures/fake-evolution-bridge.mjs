@@ -45,6 +45,7 @@ if (args.includes("--evolve-json")) {
     ["ru-aggro", "RU Aggro"],
     ["lotus-combo", "Lotus Combo"],
     ["burn", "Burn"],
+    ["uwr", "UWR Aggro"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {
