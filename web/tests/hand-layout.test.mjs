@@ -743,7 +743,7 @@ test("live header exposes a compact selectable reproduction summary", async () =
   assert.equal(pixels(cssRule(css, ".top-bar"), "height"), 64);
 });
 
-test("debug reveal is persistently warned and new setup fails closed", async () => {
+test("debug reveal is persistently warned and defaults on for practice", async () => {
   const [app, css] = await Promise.all([
     source("App.tsx"),
     source("styles.css"),
@@ -760,11 +760,11 @@ test("debug reveal is persistently warned and new setup fails closed", async () 
     app.indexOf("function TopBar"),
   );
 
-  assert.match(initialConfig, /debugReveal:\s*false/);
+  assert.match(initialConfig, /debugReveal:\s*true/);
   assert.doesNotMatch(initialConfig, /readDefault\([^)]*debugReveal/);
   assert.match(
     newMatchConfig,
-    /currentConfig[\s\S]+?\.\.\.currentConfig[\s\S]+?debugReveal:\s*false/,
+    /currentConfig[\s\S]+?\.\.\.currentConfig[\s\S]+?debugReveal:\s*true/,
   );
   assert.match(
     app,
