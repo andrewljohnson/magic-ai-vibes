@@ -244,7 +244,11 @@ function render() {
   const last = rows[rows.length - 1];
   const probes = rows
     .filter(r => r.vs_handcrafted !== undefined)
-    .map(r => ({ ...r, iteration: r.probe_iteration ?? r.iteration }));
+    .map(r => {
+      const probeIter = r.probe_iteration ?? r.iteration;
+      const gamesPerIter = r.iteration > 0 ? r.games / r.iteration : 0;
+      return { ...r, iteration: probeIter, games: Math.round(probeIter * gamesPerIter) };
+    });
   const lastProbe = probes[probes.length - 1];
   const firstProbe = probes[0];
   document.getElementById("t-iter").textContent = last.iteration;
@@ -285,11 +289,15 @@ function render() {
 
   const behaviorRows = rows
     .filter(r => r.behaviors)
-    .map(r => ({
-      iteration: r.probe_iteration ?? r.iteration,
-      games: r.games,
-      ...r.behaviors,
-    }));
+    .map(r => {
+      const probeIter = r.probe_iteration ?? r.iteration;
+      const gamesPerIter = r.iteration > 0 ? r.games / r.iteration : 0;
+      return {
+        iteration: probeIter,
+        games: Math.round(probeIter * gamesPerIter),
+        ...r.behaviors,
+      };
+    });
   if (behaviorRows.length) {
     drawChart("behaviors", "tip-behaviors", behaviorRows,
       [{ key: "land_drop", label: "land drop", color: "--s1", dots: true },
