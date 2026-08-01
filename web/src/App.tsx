@@ -8,6 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
+  createContext,
+  useContext,
 } from "react";
 import {
   createEvolution,
@@ -353,9 +355,47 @@ function CardFace({
   ].filter((value): value is string => Boolean(value));
   const title = publicDescription.join(" • ");
   const accessibleLabel = publicDescription.join(", ");
+  const zoomCard = useContext(CardZoomContext);
+  const pressTimerRef = useRef<number | null>(null);
+  const pressOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const clearPress = () => {
+    if (pressTimerRef.current !== null) {
+      window.clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    pressOriginRef.current = null;
+  };
 
   return (
     <button
+      onPointerDown={(event) => {
+        pressOriginRef.current = {
+          x: event.clientX,
+          y: event.clientY,
+        };
+        if (pressTimerRef.current !== null) {
+          window.clearTimeout(pressTimerRef.current);
+        }
+        pressTimerRef.current = window.setTimeout(() => {
+          pressTimerRef.current = null;
+          zoomCard(card);
+        }, 450);
+      }}
+      onPointerMove={(event) => {
+        const origin = pressOriginRef.current;
+        if (
+          origin &&
+          Math.hypot(
+            event.clientX - origin.x,
+            event.clientY - origin.y,
+          ) > 8
+        ) {
+          clearPress();
+        }
+      }}
+      onPointerUp={clearPress}
+      onPointerLeave={clearPress}
+      onPointerCancel={clearPress}
       className={`card-face card-${cardColor(card)} ${
         compact ? "card-compact" : ""
       } ${selected ? "is-selected" : ""} ${
@@ -373,18 +413,15 @@ function CardFace({
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      disabled={!onClick && !draggable}
+      data-inert={!onClick && !draggable ? "true" : undefined}
+      aria-disabled={!onClick && !draggable ? true : undefined}
       aria-pressed={actionable ? selected : undefined}
       aria-label={accessibleLabel}
     >
       <span className="card-edge" />
       <span className="card-heading">
         <span className="card-name">{card.name}</span>
-        {(card.cost || card.costLabel) && (
-          <span className="mana-cost">
-            {formatCost(card.cost, card.costLabel)}
-          </span>
-        )}
+        <ManaCostPips card={card} />
       </span>
       <span className="card-field">
         {card.flying ? (
@@ -422,6 +459,151 @@ function CardFace({
         <span className="status-token status-origin">{choiceOriginLabel}</span>
       )}
     </button>
+  );
+}
+
+const CARD_RULES_TEXT: Record<string, string> = {
+  Forest: "Tap: Add {G}.",
+  Mountain: "Tap: Add {R}.",
+  Island: "Tap: Add {U}.",
+  Plains: "Tap: Add {W}.",
+  Plateau: "Tap: Add {R} or {W}.",
+  Tundra: "Tap: Add {W} or {U}.",
+  "Volcanic Island": "Tap: Add {U} or {R}.",
+  "Lightning Bolt": "Lightning Bolt deals 3 damage to any target.",
+  Counterspell: "Counter target spell.",
+  Tsunami: "Destroy all Islands.",
+  Millstone: "{2}, Tap: Target player mills two cards.",
+  Moat: "Creatures without flying can't attack.",
+  "Flying Men": "Flying.",
+  "Ironclaw Orcs": "Can't block creatures with power 2 or greater.",
+  Disintegrate:
+    "Disintegrate deals X damage to any target. A creature dealt lethal damage this way is exiled.",
+  "Giant Growth": "Target creature gets +3/+3 until end of turn.",
+  "Mox Sapphire": "Tap: Add {U}.",
+  "Mox Pearl": "Tap: Add {W}.",
+  "Mox Ruby": "Tap: Add {R}.",
+  "Sol Ring": "Tap: Add {2}.",
+  "Ancestral Recall": "Target player draws three cards.",
+  "Time Walk": "Take an extra turn after this one.",
+  Braingeyser: "Target player draws X cards.",
+  "Force Spike":
+    "Counter target spell unless its controller pays {1}.",
+  "Air Elemental": "Flying.",
+  "Black Lotus":
+    "Sacrifice: Add three mana of any one color.",
+  Channel:
+    "Until end of turn, you may pay 1 life for {1} (down to 1 life).",
+  "Llanowar Elves": "Tap: Add {G}.",
+  "Serendib Efreet":
+    "Flying. At the beginning of your upkeep, you lose 1 life.",
+  "Serra Angel": "Flying, vigilance.",
+  "Black Vise":
+    "At the beginning of the opponent's upkeep, they lose 1 life for each card in their hand beyond four.",
+  Disenchant: "Destroy target artifact or enchantment.",
+  "Psionic Blast":
+    "Psionic Blast deals 4 damage to any target and 2 damage to you.",
+  "Swords to Plowshares":
+    "Exile target creature. Its controller gains life equal to its power.",
+  "Wheel of Fortune":
+    "Each player discards their hand and draws seven cards.",
+  "Library of Alexandria":
+    "Tap: Add {1}. Or, if you have exactly seven cards in hand, Tap: Draw a card.",
+  "Mishra's Factory":
+    "{1}: Becomes a 2/2 artifact creature until end of turn (it can still tap for {1}).",
+  "Strip Mine":
+    "Tap: Add {1}. Or sacrifice Strip Mine: Destroy target land.",
+};
+
+function ManaCostPips({ card }: { card: Card }) {
+  const cost =
+    card.cost && typeof card.cost === "object"
+      ? (card.cost as Record<string, number>)
+      : undefined;
+  const label = card.costLabel ?? "";
+  const pips: Array<{ kind: string; text?: string }> = [];
+  if (label.includes("X")) pips.push({ kind: "generic", text: "X" });
+  if (cost?.generic) {
+    pips.push({ kind: "generic", text: String(cost.generic) });
+  }
+  for (const [color, count] of [
+    ["white", cost?.white ?? 0],
+    ["blue", cost?.blue ?? 0],
+    ["red", cost?.red ?? 0],
+    ["green", cost?.green ?? 0],
+  ] as Array<[string, number]>) {
+    for (let pip = 0; pip < count; pip += 1) {
+      pips.push({ kind: color });
+    }
+  }
+  if (pips.length === 0) return null;
+  return (
+    <span
+      className="mana-cost mana-pips"
+      aria-label={`Cost ${formatCost(card.cost, card.costLabel)}`}
+    >
+      {pips.map((pip, index) => (
+        <span
+          key={index}
+          className={`mana-pip mana-pip-${pip.kind}`}
+          aria-hidden="true"
+        >
+          {pip.text ?? ""}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const CardZoomContext = createContext<(card: Card | null) => void>(
+  () => {},
+);
+
+const SlamContext = createContext<{
+  slamIds: ReadonlySet<string>;
+  hitIds: ReadonlySet<string>;
+  direction: 1 | -1;
+  key: number;
+}>({ slamIds: new Set(), hitIds: new Set(), direction: 1, key: 0 });
+
+function CardZoomOverlay({
+  card,
+  onClose,
+}: {
+  card: Card;
+  onClose: () => void;
+}) {
+  const rules = CARD_RULES_TEXT[card.name];
+  return (
+    <div
+      className="card-zoom-backdrop"
+      role="dialog"
+      aria-label={`${card.name} enlarged`}
+      onClick={onClose}
+      onPointerUp={onClose}
+    >
+      <div className="card-zoom">
+        <div className="card-zoom-heading">
+          <strong>{card.name}</strong>
+          <ManaCostPips card={card} />
+        </div>
+        <div className="card-zoom-type">
+          {(card.type ?? "").toUpperCase()}
+          {card.flying ? " — FLYING" : ""}
+        </div>
+        <div className="card-zoom-text">
+          {rules ??
+            (card.type === "creature"
+              ? "No abilities."
+              : "")}
+        </div>
+        {card.type === "creature" && (
+          <div className="card-zoom-stats">
+            {card.power}/{card.toughness}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -777,6 +959,7 @@ function PermanentRow({
   ) => void;
   onEndBlockerDrag?: () => void;
 }) {
+  const slamState = useContext(SlamContext);
   if (permanents.length === 0) return null;
   return (
     <div className="permanent-row" aria-label={title}>
@@ -807,8 +990,18 @@ function PermanentRow({
                 blockAssignments?.[id] ? "is-blocking" : ""
               } ${
                 targetedByStackIds?.has(id) ? "is-spell-target" : ""
-              }`}
-              key={id}
+              } ${
+                slamState.slamIds.has(id)
+                  ? slamState.direction === -1
+                    ? "is-slamming-up"
+                    : "is-slamming-down"
+                  : ""
+              } ${slamState.hitIds.has(id) ? "is-hit" : ""}`}
+              key={
+                slamState.slamIds.has(id) || slamState.hitIds.has(id)
+                  ? `${id}-slam-${slamState.key}`
+                  : id
+              }
               data-arrow-pid={id}
               onDragOver={(event) =>
                 onPriorityDragOver?.(`permanent:${id}`, event)
@@ -1518,22 +1711,13 @@ function PriorityControls({
         )}
 
         <div className="pass-priority-controls">
-          {passOptions.map((option) => (
-            <button
-              id={priorityOptionElementId(decision.decisionId, option.index)}
-              type="button"
-              key={`${option.index}-${option.label}`}
-              onClick={() =>
-                onSubmit({
-                  decisionId: decision.decisionId,
-                  index: option.index,
-                })
-              }
-              disabled={busy}
-            >
-              {stackInteraction ? "Pass toward resolution" : "Pass priority"}
-            </button>
-          ))}
+          {passOptions.length > 0 && (
+            <span className="pass-priority-hint">
+              {stackInteraction
+                ? "Pass toward resolution with the gold button by the stack."
+                : "Pass with the gold button by the stack."}
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -3269,6 +3453,73 @@ export default function App() {
   const [selectedAttackers, setSelectedAttackers] = useState<Set<string>>(
     new Set(),
   );
+  const [zoomedCard, setZoomedCard] = useState<Card | null>(null);
+  const [slam, setSlam] = useState<{
+    ids: Set<string>;
+    hits: Set<string>;
+    direction: 1 | -1;
+    amp: number;
+    key: number;
+  } | null>(null);
+  const prevCombatRef = useRef<{
+    attackers: Array<string | number>;
+    blocks: Array<Array<string | number>>;
+    activePlayer: number;
+    powers: Record<string, number>;
+  } | null>(null);
+  useEffect(() => {
+    const combat =
+      (snapshot as unknown as {
+        pendingCombat?: {
+          attackers?: Array<string | number>;
+          blocks?: Array<Array<string | number>>;
+        } | null;
+      } | null)?.pendingCombat ?? null;
+    const publicState = snapshot?.state;
+    if (combat && publicState) {
+      const powers: Record<string, number> = {};
+      for (const side of publicState.players ?? []) {
+        for (const creature of side.creatures ?? []) {
+          powers[String(creature.permanentId)] =
+            creature.power ?? creature.card?.power ?? 0;
+        }
+      }
+      prevCombatRef.current = {
+        attackers: combat.attackers ?? [],
+        blocks: combat.blocks ?? [],
+        activePlayer: publicState.activePlayer ?? 0,
+        powers,
+      };
+      return;
+    }
+    const finished = prevCombatRef.current;
+    if (!finished) return;
+    prevCombatRef.current = null;
+    const ids = new Set(
+      finished.attackers.map((id) => String(id)),
+    );
+    const hits = new Set(
+      finished.blocks.flatMap((pair) =>
+        Array.isArray(pair) && pair.length === 2
+          ? [String(pair[1])]
+          : [],
+      ),
+    );
+    const damage = finished.attackers.reduce<number>(
+      (total, id) => total + Number(finished.powers[String(id)] ?? 0),
+      0,
+    );
+    setSlam({
+      ids,
+      hits,
+      direction: finished.activePlayer === 0 ? -1 : 1,
+      amp: damage >= 7 ? 8 : damage >= 4 ? 5 : 2,
+      key: Date.now(),
+    });
+    const timer = window.setTimeout(() => setSlam(null), 750);
+    return () => window.clearTimeout(timer);
+  }, [snapshot]);
+
   const [selectedDiscardIndices, setSelectedDiscardIndices] = useState<
     Set<number>
   >(new Set());
@@ -4054,6 +4305,7 @@ export default function App() {
     finishBlockerDrag();
     assignSelectedBlocker(blockerId, attackerId);
   };
+
   const toggleAttacker = (id: string) => {
     const next = new Set(selectedAttackers);
     if (next.has(id)) next.delete(id);
@@ -4062,6 +4314,15 @@ export default function App() {
   };
 
   return (
+    <CardZoomContext.Provider value={setZoomedCard}>
+    <SlamContext.Provider
+      value={{
+        slamIds: slam?.ids ?? new Set(),
+        hitIds: slam?.hits ?? new Set(),
+        direction: slam?.direction ?? 1,
+        key: slam?.key ?? 0,
+      }}
+    >
     <div
       className={`app-shell game-shell has-stack ${""
       } ${snapshot.decision && hasVisibleDecision ? "has-decision" : ""} ${
@@ -4082,7 +4343,14 @@ export default function App() {
         <>
           <div className="game-layout">
             <MatchLog entries={snapshot.log ?? []} />
-            <main className="table-stage">
+            <main
+      className={`table-stage ${slam ? "is-rumbling" : ""}`}
+      style={
+        slam
+          ? ({ "--shake-amp": `${slam.amp}px` } as CSSProperties)
+          : undefined
+      }
+    >
               <TargetArrows snapshot={snapshot} />
               <div className="battlefield">
                 <BattlefieldSide
@@ -4341,7 +4609,15 @@ export default function App() {
           </button>
         </div>
       )}
+      {zoomedCard && (
+        <CardZoomOverlay
+          card={zoomedCard}
+          onClose={() => setZoomedCard(null)}
+        />
+      )}
     </div>
+    </SlamContext.Provider>
+    </CardZoomContext.Provider>
   );
 }
 

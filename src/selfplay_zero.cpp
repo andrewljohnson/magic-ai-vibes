@@ -4427,7 +4427,7 @@ SpzBehaviorRates run_behavior_probes(
                 1, LandPermanent{.card = CardId::Mountain});
             self.creatures = {CreaturePermanent{
                 .id = 11,
-                .card = CardId::GrizzlyBears,
+                .card = CardId::IronclawOrcs,
                 .tapped = false,
                 .summoning_sick = false,
                 .damage = 0,
@@ -5157,9 +5157,19 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         random_probe.baseline_deck_win_rate(deck);
                 }
                 have_deck_lift = true;
-                behavior_rates = run_behavior_probes(
-                    probe_net, mix_seed(config.seed, 9500 + iteration));
-                have_behaviors = true;
+                try {
+                    behavior_rates = run_behavior_probes(
+                        probe_net,
+                        mix_seed(config.seed, 9500 + iteration));
+                    have_behaviors = true;
+                } catch (const std::exception& error) {
+                    // A probe defect must never kill a training run.
+                    if (config.log) {
+                        config.log(std::string(
+                                       "behavior probe failed: ") +
+                                   error.what());
+                    }
+                }
                 if (config.log) {
                     std::ostringstream behavior_line;
                     behavior_line

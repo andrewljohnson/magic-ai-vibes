@@ -248,7 +248,10 @@ test("stack, priority, and battlefield rendering share bridge-shaped targets", a
   assert.match(app, /option\.spellTarget/);
   assert.match(app, /describeTopOfStack\(state\.stack \?\? \[\]\)/);
   assert.match(app, /"Respond to the stack"/);
-  assert.match(app, /\? "Pass toward resolution" : "Pass priority"/);
+  assert.match(
+    app,
+    /\? "Pass toward resolution with the gold button by the stack\."/,
+  );
   assert.match(app, /concisePriorityOptionLabel\(option\)/);
   assert.match(app, /target\s*\?\s*`Target → \$\{target\}`/);
   assert.match(app, /stackPermanentTargetIds\(stack\)/);
