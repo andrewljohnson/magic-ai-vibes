@@ -2583,6 +2583,18 @@ legal_priority_actions(const GameState& state, std::size_t player,
                 actions.push_back(PriorityAction::activate_strip_mine(
                     land.id, owner, target_land.id));
             }
+            // An animated land (a creature whose printed card is a
+            // land, e.g. a fighting Factory) is still a land and can
+            // be stripped.
+            for (const auto& creature :
+                 state.players[owner].creatures) {
+                if (card_definition(creature.card).type ==
+                    CardType::Land) {
+                    actions.push_back(
+                        PriorityAction::activate_strip_mine(
+                            land.id, owner, creature.id));
+                }
+            }
         }
     }
     for (const auto& sage : player_state.creatures) {
@@ -3415,6 +3427,20 @@ bool resolve_top_of_stack(
                     return true;
                 }
             }
+            // Animated lands are still lands while they fight.
+            for (std::size_t index = 0;
+                 index < owner.creatures.size(); ++index) {
+                const auto& creature = owner.creatures[index];
+                if (creature.id == *spell.target->creature &&
+                    card_definition(creature.card).type ==
+                        CardType::Land) {
+                    owner.graveyard.push_back(creature.card);
+                    owner.creatures.erase(
+                        owner.creatures.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
             return true;  // land already gone: fizzles
         }
         return false;
@@ -3852,6 +3878,19 @@ bool resolve_top_of_stack(
                 player_side.graveyard.push_back(land.card);
             }
             player_side.lands.clear();
+            // Animated lands die with the rest.
+            for (std::size_t index = player_side.creatures.size();
+                 index-- > 0;) {
+                if (card_definition(
+                        player_side.creatures[index].card)
+                        .type == CardType::Land) {
+                    player_side.graveyard.push_back(
+                        player_side.creatures[index].card);
+                    player_side.creatures.erase(
+                        player_side.creatures.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                }
+            }
         }
         controller.graveyard.push_back(spell.card);
         return true;

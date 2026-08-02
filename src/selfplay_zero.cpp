@@ -4578,8 +4578,8 @@ struct SpzAgent {
         constexpr std::size_t kMulliganWorlds = 8;
         constexpr double kMulliganMargin = 0.02;
         const std::size_t hand_size = observation.hand.size();
-        if (hand_size < 5) {
-            // Never dig below four cards on value noise.
+        if (hand_size == 0) {
+            // Nothing left to mulligan away.
             return false;
         }
         const GameState reconstructed =

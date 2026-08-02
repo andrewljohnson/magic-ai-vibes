@@ -4854,6 +4854,68 @@ TEST(manual_land_tap_floats_mana_and_pays_first) {
     CHECK(player.creatures[0].tapped);
 }
 
+TEST(animated_lands_are_still_lands_for_land_destruction) {
+    // Strip Mine can destroy an animated Factory.
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.lands = {
+        {.id = 141, .card = old_school::CardId::StripMine,
+         .tapped = false},
+    };
+    enemy.creatures = {
+        {.id = 142,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto strip = old_school::PriorityAction::activate_strip_mine(
+        141, 1, 142);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, false),
+                     strip));
+    CHECK(old_school::apply_priority_action(state, 0, strip, false));
+    resolve_top(state, 0);
+    CHECK(enemy.creatures.empty());
+    CHECK(count_card(enemy.graveyard,
+                     old_school::CardId::MishrasFactory) == 1);
+
+    // Armageddon kills animated lands along with every other land.
+    old_school::GameState wrath_state;
+    wrath_state.active_player = 0;
+    auto& caster = wrath_state.players[0];
+    auto& victim = wrath_state.players[1];
+    caster.hand = {old_school::CardId::Armageddon};
+    caster.lands = {
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+    };
+    victim.creatures = {
+        {.id = 143,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 144,
+         .card = old_school::CardId::GrizzlyBears,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        wrath_state, 0,
+        old_school::PriorityAction::cast_sorcery(
+            old_school::CardId::Armageddon),
+        true));
+    resolve_top(wrath_state, 0);
+    CHECK(caster.lands.empty());
+    CHECK(victim.creatures.size() == 1);
+    CHECK(victim.creatures[0].card ==
+          old_school::CardId::GrizzlyBears);
+    CHECK(count_card(victim.graveyard,
+                     old_school::CardId::MishrasFactory) == 1);
+}
+
 TEST(payment_variants_fire_only_on_ability_lands_or_dual_choices) {
     old_school::GameState state;
     state.active_player = 0;
