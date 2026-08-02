@@ -403,7 +403,7 @@ function render() {
   }
   const recent = tableRows.slice(-1000).reverse();
   document.getElementById("table").innerHTML =
-    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th></tr>" +
+    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th><th>mulls \u00d71/\u00d72/\u00d73</th></tr>" +
     recent.map(r => {
       let lift = "";
       if (r.deck_lift) {
@@ -419,7 +419,15 @@ function render() {
       return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${lossCell}</td>` +
         `<td>${r.vs_random !== undefined ? fmtPct(r.vs_random) : ""}</td>` +
         `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
-        `<td>${r.vs_deep_monte_carlo !== undefined ? fmtPct(r.vs_deep_monte_carlo) : ""}</td><td>${lift}</td></tr>`;
+        `<td>${r.vs_deep_monte_carlo !== undefined ? fmtPct(r.vs_deep_monte_carlo) : ""}</td><td>${lift}</td>` +
+        `<td>${
+          Array.isArray(r.mulligan_depths)
+            ? r.mulligan_depths
+                .slice(0, 3)
+                .map(rate => (rate * 100).toFixed(1))
+                .join(" / ")
+            : ""
+        }</td></tr>`;
     }).join("") +
     "</table>";
 }
