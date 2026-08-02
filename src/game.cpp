@@ -1133,52 +1133,64 @@ bool land_provides(CardId land, int ManaCost::*color) {
 std::vector<std::vector<PaymentTap>> alternative_payments(
     const PlayerState& player, const ManaCost& cost,
     std::size_t max_variants) {
-    // Greedy exact covers of the cost under different source
-    // preferences, expressed as pre-tap lists. Colored needs are
-    // satisfied first (from the most restrictive source the policy
-    // allows), then the generic remainder. Lotus sacrifice and
-    // Channel life cannot be expressed as taps, so plans never rely
-    // on them.
-    struct Source {
-        PermanentId id = 0;
-        CardId card = CardId::Forest;
-        bool is_land = false;
-        int amount = 1;  // generic face amount (Sol Ring = 2)
+    // Branch only where payment choice genuinely matters:
+    //  1. the auto plan taps an ability land (Library / Factory /
+    //     Strip Mine) -> offer the cover that avoids them;
+    //  2. a colored need could be paid by different dual-land types
+    //     (Volcanic Island vs Tundra for {U}) -> offer the swap.
+    // The base tiers (rocks, basics, duals, City) stay the planner's.
+    const auto is_ability_land = [](CardId land) {
+        return land == CardId::LibraryOfAlexandria ||
+               land == CardId::MishrasFactory ||
+               land == CardId::StripMine;
     };
-    std::vector<Source> sources;
-    for (const auto& land : player.lands) {
-        if (!land.tapped) {
-            sources.push_back(
-                {land.id, land.card, true,
-                 std::max(1, land_mana(land.card).generic)});
+    const auto is_dual = [](CardId land) {
+        return land == CardId::Plateau || land == CardId::Tundra ||
+               land == CardId::VolcanicIsland ||
+               land == CardId::UndergroundSea ||
+               land == CardId::Badlands;
+    };
+    const ManaPaymentPlan plan = plan_mana_payment(player, cost);
+    if (!plan.possible || max_variants == 0) {
+        return {};
+    }
+    std::vector<PermanentId> default_set;
+    bool default_taps_ability = false;
+    for (std::size_t index = 0; index < player.lands.size(); ++index) {
+        if (plan.tap_lands[index]) {
+            default_set.push_back(player.lands[index].id);
+            default_taps_ability =
+                default_taps_ability ||
+                is_ability_land(player.lands[index].card);
         }
     }
-    for (const auto& artifact : player.artifacts) {
-        if (artifact.tapped) {
-            continue;
-        }
-        const CardId face = artifact_face(artifact);
-        if (face == CardId::FellwarStone) {
-            sources.push_back({artifact.id, face, false, 1});
-        } else if (mana_total(artifact_mana(face)) > 0) {
-            sources.push_back({artifact.id, face, false,
-                               std::max(1, artifact_mana(face).generic)});
+    for (std::size_t index = 0; index < player.artifacts.size();
+         ++index) {
+        if (plan.tap_artifacts[index]) {
+            default_set.push_back(player.artifacts[index].id);
         }
     }
+    std::sort(default_set.begin(), default_set.end());
+
     static constexpr std::array<int ManaCost::*, 6> kFaces = {
         &ManaCost::generic, &ManaCost::green, &ManaCost::red,
         &ManaCost::blue,    &ManaCost::white, &ManaCost::black,
     };
-    const auto provides_face = [](const Source& source, int face) {
+    struct Source {
+        PermanentId id = 0;
+        CardId card = CardId::Forest;
+        bool is_land = false;
+        int amount = 1;  // generic contribution (Sol Ring = 2)
+    };
+    const auto provides_face = [&](const Source& source, int face) {
         if (face == 0) {
-            return source.is_land
-                       ? land_mana(source.card).generic > 0 &&
-                             source.card != CardId::CityOfBrass
-                       : artifact_mana(source.card).generic > 0;
+            return !source.is_land &&
+                   artifact_mana(source.card).generic > 0;
         }
         if (source.is_land) {
-            return land_provides(source.card, kFaces[static_cast<
-                                                  std::size_t>(face)]);
+            return land_provides(
+                source.card,
+                kFaces[static_cast<std::size_t>(face)]);
         }
         if (source.card == CardId::FellwarStone) {
             return true;
@@ -1186,51 +1198,55 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
         return artifact_mana(source.card).*kFaces[static_cast<
                    std::size_t>(face)] > 0;
     };
-    const auto colored_flexibility = [&](const Source& source) {
-        int count = 0;
-        for (int face = 1; face <= 5; ++face) {
-            count += provides_face(source, face) ? 1 : 0;
+    // Greedy cover in planner tier order. `exclude_ability` drops
+    // ability lands from the pool; `prefer_face`/`prefer_dual` bumps
+    // one dual type to the front of that face's colored payment.
+    const auto cover = [&](bool exclude_ability, int prefer_face,
+                           CardId prefer_dual)
+        -> std::optional<std::vector<PaymentTap>> {
+        std::vector<Source> pool;
+        for (const auto& artifact : player.artifacts) {
+            if (artifact.tapped) {
+                continue;
+            }
+            const CardId face_card = artifact_face(artifact);
+            if (face_card == CardId::FellwarStone) {
+                pool.push_back({artifact.id, face_card, false, 1});
+            } else if (mana_total(artifact_mana(face_card)) > 0) {
+                pool.push_back(
+                    {artifact.id, face_card, false,
+                     std::max(1,
+                              artifact_mana(face_card).generic)});
+            }
         }
-        return count;
-    };
-    // Policy = ordering preference for spending, smaller spends first.
-    // 0: rocks first (mirrors the planner's family, other tie-breaks)
-    // 1: rocks last (save moxen, spend lands)
-    // 2: painful first (spend City/ability lands, keep everything else)
-    const auto spend_rank = [&](const Source& source, int policy) {
-        const bool painful =
-            source.is_land && (source.card == CardId::CityOfBrass ||
-                               source.card == CardId::StripMine ||
-                               source.card == CardId::MishrasFactory ||
-                               source.card ==
-                                   CardId::LibraryOfAlexandria);
-        switch (policy) {
-        case 1:
-            return (painful ? 2 : source.is_land ? 0 : 1) * 10 +
-                   colored_flexibility(source);
-        case 2:
-            return (painful ? 0 : source.is_land ? 1 : 2) * 10 +
-                   colored_flexibility(source);
-        default:
-            return (source.is_land ? (painful ? 2 : 1) : 0) * 10 +
-                   colored_flexibility(source);
+        std::vector<Source> lands;
+        for (const auto& land : player.lands) {
+            if (land.tapped ||
+                (exclude_ability && is_ability_land(land.card))) {
+                continue;
+            }
+            lands.push_back({land.id, land.card, true, 1});
         }
-    };
-    std::vector<std::vector<PaymentTap>> variants;
-    std::vector<std::vector<PermanentId>> seen_sets;
-    for (int policy = 0; policy < 3; ++policy) {
-        std::vector<Source> pool = sources;
-        std::stable_sort(pool.begin(), pool.end(),
-                         [&](const Source& left, const Source& right) {
-                             return spend_rank(left, policy) <
-                                    spend_rank(right, policy);
-                         });
+        const auto land_tier = [&](CardId card) {
+            if (is_dual(card)) {
+                return 1;
+            }
+            if (card == CardId::CityOfBrass) {
+                return 2;
+            }
+            return is_ability_land(card) ? 3 : 0;
+        };
+        std::stable_sort(
+            lands.begin(), lands.end(),
+            [&](const Source& left, const Source& right) {
+                return land_tier(left.card) < land_tier(right.card);
+            });
+        pool.insert(pool.end(), lands.begin(), lands.end());
+
         std::vector<PaymentTap> taps;
         std::vector<bool> used(pool.size(), false);
-        bool feasible = true;
-        // Colored needs first, net of already-floated pool.
         int pool_spent_on_color = 0;
-        for (int face = 1; face <= 5 && feasible; ++face) {
+        for (int face = 1; face <= 5; ++face) {
             const int have =
                 player.mana_pool.*kFaces[static_cast<std::size_t>(
                     face)];
@@ -1238,6 +1254,19 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
                 cost.*kFaces[static_cast<std::size_t>(face)];
             pool_spent_on_color += std::min(have, want);
             int needed = std::max(0, want - have);
+            // Preferred dual first for the flagged face.
+            if (needed > 0 && face == prefer_face) {
+                for (std::size_t index = 0;
+                     index < pool.size() && needed > 0; ++index) {
+                    if (!used[index] &&
+                        pool[index].card == prefer_dual &&
+                        provides_face(pool[index], face)) {
+                        used[index] = true;
+                        taps.push_back({pool[index].id, face});
+                        --needed;
+                    }
+                }
+            }
             for (std::size_t index = 0;
                  index < pool.size() && needed > 0; ++index) {
                 if (used[index] ||
@@ -1248,9 +1277,10 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
                 taps.push_back({pool[index].id, face});
                 --needed;
             }
-            feasible = needed == 0;
+            if (needed > 0) {
+                return std::nullopt;
+            }
         }
-        // Generic remainder, net of whatever floated pool is left.
         const int pool_total =
             player.mana_pool.generic + player.mana_pool.green +
             player.mana_pool.red + player.mana_pool.blue +
@@ -1262,7 +1292,6 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
             if (used[index]) {
                 continue;
             }
-            // Any face pays generic; prefer the pure-generic face.
             int face = 0;
             if (!provides_face(pool[index], 0)) {
                 face = 1;
@@ -1278,22 +1307,57 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
             taps.push_back({pool[index].id, face});
             generic_needed -= pool[index].amount;
         }
-        if (!feasible || generic_needed > 0 || taps.empty()) {
-            continue;
+        if (generic_needed > 0 || taps.empty()) {
+            return std::nullopt;
+        }
+        return taps;
+    };
+
+    std::vector<std::vector<PaymentTap>> variants;
+    std::vector<std::vector<PermanentId>> seen = {default_set};
+    const auto emit = [&](std::optional<std::vector<PaymentTap>>
+                              candidate) {
+        if (!candidate.has_value() ||
+            variants.size() >= max_variants) {
+            return;
         }
         std::vector<PermanentId> signature;
-        for (const PaymentTap& tap : taps) {
+        for (const PaymentTap& tap : *candidate) {
             signature.push_back(tap.permanent);
         }
         std::sort(signature.begin(), signature.end());
-        if (std::find(seen_sets.begin(), seen_sets.end(), signature) !=
-            seen_sets.end()) {
+        if (std::find(seen.begin(), seen.end(), signature) !=
+            seen.end()) {
+            return;
+        }
+        seen.push_back(std::move(signature));
+        variants.push_back(std::move(*candidate));
+    };
+    if (default_taps_ability) {
+        emit(cover(true, 0, CardId::Forest));
+    }
+    // Dual-choice branching: a colored need payable by two or more
+    // distinct dual types gets one variant per alternative type.
+    for (int face = 1; face <= 5; ++face) {
+        if (cost.*kFaces[static_cast<std::size_t>(face)] <= 0) {
             continue;
         }
-        seen_sets.push_back(signature);
-        variants.push_back(std::move(taps));
-        if (variants.size() >= max_variants) {
-            break;
+        std::vector<CardId> dual_types;
+        for (const auto& land : player.lands) {
+            if (!land.tapped && is_dual(land.card) &&
+                land_provides(land.card,
+                              kFaces[static_cast<std::size_t>(
+                                  face)]) &&
+                std::find(dual_types.begin(), dual_types.end(),
+                          land.card) == dual_types.end()) {
+                dual_types.push_back(land.card);
+            }
+        }
+        if (dual_types.size() < 2) {
+            continue;
+        }
+        for (const CardId dual : dual_types) {
+            emit(cover(false, face, dual));
         }
     }
     return variants;
@@ -5290,7 +5354,7 @@ Game::continue_priority_window(bool sorcery_actions,
                     continue;
                 }
                 for (auto& taps : alternative_payments(
-                         state_.players[priority.player], *cost, 2)) {
+                         state_.players[priority.player], *cost, 3)) {
                     PriorityAction variant = actions[index];
                     variant.pre_taps = std::move(taps);
                     actions.push_back(std::move(variant));

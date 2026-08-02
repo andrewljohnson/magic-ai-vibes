@@ -3700,7 +3700,7 @@ struct SpzAgent {
                              });
             const std::size_t candidates = std::min(
                 std::max<std::size_t>(config.rollout_top_k, 2) +
-                    (config.payment_branching ? 4 : 0),
+                    (config.payment_branching ? 2 : 0),
                 order.size());
             std::vector<double> rollout_totals(actions.size(),
                                                kIllegalScore);
