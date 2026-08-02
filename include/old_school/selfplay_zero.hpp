@@ -250,6 +250,11 @@ SpzAdvantageNet load_spz_advantage_net(const std::string& path);
 struct SpzPolicyConfig {
     // Determinized worlds averaged per priority-action evaluation.
     std::size_t worlds = 2;
+    // Among candidates whose refined scores tie within the noise band,
+    // prefer the one that spends the least (mana + X): when search
+    // cannot tell futures apart, do not pay for one. Card-agnostic
+    // successor to the retired advantage head's tie arbitration.
+    bool frugal_tie_break = true;
     // Worlds averaged when predicting opponent blocks during attack search.
     std::size_t block_prediction_worlds = 2;
     // Epsilon-greedy exploration over priority actions and combat choices.

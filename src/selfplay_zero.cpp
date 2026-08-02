@@ -2046,6 +2046,28 @@ struct SpzAgent {
         }
     }
 
+    // Mana a candidate action spends if taken now: printed cost plus X
+    // for casts, the engine's activation costs for abilities. Rules
+    // facts, not card strategy.
+    static int action_mana_spend(const PriorityAction& action) {
+        switch (action.kind) {
+        case PriorityActionKind::Pass:
+        case PriorityActionKind::PlayLand:
+        case PriorityActionKind::ActivateLibrary:
+        case PriorityActionKind::ActivateStripMine:
+            return 0;
+        case PriorityActionKind::ActivateMishrasFactory:
+            return 1;
+        case PriorityActionKind::ActivateMillstone:
+            return 2;
+        default: {
+            const ManaCost& cost = card_definition(action.card).cost;
+            return cost.generic + cost.green + cost.red + cost.blue +
+                   cost.white + std::max(0, action.x_value);
+        }
+        }
+    }
+
     // ------------------------------------------------------------------
     // No-upside prune: a rules-only refusal of actions that cannot help.
     //
@@ -3732,12 +3754,14 @@ struct SpzAgent {
                         std::move(sample));
                 }
             }
-            if (advantage_net != nullptr) {
-                // The head is trained to ORDER actions, not to move
-                // scores: search alone settles contested decisions, and
-                // the head re-ranks only the actions whose rollout
-                // totals tie the best within the evaluation noise band
-                // (where waste otherwise wins by coin flip).
+            if (advantage_net != nullptr ||
+                config.frugal_tie_break) {
+                // Search alone settles contested decisions; this block
+                // handles only the actions whose rollout totals tie
+                // the best within the evaluation noise band (where
+                // waste otherwise wins by coin flip): resample harder,
+                // then arbitrate — by the head when one is loaded,
+                // otherwise by frugality (spend nothing on a tie).
                 const double band =
                     config.advantage_tie_band *
                     static_cast<double>(worlds);
@@ -3810,15 +3834,32 @@ struct SpzAgent {
                     }
                     finalists = std::move(tight);
                 }
-                double best_delta =
-                    -std::numeric_limits<double>::infinity();
                 std::size_t best_tied = actions.size();
-                for (const std::size_t index : finalists) {
-                    const double delta = advantage_net->delta(
-                        state_row, action_rows[index]);
-                    if (delta > best_delta) {
-                        best_delta = delta;
-                        best_tied = index;
+                if (advantage_net != nullptr) {
+                    double best_delta =
+                        -std::numeric_limits<double>::infinity();
+                    for (const std::size_t index : finalists) {
+                        const double delta = advantage_net->delta(
+                            state_row, action_rows[index]);
+                        if (delta > best_delta) {
+                            best_delta = delta;
+                            best_tied = index;
+                        }
+                    }
+                } else {
+                    int best_spend = std::numeric_limits<int>::max();
+                    double best_total =
+                        -std::numeric_limits<double>::infinity();
+                    for (const std::size_t index : finalists) {
+                        const int spend =
+                            action_mana_spend(actions[index]);
+                        if (spend < best_spend ||
+                            (spend == best_spend &&
+                             totals[index] > best_total)) {
+                            best_spend = spend;
+                            best_total = totals[index];
+                            best_tied = index;
+                        }
                     }
                 }
                 if (best_tied < actions.size()) {
