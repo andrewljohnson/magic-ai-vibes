@@ -571,15 +571,26 @@ TEST(starting_decks_have_the_requested_cards) {
 
     const auto ru_deck = old_school::ru_aggro_deck();
     CHECK(ru_deck.size() == 40);
-    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 10);
-    CHECK(count_card(ru_deck, old_school::CardId::Island) == 7);
-    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 3);
-    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 2);
-    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::ForceSpike) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::Counterspell) == 2);
+    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 13);
+    CHECK(count_card(ru_deck, old_school::CardId::Island) == 4);
+    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 3);
+    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 5);
+    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 2);
+    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 8);
+    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 3);
+    CHECK(count_card(ru_deck, old_school::CardId::Disintegrate) == 2);
+
+    const auto robots = old_school::robots_deck();
+    CHECK(robots.size() == 60);
+    CHECK(count_card(robots, old_school::CardId::SuChi) == 4);
+    CHECK(count_card(robots, old_school::CardId::SageOfLatNam) == 3);
+    CHECK(count_card(robots, old_school::CardId::Triskelion) == 3);
+    CHECK(count_card(robots, old_school::CardId::CopyArtifact) == 4);
+    CHECK(count_card(robots, old_school::CardId::MishrasFactory) == 4);
+    CHECK(count_card(robots, old_school::CardId::Tundra) == 4);
+    CHECK(count_card(robots, old_school::CardId::CityOfBrass) == 3);
+    CHECK(count_card(robots, old_school::CardId::UndergroundSea) == 2);
+    CHECK(count_card(robots, old_school::CardId::Badlands) == 1);
 }
 
 TEST(determinization_is_reproducible_and_preserves_observer_hand) {
@@ -2842,7 +2853,7 @@ TEST(handcrafted_sequences_the_channel_kill_and_takes_exact_lethal) {
     take(old_school::CardId::Disintegrate);
     state.players[0].hand.push_back(old_school::CardId::Disintegrate);
     state.players[0].library = pool;
-    state.players[1].library = old_school::ru_aggro_deck();
+    state.players[1].library = old_school::robots_deck();
 
     const auto best_action =
         [&](const old_school::GameState& position) {
@@ -3012,7 +3023,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 8,
+        .population = 9,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3025,11 +3036,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 8);
-    CHECK(first.best.total.games == 32);
+    CHECK(first.best.by_opponent.size() == 9);
+    CHECK(first.best.total.games == 36);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          32);
+          36);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3040,6 +3051,7 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::blue_deck(),
              old_school::white_control_deck(),
              old_school::ru_aggro_deck(),
+             old_school::robots_deck(),
              old_school::lotus_combo_deck(),
              old_school::burn_deck(),
              old_school::uwr_deck(),
@@ -4432,7 +4444,8 @@ TEST(uwr_deck_is_sixty_cards_and_determinization_conserves_new_zones) {
     const auto deck = old_school::uwr_deck();
     CHECK(deck.size() == 60);
     CHECK(count_card(deck, old_school::CardId::LightningBolt) == 8);
-    CHECK(count_card(deck, old_school::CardId::WheelOfFortune) == 2);
+    CHECK(count_card(deck, old_school::CardId::WheelOfFortune) == 1 &&
+          count_card(deck, old_school::CardId::Timetwister) == 1);
     CHECK(count_card(deck, old_school::CardId::MishrasFactory) == 4);
 
     // Mid-game state exercising every new zone move: an exiled creature
@@ -4627,6 +4640,478 @@ TEST(paris_mulligans_shrink_hands_and_are_counted_and_announced) {
                    old_school::GameEventKind::MulliganTaken;
         });
     CHECK(announcements == 2);
+}
+
+
+namespace {
+
+void resolve_top(old_school::GameState& state, std::size_t actor) {
+    old_school::PriorityState priority = {.player = actor,
+                                          .consecutive_passes = 0};
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::Passed);
+    CHECK(old_school::pass_priority(state, priority) ==
+          old_school::PriorityPassResult::StackObjectResolved);
+}
+
+}  // namespace
+
+TEST(black_mana_pays_demonic_tutor_and_fetches_the_chosen_card) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::DemonicTutor};
+    player.library = {old_school::CardId::SuChi,
+                      old_school::CardId::Forest};
+    player.lands = {
+        {.id = 11,
+         .card = old_school::CardId::UndergroundSea,
+         .tapped = false},
+        {.id = 12, .card = old_school::CardId::Island, .tapped = false},
+    };
+
+    const auto tutor_suchi = old_school::PriorityAction::
+        cast_demonic_tutor(old_school::CardId::SuChi);
+    const auto legal =
+        old_school::legal_priority_actions(state, 0, true);
+    CHECK(has_action(legal, tutor_suchi));
+    CHECK(has_action(legal, old_school::PriorityAction::
+                                cast_demonic_tutor(
+                                    old_school::CardId::Forest)));
+    CHECK(old_school::apply_priority_action(state, 0, tutor_suchi,
+                                            true));
+    resolve_top(state, 0);
+    CHECK(player.hand.size() == 1);
+    CHECK(player.hand[0] == old_school::CardId::SuChi);
+    CHECK(player.library.size() == 1);
+    CHECK(count_card(player.graveyard,
+                     old_school::CardId::DemonicTutor) == 1);
+}
+
+TEST(city_of_brass_pays_any_color_and_costs_a_life_when_tapped) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::LightningBolt};
+    player.lands = {
+        {.id = 21,
+         .card = old_school::CardId::CityOfBrass,
+         .tapped = false},
+    };
+    const auto bolt = old_school::PriorityAction::cast_lightning_bolt(
+        old_school::Target::player_target(1));
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     bolt));
+    CHECK(old_school::apply_priority_action(state, 0, bolt, true));
+    CHECK(player.life == 19);
+    CHECK(player.lands[0].tapped);
+    resolve_top(state, 0);
+    CHECK(state.players[1].life == 17);
+}
+
+TEST(mana_drain_counters_and_banks_mana_for_next_main_phase) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::ManaDrain};
+    player.lands = {
+        {.id = 31, .card = old_school::CardId::Island, .tapped = false},
+        {.id = 32, .card = old_school::CardId::Island, .tapped = false},
+    };
+    state.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = state.next_stack_object_id++,
+        .card = old_school::CardId::GrayOgre,
+        .controller = 1,
+    });
+    const auto drain = old_school::PriorityAction::cast_mana_drain(
+        state.stack.back().id);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, false),
+                     drain));
+    CHECK(old_school::apply_priority_action(state, 0, drain, false));
+    resolve_top(state, 0);
+    CHECK(state.stack.empty());
+    CHECK(count_card(state.players[1].graveyard,
+                     old_school::CardId::GrayOgre) == 1);
+    CHECK(player.pending_mana == 3);
+    old_school::begin_turn(state, 0);
+    CHECK(player.pending_mana == 0);
+    CHECK(player.mana_pool.generic >= 3);
+}
+
+TEST(triskelion_enters_with_counters_and_pings_face_and_creatures) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.creatures = {
+        {.id = 41,
+         .card = old_school::CardId::Triskelion,
+         .tapped = false,
+         .summoning_sick = false,
+         .plus_counters = 3},
+    };
+    enemy.creatures = {
+        {.id = 42,
+         .card = old_school::CardId::FlyingMen,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto ping_face =
+        old_school::PriorityAction::activate_triskelion(
+            41, old_school::Target::player_target(1));
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, false),
+                     ping_face));
+    CHECK(old_school::apply_priority_action(state, 0, ping_face,
+                                            false));
+    CHECK(player.creatures[0].plus_counters == 2);
+    resolve_top(state, 0);
+    CHECK(enemy.life == 19);
+
+    const auto ping_flyer =
+        old_school::PriorityAction::activate_triskelion(
+            41, old_school::Target::creature_target(1, 42));
+    CHECK(old_school::apply_priority_action(state, 0, ping_flyer,
+                                            false));
+    CHECK(player.creatures[0].plus_counters == 1);
+    resolve_top(state, 0);
+    CHECK(enemy.creatures.empty());
+    CHECK(count_card(enemy.graveyard,
+                     old_school::CardId::FlyingMen) == 1);
+}
+
+TEST(manual_land_tap_floats_mana_and_pays_first) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::Counterspell};
+    player.lands = {
+        {.id = 91,
+         .card = old_school::CardId::CityOfBrass,
+         .tapped = false},
+        {.id = 92, .card = old_school::CardId::Island, .tapped = false},
+    };
+    // Float {U} from City of Brass: taps, pings a life, banks the mana.
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(91, 3), false));
+    CHECK(player.lands[0].tapped);
+    CHECK(player.life == 19);
+    CHECK(player.mana_pool.blue == 1);
+    // Tapped lands cannot float again.
+    CHECK(!old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(91, 3), false));
+    // An Island cannot make red mana.
+    CHECK(!old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(92, 2), false));
+    // City of Brass makes colored mana only, never colorless.
+    CHECK(!old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(91, 0), false));
+    // Casting Counterspell ({U}{U}) uses the floated blue first, so a
+    // single untapped Island completes the cost.
+    state.stack.push_back({
+        .kind = old_school::StackObjectKind::Spell,
+        .id = state.next_stack_object_id++,
+        .card = old_school::CardId::GrayOgre,
+        .controller = 1,
+    });
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_counterspell(
+            state.stack.back().id),
+        false));
+    CHECK(player.mana_pool.blue == 0);
+    CHECK(player.lands[1].tapped);
+
+    // Mana artifacts and Llanowar Elves tap by click too: Sol Ring
+    // banks two, a Mox its color, Elves one green.
+    player.artifacts = {
+        {.id = 93, .card = old_school::CardId::SolRing,
+         .tapped = false},
+        {.id = 94, .card = old_school::CardId::MoxJet,
+         .tapped = false},
+    };
+    player.creatures = {
+        {.id = 95,
+         .card = old_school::CardId::LlanowarElves,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(93, 0), false));
+    CHECK(player.mana_pool.generic == 2);
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(94, 5), false));
+    CHECK(player.mana_pool.black == 1);
+    // A Mox cannot make an off-color face.
+    CHECK(!old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(94, 1), false));
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::tap_land_for_mana(95, 1), false));
+    CHECK(player.mana_pool.green == 1);
+    CHECK(player.creatures[0].tapped);
+}
+
+TEST(generic_costs_prefer_moxen_over_city_of_brass) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.lands = {
+        {.id = 96,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false},
+        {.id = 97,
+         .card = old_school::CardId::CityOfBrass,
+         .tapped = false},
+    };
+    player.artifacts = {
+        {.id = 98, .card = old_school::CardId::MoxRuby,
+         .tapped = false},
+        {.id = 99, .card = old_school::CardId::MoxPearl,
+         .tapped = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::animate_factory(96),
+        false));
+    // The {1} came from a Mox: no life ping, City still untapped.
+    CHECK(player.life == 20);
+    CHECK(!player.lands[1].tapped);
+    CHECK(player.artifacts[0].tapped != player.artifacts[1].tapped);
+}
+
+TEST(su_chi_banks_four_mana_when_it_dies) {
+    old_school::GameState state;
+    state.active_player = 1;
+    auto& player = state.players[0];
+    auto& caster = state.players[1];
+    player.creatures = {
+        {.id = 71,
+         .card = old_school::CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    caster.hand = {old_school::CardId::Fireball};
+    caster.lands = {
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+    };
+    const auto burn = old_school::PriorityAction::cast_fireball(
+        4, old_school::Target::creature_target(0, 71));
+    CHECK(has_action(old_school::legal_priority_actions(state, 1, true),
+                     burn));
+    CHECK(old_school::apply_priority_action(state, 1, burn, true));
+    resolve_top(state, 1);
+    CHECK(player.creatures.empty());
+    CHECK(count_card(player.graveyard, old_school::CardId::SuChi) ==
+          1);
+    CHECK(player.mana_pool.generic == 4);
+}
+
+TEST(sage_of_lat_nam_sacrifices_an_artifact_to_draw) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    player.library = {old_school::CardId::Island};
+    player.creatures = {
+        {.id = 51,
+         .card = old_school::CardId::SageOfLatNam,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    player.artifacts = {
+        {.id = 52, .card = old_school::CardId::SolRing,
+         .tapped = false},
+    };
+    const auto sacrifice =
+        old_school::PriorityAction::activate_sage(51, 52);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, false),
+                     sacrifice));
+    CHECK(old_school::apply_priority_action(state, 0, sacrifice,
+                                            false));
+    CHECK(player.creatures[0].tapped);
+    CHECK(player.artifacts.empty());
+    CHECK(count_card(player.graveyard, old_school::CardId::SolRing) ==
+          1);
+    resolve_top(state, 0);
+    CHECK(player.hand.size() == 1);
+    CHECK(player.library.empty());
+}
+
+TEST(armageddon_destroys_every_land_on_both_sides) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::Armageddon};
+    player.lands = {
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Tundra, .tapped = false},
+    };
+    enemy.lands = {
+        {.card = old_school::CardId::Mountain, .tapped = true},
+    };
+    const auto wrath = old_school::PriorityAction::cast_sorcery(
+        old_school::CardId::Armageddon);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     wrath));
+    CHECK(old_school::apply_priority_action(state, 0, wrath, true));
+    resolve_top(state, 0);
+    CHECK(player.lands.empty());
+    CHECK(enemy.lands.empty());
+    CHECK(count_card(player.graveyard, old_school::CardId::Plains) ==
+          3);
+    CHECK(count_card(enemy.graveyard, old_school::CardId::Mountain) ==
+          1);
+}
+
+TEST(timetwister_refills_both_hands_and_conserves_every_card) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::Timetwister,
+                   old_school::CardId::GrizzlyBears};
+    player.graveyard = {old_school::CardId::LightningBolt};
+    player.library.assign(8, old_school::CardId::Island);
+    player.lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    enemy.hand = {old_school::CardId::Plains};
+    enemy.graveyard = {old_school::CardId::Moat,
+                       old_school::CardId::Moat};
+    enemy.library.assign(9, old_school::CardId::Plains);
+    const std::size_t my_total = player.hand.size() +
+                                 player.graveyard.size() +
+                                 player.library.size();
+    const std::size_t enemy_total = enemy.hand.size() +
+                                    enemy.graveyard.size() +
+                                    enemy.library.size();
+
+    const auto twist = old_school::PriorityAction::cast_sorcery(
+        old_school::CardId::Timetwister);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     twist));
+    CHECK(old_school::apply_priority_action(state, 0, twist, true));
+    resolve_top(state, 0);
+    CHECK(player.hand.size() == 7);
+    CHECK(enemy.hand.size() == 7);
+    CHECK(player.graveyard.empty());
+    CHECK(enemy.graveyard.empty());
+    CHECK(player.hand.size() + player.graveyard.size() +
+              player.library.size() ==
+          my_total);
+    CHECK(enemy.hand.size() + enemy.graveyard.size() +
+              enemy.library.size() ==
+          enemy_total);
+}
+
+TEST(copy_artifact_copies_a_sol_ring_and_taps_like_one) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::CopyArtifact,
+                   old_school::CardId::SuChi};
+    player.lands = {
+        {.card = old_school::CardId::Island, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    enemy.artifacts = {
+        {.id = 61, .card = old_school::CardId::SolRing,
+         .tapped = false},
+    };
+    const auto copy =
+        old_school::PriorityAction::cast_copy_artifact(1, 61);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     copy));
+    CHECK(old_school::apply_priority_action(state, 0, copy, true));
+    resolve_top(state, 0);
+    CHECK(player.artifacts.size() == 1);
+    CHECK(player.artifacts[0].card ==
+          old_school::CardId::CopyArtifact);
+    CHECK(player.artifacts[0].is_copy);
+    CHECK(player.artifacts[0].copy_of == old_school::CardId::SolRing);
+
+    // The copy behaves as a Sol Ring: it alone pays for Su-Chi's {4}
+    // with the two Islands.
+    for (auto& land : player.lands) {
+        land.tapped = false;
+    }
+    player.mana_pool = {};
+    const auto suchi = old_school::PriorityAction::cast_creature(
+        old_school::CardId::SuChi);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     suchi));
+    CHECK(old_school::apply_priority_action(state, 0, suchi, true));
+    CHECK(player.artifacts[0].tapped);
+}
+
+TEST(fireball_mind_twist_and_recall_move_the_right_cards) {
+    old_school::GameState state;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::Fireball,
+                   old_school::CardId::MindTwist,
+                   old_school::CardId::Recall,
+                   old_school::CardId::Island};
+    player.graveyard = {old_school::CardId::LightningBolt};
+    player.lands = {
+        {.card = old_school::CardId::Badlands, .tapped = false},
+        {.card = old_school::CardId::UndergroundSea,
+         .tapped = false},
+        {.card = old_school::CardId::CityOfBrass, .tapped = false},
+        {.card = old_school::CardId::VolcanicIsland,
+         .tapped = false},
+        {.card = old_school::CardId::Mountain, .tapped = false},
+        {.card = old_school::CardId::Island, .tapped = false},
+    };
+    enemy.hand = {old_school::CardId::Plains,
+                  old_school::CardId::Moat,
+                  old_school::CardId::Millstone};
+
+    const auto fireball = old_school::PriorityAction::cast_fireball(
+        4, old_school::Target::player_target(1));
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     fireball));
+    CHECK(old_school::apply_priority_action(state, 0, fireball, true));
+    resolve_top(state, 0);
+    CHECK(enemy.life == 16);
+    CHECK(count_card(player.graveyard, old_school::CardId::Fireball) ==
+          1);
+
+    for (auto& land : player.lands) {
+        land.tapped = false;
+    }
+    player.mana_pool = {};
+    const auto twist =
+        old_school::PriorityAction::cast_mind_twist(2, 1);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     twist));
+    CHECK(old_school::apply_priority_action(state, 0, twist, true));
+    resolve_top(state, 0);
+    CHECK(enemy.hand.size() == 1);
+    CHECK(enemy.graveyard.size() == 2);
+
+    for (auto& land : player.lands) {
+        land.tapped = false;
+    }
+    player.mana_pool = {};
+    const std::size_t hand_before = player.hand.size();
+    const std::size_t graveyard_before = player.graveyard.size();
+    const auto recall = old_school::PriorityAction::cast_recall(1);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     recall));
+    CHECK(old_school::apply_priority_action(state, 0, recall, true));
+    resolve_top(state, 0);
+    // Cast Recall (hand -1), discard one (hand -1), return one
+    // (hand +1): net one card down, graveyard net one card up.
+    CHECK(player.hand.size() == hand_before - 1);
+    CHECK(player.graveyard.size() == graveyard_before + 1);
 }
 
 int main() {

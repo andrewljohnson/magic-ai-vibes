@@ -14,8 +14,8 @@
 namespace old_school::web {
 
 struct BridgeConfig {
-    DeckId human_deck = DeckId::RUAggro;
-    DeckId opponent_deck = DeckId::RUAggro;
+    DeckId human_deck = DeckId::UWR;
+    DeckId opponent_deck = DeckId::UWR;
     std::optional<std::vector<CardId>> human_deck_cards;
     std::optional<std::vector<CardId>> opponent_deck_cards;
     BotKind opponent_bot = BotKind::Handcrafted;
@@ -44,7 +44,7 @@ enum class EvolutionPilot : std::uint8_t {
 
 struct EvolutionJsonConfig {
     std::size_t generations = 3;
-    std::size_t population = 8;
+    std::size_t population = 9;
     std::size_t games_per_opponent = 1;
     std::uint64_t seed = 42;
     EvolutionPilot pilot = EvolutionPilot::Handcrafted;

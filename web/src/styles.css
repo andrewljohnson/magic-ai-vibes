@@ -897,16 +897,19 @@ textarea:focus-visible,
 }
 
 .player-side .permanent-zone {
-  min-height: 96px;
+  /* An empty board should read as an inviting play area: keep it a
+     bit over two card heights (cards are ~80px). */
+  min-height: 200px;
 }
 
-.player-side.is-play-destination {
+.battlefield.is-play-destination {
   border: 2px dashed #75d7c3;
+  border-radius: 10px;
   background: rgba(104, 183, 167, 0.055);
   box-shadow: inset 0 0 28px rgba(104, 183, 167, 0.09);
 }
 
-.player-side.is-play-destination.is-drop-target {
+.battlefield.is-play-destination.is-drop-target {
   border-style: solid;
   border-color: var(--gold-bright);
   background: rgba(241, 211, 138, 0.11);
@@ -1263,14 +1266,6 @@ textarea:focus-visible,
 
 .permanent-slot.is-tapped .card-face {
   transform: rotate(90deg);
-}
-
-.open-ground {
-  align-self: center;
-  color: rgba(157, 169, 161, 0.26);
-  font-family: Georgia, serif;
-  font-size: 12px;
-  font-style: italic;
 }
 
 .combat-lane {
@@ -1977,8 +1972,8 @@ textarea:focus-visible,
 
 .debug-hand {
   position: static;
-  margin: 4px 8% 6px;
-  height: 95px;
+  margin: 4px 4% 6px;
+  height: 138px;
   grid-template-columns: 80px 1fr;
   border: 1px solid rgba(224, 119, 103, 0.28);
   border-radius: 7px;
@@ -1987,22 +1982,18 @@ textarea:focus-visible,
 }
 
 .debug-hand .hand-fan {
-  height: 93px;
+  height: 136px;
 }
 
 .debug-hand .hand-card-wrap {
-  width: 38px;
-  height: 60px;
-  flex-basis: 38px;
+  width: 62px;
+  height: 122px;
+  flex-basis: 62px;
 }
 
 .debug-hand .hand-card-wrap .card-face {
-  width: 46px;
-  height: 56px;
-}
-
-.debug-hand .hand-card-wrap .card-name {
-  font-size: var(--card-type-floor);
+  width: 64px;
+  height: 116px;
 }
 
 .debug-pill {
@@ -4057,6 +4048,11 @@ select {
   background: #3f8a4e;
 }
 
+.mana-pip-black {
+  background: #3b3733;
+  color: #cbc4ba;
+}
+
 .card-zoom-backdrop {
   position: fixed;
   inset: 0;
@@ -4184,6 +4180,22 @@ select {
   letter-spacing: 0.08em;
   padding: 4px 0 8px;
   border-bottom: 1px solid var(--line);
+}
+
+.stack-respond-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #9faaa2;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stack-respond-toggle input {
+  accent-color: #75d7c3;
+  cursor: pointer;
 }
 
 .stack-pass-button {

@@ -64,10 +64,27 @@ enum class CardId : std::uint8_t {
     LibraryOfAlexandria,
     MishrasFactory,
     StripMine,
+    SuChi,
+    SageOfLatNam,
+    Triskelion,
+    ManaDrain,
+    Armageddon,
+    DemonicTutor,
+    Fireball,
+    MindTwist,
+    Recall,
+    CopyArtifact,
+    FellwarStone,
+    MoxEmerald,
+    MoxJet,
+    CityOfBrass,
+    UndergroundSea,
+    Badlands,
+    Timetwister,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::StripMine) + 1;
+    static_cast<std::size_t>(CardId::Timetwister) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -84,6 +101,7 @@ struct ManaCost {
     int red = 0;
     int blue = 0;
     int white = 0;
+    int black = 0;
 
     bool operator==(const ManaCost&) const = default;
 };
@@ -110,6 +128,7 @@ std::vector<CardId> red_deck();
 std::vector<CardId> blue_deck();
 std::vector<CardId> white_control_deck();
 std::vector<CardId> ru_aggro_deck();
+std::vector<CardId> robots_deck();
 // Stress decks outside the five-deck metagame environment.
 std::vector<CardId> lotus_combo_deck();
 std::vector<CardId> burn_deck();
@@ -137,6 +156,8 @@ struct CreaturePermanent {
     int temporary_power_bonus = 0;
     int temporary_toughness_bonus = 0;
     bool exile_on_death_this_turn = false;
+    // +1/+1 counters (Triskelion); count into power and toughness.
+    int plus_counters = 0;
 
     bool operator==(const CreaturePermanent&) const = default;
 };
@@ -145,6 +166,10 @@ struct ArtifactPermanent {
     PermanentId id;
     CardId card;
     bool tapped = false;
+    // Copy Artifact: the physical card stays CopyArtifact (zone
+    // conservation), behavior follows the copied artifact.
+    CardId copy_of = CardId::Forest;  // Forest = not a copy
+    bool is_copy = false;
 
     bool operator==(const ArtifactPermanent&) const = default;
 };
@@ -165,6 +190,9 @@ struct PlayerState {
     // remains available through the current phase, then is cleared.
     ManaCost mana_pool;
     bool land_played_this_turn = false;
+    // Mana Drain: generic mana owed to this player at their next
+    // turn's beginning.
+    int pending_mana = 0;
 
     bool operator==(const PlayerState&) const = default;
 };
@@ -208,6 +236,8 @@ struct StackObject {
     std::optional<Target> target;
     std::optional<StackObjectId> spell_target;
     int x_value = 0;
+    // Demonic Tutor's selection travels with the spell.
+    std::optional<CardId> chosen_card;
 
     bool operator==(const StackObject&) const = default;
 };
@@ -262,6 +292,15 @@ enum class PriorityActionKind : std::uint8_t {
     ActivateLibrary,
     ActivateMishrasFactory,
     ActivateStripMine,
+    CastManaDrain,
+    CastFireball,
+    CastMindTwist,
+    CastRecall,
+    CastDemonicTutor,
+    CastCopyArtifact,
+    ActivateSage,
+    ActivateTriskelion,
+    TapLandForMana,
 };
 
 struct PriorityAction {
@@ -271,6 +310,8 @@ struct PriorityAction {
     std::optional<StackObjectId> spell_target;
     std::optional<PermanentId> source_permanent;
     int x_value = 0;
+    // Demonic Tutor's selected card.
+    std::optional<CardId> chosen_card;
 
     static PriorityAction pass();
     static PriorityAction play_land(CardId land);
@@ -302,6 +343,23 @@ struct PriorityAction {
                                               PermanentId land);
     static PriorityAction activate_millstone(PermanentId millstone,
                                              Target mill_target);
+    static PriorityAction cast_mana_drain(StackObjectId target_spell);
+    static PriorityAction cast_fireball(int x_value, Target target);
+    static PriorityAction cast_mind_twist(int x_value,
+                                          std::size_t target_player);
+    static PriorityAction cast_recall(int x_value);
+    static PriorityAction cast_demonic_tutor(CardId chosen);
+    static PriorityAction cast_copy_artifact(std::size_t owner,
+                                             PermanentId artifact);
+    static PriorityAction activate_sage(PermanentId sage,
+                                        PermanentId artifact);
+    static PriorityAction activate_triskelion(PermanentId triskelion,
+                                              Target target);
+    // Human-only manual mana: tap a land for one face. `color_index`
+    // rides in x_value: 0 generic, 1 green, 2 red, 3 blue, 4 white,
+    // 5 black. Never offered to bot seats or SPZ search.
+    static PriorityAction tap_land_for_mana(PermanentId land,
+                                            int color_index);
 
     bool operator==(const PriorityAction&) const = default;
 };
@@ -371,6 +429,7 @@ struct PublicPlayerState {
     std::vector<ArtifactPermanent> artifacts;
     std::vector<CardId> enchantments;
     ManaCost mana_pool;
+    int pending_mana = 0;
     bool land_played_this_turn = false;
 
     bool operator==(const PublicPlayerState&) const = default;
@@ -478,6 +537,10 @@ struct HumanController {
     // sole legal priority action. The default preserves automatic forced
     // passes for terminal play, simulations, and tests.
     bool bluff_mode = false;
+    // Offer manual TapLandForMana actions in priority windows. Only the
+    // web arena's real human seat sets this; SPZ controller seats and
+    // simulations keep the automatic payer exclusively.
+    bool offers_mana_taps = false;
 };
 
 enum class PriorityPassResult : std::uint8_t {
@@ -782,9 +845,10 @@ enum class DeckId : std::uint8_t {
     LotusCombo,
     Burn,
     UWR,
+    Robots,
 };
 
-inline constexpr std::size_t kDeckCount = 8;
+inline constexpr std::size_t kDeckCount = 9;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

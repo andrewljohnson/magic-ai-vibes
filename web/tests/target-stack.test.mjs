@@ -322,7 +322,12 @@ test("priority origins route to exact Arena surfaces without a legal-action wall
     /playOptions\.length === 1[\s\S]+?submitPriorityOption\(playOptions\[0\]\)/,
     "double-click may immediately submit only one exact targetless option",
   );
-  assert.match(app, /data-priority-play-target=\{priorityPlayTarget \|\| undefined\}/);
+  // The whole battlefield container is the play surface (drop or click
+  // anywhere in the middle section plays the card).
+  assert.match(
+    app,
+    /data-priority-play-target=\{\s*priorityPlayOptions\.length > 0 \|\| undefined\s*\}/,
+  );
   assert.match(app, /onCardDoubleClick=\{doubleClickHandCard\}/);
   assert.match(app, /choiceTarget=\{priorityDestination\}/);
   assert.match(app, /priorityTarget=\{priorityPlayerTargets\?\.has\(seat\)\}/);
@@ -343,7 +348,7 @@ test("priority origins route to exact Arena surfaces without a legal-action wall
   );
   assert.match(
     app,
-    /onDragOver=\{\(event\) => onPriorityDragOver\?\.\("play", event\)\}/,
+    /onDragOver=\{\(event\) =>\s*dragOverPriorityDestination\("play", event\)\s*\}/,
   );
   assert.match(
     app,
@@ -367,7 +372,7 @@ test("priority origins route to exact Arena surfaces without a legal-action wall
     css,
     /\.game-shell\.has-decision\.has-priority-decision\s*\{[^}]*--player-decision-height:\s*78px;/s,
   );
-  assert.match(css, /\.player-side\.is-play-destination\s*\{/);
+  assert.match(css, /\.battlefield\.is-play-destination\s*\{/);
   assert.match(css, /\.card-face\.is-choice-target\s*\{/);
   assert.match(css, /\.surface-action\s*\{/);
   assert.doesNotMatch(app, /function CardInspector/);

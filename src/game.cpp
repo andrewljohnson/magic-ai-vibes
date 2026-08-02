@@ -31,7 +31,7 @@ namespace old_school {
 
 namespace {
 
-constexpr std::array<CardDefinition, 47> kCardDefinitions = {{
+constexpr std::array<CardDefinition, kCardCount> kCardDefinitions = {{
     {CardId::Forest, "Forest", CardType::Land, {}, 0, 0, 0},
     {CardId::Mountain, "Mountain", CardType::Land, {}, 0, 0, 0},
     {CardId::GrizzlyBears,
@@ -368,9 +368,139 @@ constexpr std::array<CardDefinition, 47> kCardDefinitions = {{
      0,
      0,
      false},
+    {CardId::SuChi, "Su-Chi", CardType::Creature, {.generic = 4}, 4, 4,
+     0, false},
+    {CardId::SageOfLatNam,
+     "Sage of Lat-Nam",
+     CardType::Creature,
+     {.generic = 1, .blue = 1},
+     1,
+     2,
+     0,
+     false},
+    {CardId::Triskelion,
+     "Triskelion",
+     CardType::Creature,
+     {.generic = 6},
+     1,
+     1,
+     0,
+     false},
+    {CardId::ManaDrain,
+     "Mana Drain",
+     CardType::Instant,
+     {.blue = 2},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Armageddon,
+     "Armageddon",
+     CardType::Sorcery,
+     {.generic = 3, .white = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::DemonicTutor,
+     "Demonic Tutor",
+     CardType::Sorcery,
+     {.generic = 1, .black = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Fireball,
+     "Fireball",
+     CardType::Sorcery,
+     {.red = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MindTwist,
+     "Mind Twist",
+     CardType::Sorcery,
+     {.black = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Recall,
+     "Recall",
+     CardType::Sorcery,
+     {.blue = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::CopyArtifact,
+     "Copy Artifact",
+     CardType::Enchantment,
+     {.generic = 1, .blue = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::FellwarStone,
+     "Fellwar Stone",
+     CardType::Artifact,
+     {.generic = 2},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MoxEmerald,
+     "Mox Emerald",
+     CardType::Artifact,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::MoxJet,
+     "Mox Jet",
+     CardType::Artifact,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::CityOfBrass,
+     "City of Brass",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::UndergroundSea,
+     "Underground Sea",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Badlands,
+     "Badlands",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Timetwister,
+     "Timetwister",
+     CardType::Sorcery,
+     {.generic = 2, .blue = 1},
+     0,
+     0,
+     0,
+     false},
 }};
 
-constexpr std::array<CardId, 15> kCreatureCards = {
+constexpr std::array<CardId, 18> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -386,16 +516,21 @@ constexpr std::array<CardId, 15> kCreatureCards = {
     CardId::SavannahLions,
     CardId::SerendibEfreet,
     CardId::SerraAngel,
+    CardId::SuChi,
+    CardId::SageOfLatNam,
+    CardId::Triskelion,
 };
 
-constexpr std::array<CardId, 4> kSorceryCards = {
+constexpr std::array<CardId, 6> kSorceryCards = {
     CardId::Tsunami,
     CardId::TimeWalk,
     CardId::Channel,
     CardId::WheelOfFortune,
+    CardId::Armageddon,
+    CardId::Timetwister,
 };
 
-constexpr std::array<CardId, 7> kArtifactCards = {
+constexpr std::array<CardId, 10> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
@@ -403,6 +538,9 @@ constexpr std::array<CardId, 7> kArtifactCards = {
     CardId::BlackVise,
     CardId::MoxPearl,
     CardId::MoxRuby,
+    CardId::FellwarStone,
+    CardId::MoxEmerald,
+    CardId::MoxJet,
 };
 
 constexpr std::array<CardId, 1> kEnchantmentCards = {
@@ -423,6 +561,18 @@ ManaCost disintegrate_cost(int x_value) {
 
 ManaCost braingeyser_cost(int x_value) {
     return {.generic = x_value, .blue = 2};
+}
+
+ManaCost fireball_cost(int x_value) {
+    return {.generic = x_value, .red = 1};
+}
+
+ManaCost mind_twist_cost(int x_value) {
+    return {.generic = x_value, .black = 1};
+}
+
+ManaCost recall_cost(int x_value) {
+    return {.generic = x_value, .blue = 1};
 }
 
 bool has_card(const std::vector<CardId>& cards, CardId wanted) {
@@ -543,7 +693,7 @@ bool is_land(CardId card) {
 
 int mana_total(const ManaCost& mana) {
     return mana.generic + mana.green + mana.red + mana.blue +
-           mana.white;
+           mana.white + mana.black;
 }
 
 void add_mana(ManaCost& pool, const ManaCost& produced) {
@@ -577,6 +727,12 @@ ManaCost land_mana(CardId card) {
     case CardId::MishrasFactory:
     case CardId::StripMine:
         return {.generic = 1};
+    case CardId::UndergroundSea:
+        return {.blue = 1};
+    case CardId::Badlands:
+        return {.red = 1};
+    case CardId::CityOfBrass:
+        return {.generic = 1};
     default:
         return {};
     }
@@ -592,6 +748,12 @@ ManaCost artifact_mana(CardId card) {
         return {.red = 1};
     case CardId::SolRing:
         return {.generic = 2};
+    case CardId::MoxEmerald:
+        return {.green = 1};
+    case CardId::MoxJet:
+        return {.black = 1};
+    case CardId::FellwarStone:
+        return {.generic = 1};
     default:
         return {};
     }
@@ -616,10 +778,18 @@ struct ManaPaymentPlan {
     ManaCost remaining_pool;
 };
 
+// A Copy Artifact permanent behaves on the battlefield as the artifact
+// it entered copying; the physical card (graveyards, conservation)
+// stays CopyArtifact.
+CardId artifact_face(const ArtifactPermanent& artifact) {
+    return artifact.is_copy ? artifact.copy_of : artifact.card;
+}
+
 ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                                   const ManaCost& cost) {
-    const std::array<int, 5> cost_parts = {
-        cost.generic, cost.green, cost.red, cost.blue, cost.white,
+    const std::array<int, 6> cost_parts = {
+        cost.generic, cost.green,  cost.red,
+        cost.blue,    cost.white,  cost.black,
     };
     if (std::any_of(cost_parts.begin(), cost_parts.end(),
                     [](int amount) { return amount < 0; })) {
@@ -637,7 +807,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
     const auto tap_artifact = [&](std::size_t index) {
         plan.tap_artifacts[index] = true;
         add_mana(plan.remaining_pool,
-                 artifact_mana(player.artifacts[index].card));
+                 artifact_mana(
+                     artifact_face(player.artifacts[index])));
     };
     const auto tap_elf = [&]() {
         for (std::size_t index = 0; index < player.creatures.size();
@@ -659,7 +830,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             if (!player.artifacts[index].tapped &&
                 !plan.tap_artifacts[index] &&
                 !plan.sacrifice_artifacts[index] &&
-                player.artifacts[index].card == CardId::BlackLotus) {
+                artifact_face(player.artifacts[index]) ==
+                    CardId::BlackLotus) {
                 plan.sacrifice_artifacts[index] = true;
                 plan.remaining_pool.*color += 3;
                 return true;
@@ -671,6 +843,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         if (color == &ManaCost::blue) return CardId::MoxSapphire;
         if (color == &ManaCost::white) return CardId::MoxPearl;
         if (color == &ManaCost::red) return CardId::MoxRuby;
+        if (color == &ManaCost::green) return CardId::MoxEmerald;
+        if (color == &ManaCost::black) return CardId::MoxJet;
         return CardId::Forest;  // sentinel: no mox for this color
     };
     const auto select_color = [&](int ManaCost::*color, int needed) {
@@ -682,26 +856,46 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
              index < player.artifacts.size() && needed > 0; ++index) {
             if (!player.artifacts[index].tapped &&
                 !plan.tap_artifacts[index] &&
-                player.artifacts[index].card == mox &&
+                artifact_face(player.artifacts[index]) == mox &&
                 mox != CardId::Forest) {
                 tap_artifact(index);
                 --needed;
             }
         }
-        const auto tap_matching = [&](bool duals, int remaining) {
+        // Fellwar Stone: one mana of any color (house simplification).
+        for (std::size_t index = 0;
+             index < player.artifacts.size() && needed > 0; ++index) {
+            if (!player.artifacts[index].tapped &&
+                !plan.tap_artifacts[index] &&
+                artifact_face(player.artifacts[index]) ==
+                    CardId::FellwarStone) {
+                plan.tap_artifacts[index] = true;
+                plan.remaining_pool.*color += 1;
+                --needed;
+            }
+        }
+        // 0 = basics, 1 = painless duals, 2 = City of Brass (the
+        // life ping makes it the last colored source touched).
+        const auto tap_matching = [&](int tier, int remaining) {
             for (std::size_t index = 0;
                  index < player.lands.size() && remaining > 0;
                  ++index) {
                 const CardId land = player.lands[index].card;
-                const bool dual = land == CardId::Plateau ||
-                                  land == CardId::Tundra ||
-                                  land == CardId::VolcanicIsland;
-                if (dual == duals && !player.lands[index].tapped &&
+                const bool city = land == CardId::CityOfBrass;
+                const bool dual =
+                    land == CardId::Plateau ||
+                    land == CardId::Tundra ||
+                    land == CardId::VolcanicIsland ||
+                    land == CardId::UndergroundSea ||
+                    land == CardId::Badlands;
+                const int land_tier = city ? 2 : dual ? 1 : 0;
+                if (land_tier == tier &&
+                    !player.lands[index].tapped &&
                     !plan.tap_lands[index] &&
                     land_provides(land, color)) {
-                    if (dual) {
-                        // A dual makes the face we ask of it, not the
-                        // fixed land_mana() face.
+                    if (dual || city) {
+                        // A flexible land makes the face we ask of
+                        // it, not the fixed land_mana() face.
                         plan.tap_lands[index] = true;
                         plan.remaining_pool.*color += 1;
                     } else {
@@ -712,8 +906,9 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             }
             return remaining;
         };
-        needed = tap_matching(false, needed);
-        needed = tap_matching(true, needed);
+        needed = tap_matching(0, needed);
+        needed = tap_matching(1, needed);
+        needed = tap_matching(2, needed);
         while (needed > 0 && color == &ManaCost::green && tap_elf()) {
             --needed;
         }
@@ -734,15 +929,18 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         std::max(0, cost.blue - plan.remaining_pool.blue);
     const int white_needed =
         std::max(0, cost.white - plan.remaining_pool.white);
+    const int black_needed =
+        std::max(0, cost.black - plan.remaining_pool.black);
     if (!select_color(&ManaCost::green, green_needed) ||
         !select_color(&ManaCost::red, red_needed) ||
         !select_color(&ManaCost::blue, blue_needed) ||
-        !select_color(&ManaCost::white, white_needed)) {
+        !select_color(&ManaCost::white, white_needed) ||
+        !select_color(&ManaCost::black, black_needed)) {
         return plan;
     }
 
-    const int required_total =
-        cost.generic + cost.green + cost.red + cost.blue + cost.white;
+    const int required_total = cost.generic + cost.green + cost.red +
+                               cost.blue + cost.white + cost.black;
     const auto needs_more_mana = [&]() {
         return mana_total(plan.remaining_pool) < required_total;
     };
@@ -754,7 +952,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
          ++index) {
         if (!player.artifacts[index].tapped &&
             !plan.tap_artifacts[index] &&
-            player.artifacts[index].card == CardId::SolRing) {
+            artifact_face(player.artifacts[index]) ==
+                CardId::SolRing) {
             tap_artifact(index);
         }
     }
@@ -785,14 +984,20 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             if (land_provides(land, &ManaCost::white)) {
                 score += 1 + demand[3] * 4;
             }
-            // Ability lands are a last resort for generic costs: their
-            // activations are usually worth more than one mana.
+            // City of Brass pings its controller when tapped: for a
+            // generic cost it goes after every painless source.
+            if (land == CardId::CityOfBrass) {
+                score += 8;
+            }
+            // Ability lands are the very last resort for generic
+            // costs (after City's life ping): their activations are
+            // usually worth more than one mana.
             if (land == CardId::LibraryOfAlexandria) {
-                score += 10;
+                score += 40;
             } else if (land == CardId::MishrasFactory) {
-                score += 6;
+                score += 34;
             } else if (land == CardId::StripMine) {
-                score += 4;
+                score += 30;
             }
             return score;
         };
@@ -814,22 +1019,44 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                                     land_score(
                                         player.lands[right].card);
                          });
+        const auto painful = [](CardId land) {
+            return land == CardId::CityOfBrass ||
+                   land == CardId::LibraryOfAlexandria ||
+                   land == CardId::MishrasFactory ||
+                   land == CardId::StripMine;
+        };
+        // Painless lands first...
         for (std::size_t position = 0; position < order_count;
              ++position) {
             if (!needs_more_mana()) {
                 break;
             }
-            tap_land(order[position]);
+            if (!painful(player.lands[order[position]].card)) {
+                tap_land(order[position]);
+            }
         }
-    }
-    for (std::size_t index = 0;
-         index < player.artifacts.size() && needs_more_mana();
-         ++index) {
-        if (!player.artifacts[index].tapped &&
-            !plan.tap_artifacts[index] &&
-            mana_total(
-                artifact_mana(player.artifacts[index].card)) > 0) {
-            tap_artifact(index);
+        // ...then mana artifacts (moxen come before City's life ping
+        // or spending an ability land)...
+        for (std::size_t index = 0;
+             index < player.artifacts.size() && needs_more_mana();
+             ++index) {
+            if (!player.artifacts[index].tapped &&
+                !plan.tap_artifacts[index] &&
+                mana_total(artifact_mana(
+                    artifact_face(player.artifacts[index]))) > 0) {
+                tap_artifact(index);
+            }
+        }
+        // ...and only then City of Brass and ability lands, still in
+        // score order (City before Strip Mine/Factory/Library).
+        for (std::size_t position = 0; position < order_count;
+             ++position) {
+            if (!needs_more_mana()) {
+                break;
+            }
+            if (painful(player.lands[order[position]].card)) {
+                tap_land(order[position]);
+            }
         }
     }
     while (needs_more_mana() && tap_elf()) {
@@ -849,6 +1076,7 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         plan.remaining_pool.red < cost.red ||
         plan.remaining_pool.blue < cost.blue ||
         plan.remaining_pool.white < cost.white ||
+        plan.remaining_pool.black < cost.black ||
         mana_total(plan.remaining_pool) < required_total) {
         return plan;
     }
@@ -857,6 +1085,7 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
     plan.remaining_pool.red -= cost.red;
     plan.remaining_pool.blue -= cost.blue;
     plan.remaining_pool.white -= cost.white;
+    plan.remaining_pool.black -= cost.black;
 
     int generic_remaining = cost.generic;
     const auto spend_generic = [&](int& available) {
@@ -869,6 +1098,7 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
     spend_generic(plan.remaining_pool.red);
     spend_generic(plan.remaining_pool.blue);
     spend_generic(plan.remaining_pool.white);
+    spend_generic(plan.remaining_pool.black);
     if (generic_remaining != 0) {
         return plan;
     }
@@ -881,20 +1111,31 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
 
 // True when the land can produce the given colored mana.
 bool land_provides(CardId land, int ManaCost::*color) {
+    if (land == CardId::CityOfBrass) {
+        return color == &ManaCost::green || color == &ManaCost::red ||
+               color == &ManaCost::blue || color == &ManaCost::white ||
+               color == &ManaCost::black;
+    }
     if (color == &ManaCost::green) {
         return land == CardId::Forest;
     }
     if (color == &ManaCost::red) {
         return land == CardId::Mountain || land == CardId::Plateau ||
-               land == CardId::VolcanicIsland;
+               land == CardId::VolcanicIsland ||
+               land == CardId::Badlands;
     }
     if (color == &ManaCost::blue) {
         return land == CardId::Island || land == CardId::Tundra ||
-               land == CardId::VolcanicIsland;
+               land == CardId::VolcanicIsland ||
+               land == CardId::UndergroundSea;
     }
     if (color == &ManaCost::white) {
         return land == CardId::Plains || land == CardId::Plateau ||
                land == CardId::Tundra;
+    }
+    if (color == &ManaCost::black) {
+        return land == CardId::UndergroundSea ||
+               land == CardId::Badlands;
     }
     return false;
 }
@@ -912,6 +1153,9 @@ bool pay_mana(PlayerState& player, const ManaCost& cost) {
     for (std::size_t index = 0; index < player.lands.size(); ++index) {
         if (plan.tap_lands[index]) {
             player.lands[index].tapped = true;
+            if (player.lands[index].card == CardId::CityOfBrass) {
+                player.life -= 1;
+            }
         }
     }
     for (std::size_t index = 0;
@@ -958,8 +1202,9 @@ int maximum_available_mana(const PlayerState& player) {
     }
     for (const auto& artifact : player.artifacts) {
         if (!artifact.tapped) {
-            total += mana_total(artifact_mana(artifact.card));
-            if (artifact.card == CardId::BlackLotus) {
+            total += mana_total(
+                artifact_mana(artifact_face(artifact)));
+            if (artifact_face(artifact) == CardId::BlackLotus) {
                 total += 3;
             }
         }
@@ -988,12 +1233,13 @@ const CreaturePermanent* find_creature(
 
 int creature_power(const CreaturePermanent& creature) {
     return card_definition(creature.card).power +
-           creature.temporary_power_bonus;
+           creature.temporary_power_bonus + creature.plus_counters;
 }
 
 int creature_toughness(const CreaturePermanent& creature) {
     return card_definition(creature.card).toughness +
-           creature.temporary_toughness_bonus;
+           creature.temporary_toughness_bonus +
+           creature.plus_counters;
 }
 
 ArtifactPermanent* find_artifact(PlayerState& player, PermanentId id) {
@@ -1083,6 +1329,13 @@ void remove_dead_creatures(PlayerState& player) {
     auto creature = player.creatures.begin();
     while (creature != player.creatures.end()) {
         if (creature->damage >= creature_toughness(*creature)) {
+            // Su-Chi's death rebate: {4} into its controller's pool
+            // (house rule: no mana burn, so the mana simply banks).
+            // Exile (Disintegrate lethal) is not a death.
+            if (creature->card == CardId::SuChi &&
+                !creature->exile_on_death_this_turn) {
+                player.mana_pool.generic += 4;
+            }
             auto& destination =
                 creature->exile_on_death_this_turn
                     ? player.exile
@@ -1106,6 +1359,38 @@ std::size_t opponent_of(std::size_t player) {
 
 double handcrafted_card_value(CardId card) {
     switch (card) {
+    case CardId::SuChi:
+        return 1200.0;
+    case CardId::SageOfLatNam:
+        return 700.0;
+    case CardId::Triskelion:
+        return 1500.0;
+    case CardId::ManaDrain:
+        return 1100.0;
+    case CardId::Armageddon:
+        return 900.0;
+    case CardId::DemonicTutor:
+        return 1300.0;
+    case CardId::Fireball:
+        return 950.0;
+    case CardId::MindTwist:
+        return 1000.0;
+    case CardId::Recall:
+        return 650.0;
+    case CardId::CopyArtifact:
+        return 800.0;
+    case CardId::FellwarStone:
+        return 500.0;
+    case CardId::MoxEmerald:
+    case CardId::MoxJet:
+        return 1600.0;
+    case CardId::CityOfBrass:
+        return 200.0;
+    case CardId::UndergroundSea:
+    case CardId::Badlands:
+        return 150.0;
+    case CardId::Timetwister:
+        return 1200.0;
     case CardId::Forest:
     case CardId::Mountain:
     case CardId::Island:
@@ -1236,8 +1521,8 @@ std::vector<CardId> lotus_combo_deck() {
 }
 
 std::vector<CardId> burn_deck() {
-    std::vector<CardId> deck(15, CardId::Mountain);
-    deck.insert(deck.end(), 25, CardId::LightningBolt);
+    std::vector<CardId> deck(12, CardId::Mountain);
+    deck.insert(deck.end(), 18, CardId::LightningBolt);
     return deck;
 }
 
@@ -1257,7 +1542,8 @@ std::vector<CardId> uwr_deck() {
     deck.insert(deck.end(), 4, CardId::PsionicBlast);
     deck.insert(deck.end(), 3, CardId::SwordsToPlowshares);
     deck.push_back(CardId::TimeWalk);
-    deck.insert(deck.end(), 2, CardId::WheelOfFortune);
+    deck.push_back(CardId::WheelOfFortune);
+    deck.push_back(CardId::Timetwister);
     deck.push_back(CardId::LibraryOfAlexandria);
     deck.insert(deck.end(), 4, CardId::MishrasFactory);
     deck.push_back(CardId::Plains);
@@ -1290,15 +1576,52 @@ std::vector<CardId> white_control_deck() {
 }
 
 std::vector<CardId> ru_aggro_deck() {
-    std::vector<CardId> deck(10, CardId::Mountain);
-    deck.insert(deck.end(), 7, CardId::Island);
-    deck.insert(deck.end(), 4, CardId::FlyingMen);
-    deck.insert(deck.end(), 4, CardId::IronclawOrcs);
-    deck.insert(deck.end(), 3, CardId::GrayOgre);
-    deck.insert(deck.end(), 2, CardId::HillGiant);
+    std::vector<CardId> deck(13, CardId::Mountain);
+    deck.insert(deck.end(), 4, CardId::Island);
+    deck.insert(deck.end(), 3, CardId::FlyingMen);
+    deck.insert(deck.end(), 5, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 2, CardId::GrayOgre);
+    deck.insert(deck.end(), 8, CardId::HillGiant);
+    deck.insert(deck.end(), 3, CardId::LightningBolt);
+    deck.insert(deck.end(), 2, CardId::Disintegrate);
+    return deck;
+}
+
+std::vector<CardId> robots_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::SuChi);
+    deck.insert(deck.end(), 3, CardId::SageOfLatNam);
+    deck.insert(deck.end(), 3, CardId::Triskelion);
+    deck.insert(deck.end(), 3, CardId::Counterspell);
     deck.insert(deck.end(), 4, CardId::LightningBolt);
-    deck.insert(deck.end(), 4, CardId::ForceSpike);
-    deck.insert(deck.end(), 2, CardId::Counterspell);
+    deck.insert(deck.end(), 2, CardId::PsionicBlast);
+    deck.push_back(CardId::AncestralRecall);
+    deck.push_back(CardId::ManaDrain);
+    deck.push_back(CardId::Armageddon);
+    deck.push_back(CardId::Braingeyser);
+    deck.push_back(CardId::DemonicTutor);
+    deck.push_back(CardId::Fireball);
+    deck.push_back(CardId::MindTwist);
+    deck.push_back(CardId::Recall);
+    deck.push_back(CardId::TimeWalk);
+    deck.push_back(CardId::WheelOfFortune);
+    deck.insert(deck.end(), 4, CardId::CopyArtifact);
+    deck.push_back(CardId::BlackLotus);
+    deck.push_back(CardId::FellwarStone);
+    deck.push_back(CardId::MoxEmerald);
+    deck.push_back(CardId::MoxJet);
+    deck.push_back(CardId::MoxPearl);
+    deck.push_back(CardId::MoxRuby);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.insert(deck.end(), 4, CardId::Tundra);
+    deck.insert(deck.end(), 3, CardId::CityOfBrass);
+    deck.insert(deck.end(), 3, CardId::VolcanicIsland);
+    deck.insert(deck.end(), 2, CardId::UndergroundSea);
+    deck.push_back(CardId::Badlands);
+    deck.push_back(CardId::LibraryOfAlexandria);
+    deck.push_back(CardId::StripMine);
     return deck;
 }
 
@@ -1574,6 +1897,79 @@ PriorityAction PriorityAction::activate_strip_mine(
             .source_permanent = strip_mine};
 }
 
+PriorityAction PriorityAction::cast_mana_drain(
+    StackObjectId target_spell) {
+    return {.kind = PriorityActionKind::CastManaDrain,
+            .card = CardId::ManaDrain,
+            .spell_target = target_spell};
+}
+
+PriorityAction PriorityAction::cast_fireball(int x_value,
+                                             Target target) {
+    return {.kind = PriorityActionKind::CastFireball,
+            .card = CardId::Fireball,
+            .target = target,
+            .x_value = x_value};
+}
+
+PriorityAction PriorityAction::cast_mind_twist(
+    int x_value, std::size_t target_player) {
+    return {.kind = PriorityActionKind::CastMindTwist,
+            .card = CardId::MindTwist,
+            .target = Target::player_target(target_player),
+            .x_value = x_value};
+}
+
+PriorityAction PriorityAction::cast_recall(int x_value) {
+    return {.kind = PriorityActionKind::CastRecall,
+            .card = CardId::Recall,
+            .x_value = x_value};
+}
+
+PriorityAction PriorityAction::cast_demonic_tutor(CardId chosen) {
+    PriorityAction action{
+        .kind = PriorityActionKind::CastDemonicTutor,
+        .card = CardId::DemonicTutor};
+    action.chosen_card = chosen;
+    return action;
+}
+
+PriorityAction PriorityAction::cast_copy_artifact(
+    std::size_t owner, PermanentId artifact) {
+    return {.kind = PriorityActionKind::CastCopyArtifact,
+            .card = CardId::CopyArtifact,
+            .target = Target::creature_target(owner, artifact)};
+}
+
+PriorityAction PriorityAction::activate_sage(PermanentId sage,
+                                             PermanentId artifact) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateSage,
+        .card = CardId::SageOfLatNam,
+        .target = Target::creature_target(0, artifact)};
+    action.source_permanent = sage;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_triskelion(
+    PermanentId triskelion, Target target) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateTriskelion,
+        .card = CardId::Triskelion,
+        .target = target};
+    action.source_permanent = triskelion;
+    return action;
+}
+
+PriorityAction PriorityAction::tap_land_for_mana(PermanentId land,
+                                                 int color_index) {
+    PriorityAction action{
+        .kind = PriorityActionKind::TapLandForMana};
+    action.source_permanent = land;
+    action.x_value = color_index;
+    return action;
+}
+
 PriorityAction
 PriorityAction::activate_millstone(PermanentId millstone,
                                    Target mill_target) {
@@ -1612,7 +2008,8 @@ legal_priority_actions(const GameState& state, std::size_t player,
             const ManaCost& seen = cost_memo[entry].cost;
             if (seen.generic == cost.generic &&
                 seen.green == cost.green && seen.red == cost.red &&
-                seen.blue == cost.blue && seen.white == cost.white) {
+                seen.blue == cost.blue && seen.white == cost.white &&
+                seen.black == cost.black) {
                 return cost_memo[entry].payable;
             }
         }
@@ -1689,6 +2086,76 @@ legal_priority_actions(const GameState& state, std::size_t player,
                                 Target::creature_target(
                                     controller, creature.id)));
                     }
+                }
+            }
+        }
+        if (has_card(player_state.hand, CardId::Fireball)) {
+            for (int x_value = 0;
+                 x_value <= maximum_available_mana(player_state) &&
+                 can_pay(player_state, fireball_cost(x_value));
+                 ++x_value) {
+                for (std::size_t controller = 0;
+                     controller < state.players.size();
+                     ++controller) {
+                    actions.push_back(PriorityAction::cast_fireball(
+                        x_value,
+                        Target::player_target(controller)));
+                    for (const auto& creature :
+                         state.players[controller].creatures) {
+                        actions.push_back(
+                            PriorityAction::cast_fireball(
+                                x_value,
+                                Target::creature_target(
+                                    controller, creature.id)));
+                    }
+                }
+            }
+        }
+        if (has_card(player_state.hand, CardId::MindTwist)) {
+            for (int x_value = 1;
+                 x_value <= maximum_available_mana(player_state) &&
+                 can_pay(player_state, mind_twist_cost(x_value));
+                 ++x_value) {
+                actions.push_back(PriorityAction::cast_mind_twist(
+                    x_value, opponent_of(player)));
+            }
+        }
+        if (has_card(player_state.hand, CardId::Recall)) {
+            const int recall_limit = static_cast<int>(
+                std::min(player_state.hand.size() - 1,
+                         player_state.graveyard.size()));
+            for (int x_value = 1;
+                 x_value <= recall_limit &&
+                 x_value <= maximum_available_mana(player_state) &&
+                 can_pay(player_state, recall_cost(x_value));
+                 ++x_value) {
+                actions.push_back(
+                    PriorityAction::cast_recall(x_value));
+            }
+        }
+        if (has_card(player_state.hand, CardId::DemonicTutor) &&
+            can_pay_memo(
+                card_definition(CardId::DemonicTutor).cost)) {
+            std::vector<CardId> seen;
+            for (const CardId card : player_state.library) {
+                if (std::find(seen.begin(), seen.end(), card) ==
+                    seen.end()) {
+                    seen.push_back(card);
+                    actions.push_back(
+                        PriorityAction::cast_demonic_tutor(card));
+                }
+            }
+        }
+        if (has_card(player_state.hand, CardId::CopyArtifact) &&
+            can_pay_memo(
+                card_definition(CardId::CopyArtifact).cost)) {
+            for (std::size_t owner = 0;
+                 owner < state.players.size(); ++owner) {
+                for (const auto& artifact :
+                     state.players[owner].artifacts) {
+                    actions.push_back(
+                        PriorityAction::cast_copy_artifact(
+                            owner, artifact.id));
                 }
             }
         }
@@ -1811,6 +2278,17 @@ legal_priority_actions(const GameState& state, std::size_t player,
         }
     }
 
+    const auto& mana_drain = card_definition(CardId::ManaDrain);
+    if (has_card(player_state.hand, CardId::ManaDrain) &&
+        can_pay_memo(mana_drain.cost)) {
+        for (const auto& spell : state.stack) {
+            if (spell.kind == StackObjectKind::Spell) {
+                actions.push_back(
+                    PriorityAction::cast_mana_drain(spell.id));
+            }
+        }
+    }
+
     const auto& force_spike =
         card_definition(CardId::ForceSpike);
     if (has_card(player_state.hand, CardId::ForceSpike) &&
@@ -1863,9 +2341,37 @@ legal_priority_actions(const GameState& state, std::size_t player,
             }
         }
     }
+    for (const auto& sage : player_state.creatures) {
+        if (sage.card != CardId::SageOfLatNam || sage.tapped ||
+            sage.summoning_sick) {
+            continue;
+        }
+        for (const auto& artifact : player_state.artifacts) {
+            actions.push_back(PriorityAction::activate_sage(
+                sage.id, artifact.id));
+        }
+    }
+    for (const auto& trike : player_state.creatures) {
+        if (trike.card != CardId::Triskelion ||
+            trike.plus_counters <= 0) {
+            continue;
+        }
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            actions.push_back(PriorityAction::activate_triskelion(
+                trike.id, Target::player_target(owner)));
+            for (const auto& creature :
+                 state.players[owner].creatures) {
+                actions.push_back(
+                    PriorityAction::activate_triskelion(
+                        trike.id, Target::creature_target(
+                                      owner, creature.id)));
+            }
+        }
+    }
     if (can_pay_memo(kMillstoneActivationCost)) {
         for (const auto& artifact : player_state.artifacts) {
-            if (artifact.card != CardId::Millstone ||
+            if (artifact_face(artifact) != CardId::Millstone ||
                 artifact.tapped) {
                 continue;
             }
@@ -1883,10 +2389,14 @@ legal_priority_actions(const GameState& state, std::size_t player,
 bool apply_priority_action(GameState& state, std::size_t player,
                            const PriorityAction& action,
                            bool sorcery_actions) {
-    const auto actions =
-        legal_priority_actions(state, player, sorcery_actions);
-    if (!contains_action(actions, action)) {
-        return false;
+    // Human-only manual mana taps are injected by the game loop, not
+    // enumerated; their apply case below fully validates them.
+    if (action.kind != PriorityActionKind::TapLandForMana) {
+        const auto actions =
+            legal_priority_actions(state, player, sorcery_actions);
+        if (!contains_action(actions, action)) {
+            return false;
+        }
     }
 
     auto& player_state = state.players[player];
@@ -2152,6 +2662,179 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::CastManaDrain: {
+        const auto& definition = card_definition(CardId::ManaDrain);
+        if (!action.spell_target.has_value() ||
+            !pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, CardId::ManaDrain)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::ManaDrain,
+            .controller = player,
+            .spell_target = action.spell_target,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastFireball: {
+        if (!action.target.has_value() ||
+            !pay_mana(player_state, fireball_cost(action.x_value)) ||
+            !remove_card(player_state.hand, CardId::Fireball)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::Fireball,
+            .controller = player,
+            .target = action.target,
+            .x_value = action.x_value,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastMindTwist: {
+        if (!action.target.has_value() ||
+            !pay_mana(player_state,
+                      mind_twist_cost(action.x_value)) ||
+            !remove_card(player_state.hand, CardId::MindTwist)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::MindTwist,
+            .controller = player,
+            .target = action.target,
+            .x_value = action.x_value,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastRecall: {
+        if (action.x_value < 1 ||
+            !pay_mana(player_state, recall_cost(action.x_value)) ||
+            !remove_card(player_state.hand, CardId::Recall)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::Recall,
+            .controller = player,
+            .x_value = action.x_value,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastDemonicTutor: {
+        const auto& definition =
+            card_definition(CardId::DemonicTutor);
+        if (!action.chosen_card.has_value() ||
+            !pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, CardId::DemonicTutor)) {
+            return false;
+        }
+        StackObject spell{
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::DemonicTutor,
+            .controller = player,
+        };
+        spell.chosen_card = action.chosen_card;
+        state.stack.push_back(spell);
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastCopyArtifact: {
+        const auto& definition =
+            card_definition(CardId::CopyArtifact);
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            !pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, CardId::CopyArtifact)) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::CopyArtifact,
+            .controller = player,
+            .target = action.target,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::ActivateSage: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        auto* sage =
+            find_creature(player_state, *action.source_permanent);
+        if (sage == nullptr || sage->card != CardId::SageOfLatNam ||
+            sage->tapped || sage->summoning_sick) {
+            return false;
+        }
+        bool sacrificed = false;
+        for (std::size_t index = 0;
+             index < player_state.artifacts.size(); ++index) {
+            if (player_state.artifacts[index].id ==
+                *action.target->creature) {
+                player_state.graveyard.push_back(
+                    player_state.artifacts[index].card);
+                player_state.artifacts.erase(
+                    player_state.artifacts.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+                sacrificed = true;
+                break;
+            }
+        }
+        if (!sacrificed) {
+            return false;
+        }
+        sage->tapped = true;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::SageOfLatNam,
+            .controller = player,
+        });
+        return true;
+    }
+
+    case PriorityActionKind::ActivateTriskelion: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value()) {
+            return false;
+        }
+        auto* trike =
+            find_creature(player_state, *action.source_permanent);
+        if (trike == nullptr || trike->card != CardId::Triskelion ||
+            trike->plus_counters <= 0) {
+            return false;
+        }
+        trike->plus_counters -= 1;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::Triskelion,
+            .controller = player,
+            .target = action.target,
+        });
+        return true;
+    }
+
     case PriorityActionKind::ActivateLibrary: {
         if (!action.source_permanent.has_value() ||
             player_state.hand.size() != 7) {
@@ -2251,7 +2934,7 @@ bool apply_priority_action(GameState& state, std::size_t player,
         auto* millstone =
             find_artifact(player_state, *action.source_permanent);
         if (millstone == nullptr || millstone->tapped ||
-            millstone->card != CardId::Millstone ||
+            artifact_face(*millstone) != CardId::Millstone ||
             !pay_mana(player_state, kMillstoneActivationCost)) {
             return false;
         }
@@ -2265,6 +2948,92 @@ bool apply_priority_action(GameState& state, std::size_t player,
             .spell_target = std::nullopt,
         });
         return true;
+    }
+
+    case PriorityActionKind::TapLandForMana: {
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        static constexpr std::array<int ManaCost::*, 6> kFaces = {
+            &ManaCost::generic, &ManaCost::green, &ManaCost::red,
+            &ManaCost::blue,    &ManaCost::white, &ManaCost::black,
+        };
+        if (action.x_value < 0 ||
+            action.x_value >= static_cast<int>(kFaces.size())) {
+            return false;
+        }
+        const auto face =
+            kFaces[static_cast<std::size_t>(action.x_value)];
+        const auto land = std::find_if(
+            player_state.lands.begin(), player_state.lands.end(),
+            [&](const LandPermanent& candidate) {
+                return candidate.id == *action.source_permanent;
+            });
+        if (land != player_state.lands.end()) {
+            if (land->tapped) {
+                return false;
+            }
+            if (action.x_value == 0) {
+                // City of Brass makes colored mana only.
+                if (land->card == CardId::CityOfBrass ||
+                    land_mana(land->card).generic <= 0) {
+                    return false;
+                }
+            } else if (!land_provides(land->card, face)) {
+                return false;
+            }
+            land->tapped = true;
+            if (land->card == CardId::CityOfBrass) {
+                player_state.life -= 1;
+            }
+            player_state.mana_pool.*face += 1;
+            return true;
+        }
+        const auto artifact = std::find_if(
+            player_state.artifacts.begin(),
+            player_state.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == *action.source_permanent;
+            });
+        if (artifact != player_state.artifacts.end()) {
+            if (artifact->tapped) {
+                return false;
+            }
+            const CardId artifact_card = artifact_face(*artifact);
+            if (artifact_card == CardId::FellwarStone) {
+                // Any single color, never colorless.
+                if (action.x_value == 0) {
+                    return false;
+                }
+                artifact->tapped = true;
+                player_state.mana_pool.*face += 1;
+                return true;
+            }
+            const int amount = artifact_mana(artifact_card).*face;
+            if (amount <= 0) {
+                return false;
+            }
+            artifact->tapped = true;
+            player_state.mana_pool.*face += amount;
+            return true;
+        }
+        const auto creature = std::find_if(
+            player_state.creatures.begin(),
+            player_state.creatures.end(),
+            [&](const CreaturePermanent& candidate) {
+                return candidate.id == *action.source_permanent;
+            });
+        if (creature != player_state.creatures.end()) {
+            if (creature->card != CardId::LlanowarElves ||
+                creature->tapped || creature->summoning_sick ||
+                face != &ManaCost::green) {
+                return false;
+            }
+            creature->tapped = true;
+            player_state.mana_pool.green += 1;
+            return true;
+        }
+        return false;
     }
     }
 
@@ -2332,6 +3101,40 @@ bool resolve_top_of_stack(
             }
             return true;  // already animated or gone: fizzle quietly
         }
+        if (spell.card == CardId::SageOfLatNam) {
+            auto& owner = state.players[spell.controller];
+            if (owner.library.empty()) {
+                state.failed_draw[spell.controller] = true;
+            } else {
+                owner.hand.push_back(owner.library.back());
+                owner.library.pop_back();
+                ++state.stats[spell.controller].cards_drawn;
+            }
+            return true;
+        }
+        if (spell.card == CardId::Triskelion) {
+            if (!spell.target.has_value()) {
+                return false;
+            }
+            if (!spell.target->creature.has_value()) {
+                state.players[spell.target->player].life -= 1;
+                state.stats[spell.controller].damage_to_opponent +=
+                    spell.target->player ==
+                            opponent_of(spell.controller)
+                        ? 1
+                        : 0;
+                return true;
+            }
+            auto& owner = state.players[spell.target->player];
+            auto* creature =
+                find_creature(owner, *spell.target->creature);
+            if (creature == nullptr) {
+                return true;  // fizzles
+            }
+            creature->damage += 1;
+            remove_dead_creatures(owner);
+            return true;
+        }
         if (spell.card == CardId::StripMine) {
             if (!spell.target.has_value() ||
                 !spell.target->creature.has_value()) {
@@ -2361,6 +3164,9 @@ bool resolve_top_of_stack(
              .tapped = false,
              .summoning_sick = true,
              .damage = 0});
+        if (spell.card == CardId::Triskelion) {
+            controller.creatures.back().plus_counters = 3;
+        }
         return true;
     }
 
@@ -2372,7 +3178,8 @@ bool resolve_top_of_stack(
         return true;
     }
 
-    if (definition.type == CardType::Enchantment) {
+    if (definition.type == CardType::Enchantment &&
+        spell.card != CardId::CopyArtifact) {
         controller.enchantments.push_back(spell.card);
         return true;
     }
@@ -2648,6 +3455,176 @@ bool resolve_top_of_stack(
         return true;
     }
 
+    if (spell.card == CardId::ManaDrain) {
+        if (spell.spell_target.has_value()) {
+            const auto target = std::find_if(
+                state.stack.begin(), state.stack.end(),
+                [&](const StackObject& candidate) {
+                    return candidate.id == *spell.spell_target;
+                });
+            if (target != state.stack.end() &&
+                target->kind == StackObjectKind::Spell) {
+                // The countered spell's mana is owed at the caster's
+                // next turn (house timing for Mana Drain).
+                controller.pending_mana +=
+                    mana_total(
+                        card_definition(target->card).cost) +
+                    std::max(0, target->x_value);
+                state.players[target->controller]
+                    .graveyard.push_back(target->card);
+                state.stack.erase(target);
+                ++state.stats[spell.controller].spells_countered;
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::Fireball) {
+        controller.graveyard.push_back(spell.card);
+        if (!spell.target.has_value()) {
+            return false;
+        }
+        if (!spell.target->creature.has_value()) {
+            state.players[spell.target->player].life -=
+                spell.x_value;
+            state.stats[spell.controller].damage_to_opponent +=
+                spell.target->player == opponent_of(spell.controller)
+                    ? static_cast<std::size_t>(
+                          std::max(0, spell.x_value))
+                    : 0;
+            return true;
+        }
+        auto& owner = state.players[spell.target->player];
+        auto* creature =
+            find_creature(owner, *spell.target->creature);
+        if (creature == nullptr) {
+            return true;  // fizzles
+        }
+        creature->damage += spell.x_value;
+        remove_dead_creatures(owner);
+        return true;
+    }
+
+    if (spell.card == CardId::MindTwist) {
+        controller.graveyard.push_back(spell.card);
+        if (!spell.target.has_value()) {
+            return false;
+        }
+        auto& victim = state.players[spell.target->player];
+        for (int discard = 0;
+             discard < spell.x_value && !victim.hand.empty();
+             ++discard) {
+            victim.graveyard.push_back(victim.hand.front());
+            victim.hand.erase(victim.hand.begin());
+        }
+        return true;
+    }
+
+    if (spell.card == CardId::Recall) {
+        controller.graveyard.push_back(spell.card);
+        // House simplification: discard the first X cards of hand,
+        // then return the X most recent graveyard cards to hand.
+        for (int discard = 0;
+             discard < spell.x_value && !controller.hand.empty();
+             ++discard) {
+            controller.graveyard.push_back(controller.hand.front());
+            controller.hand.erase(controller.hand.begin());
+        }
+        for (int returned = 0;
+             returned < spell.x_value && !controller.graveyard.empty();
+             ++returned) {
+            controller.hand.push_back(controller.graveyard.back());
+            controller.graveyard.pop_back();
+        }
+        return true;
+    }
+
+    if (spell.card == CardId::DemonicTutor) {
+        controller.graveyard.push_back(spell.card);
+        if (spell.chosen_card.has_value()) {
+            const auto found = std::find(controller.library.begin(),
+                                         controller.library.end(),
+                                         *spell.chosen_card);
+            if (found != controller.library.end()) {
+                controller.hand.push_back(*found);
+                controller.library.erase(found);
+            }
+        }
+        return true;
+    }
+
+    if (spell.card == CardId::CopyArtifact) {
+        if (!spell.target.has_value() ||
+            !spell.target->creature.has_value()) {
+            return false;
+        }
+        const auto& owner = state.players[spell.target->player];
+        const ArtifactPermanent* original = nullptr;
+        for (const auto& artifact : owner.artifacts) {
+            if (artifact.id == *spell.target->creature) {
+                original = &artifact;
+                break;
+            }
+        }
+        if (original == nullptr) {
+            controller.graveyard.push_back(spell.card);
+            return true;  // fizzles
+        }
+        ArtifactPermanent copy{
+            .id = state.next_permanent_id++,
+            .card = CardId::CopyArtifact,
+            .tapped = false,
+        };
+        copy.copy_of = original->is_copy ? original->copy_of
+                                         : original->card;
+        copy.is_copy = true;
+        controller.artifacts.push_back(copy);
+        return true;
+    }
+
+    if (spell.card == CardId::Armageddon) {
+        for (auto& player_side : state.players) {
+            for (const auto& land : player_side.lands) {
+                player_side.graveyard.push_back(land.card);
+            }
+            player_side.lands.clear();
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::Timetwister) {
+        // House determinism: each player's hand and graveyard go under
+        // the library in fixed order, then both draw seven.
+        for (std::size_t seat = 0; seat < 2; ++seat) {
+            auto& twisted = state.players[seat];
+            std::vector<CardId> pile;
+            if (seat == spell.controller) {
+                // The spell itself returns to the shuffled pile too.
+                pile.push_back(CardId::Timetwister);
+            }
+            pile.insert(pile.end(), twisted.hand.begin(),
+                        twisted.hand.end());
+            pile.insert(pile.end(), twisted.graveyard.begin(),
+                        twisted.graveyard.end());
+            twisted.hand.clear();
+            twisted.graveyard.clear();
+            twisted.library.insert(twisted.library.begin(),
+                                   pile.begin(), pile.end());
+            for (int draw = 0; draw < 7; ++draw) {
+                if (twisted.library.empty()) {
+                    state.failed_draw[seat] = true;
+                    break;
+                }
+                twisted.hand.push_back(twisted.library.back());
+                twisted.library.pop_back();
+                ++state.stats[seat].cards_drawn;
+            }
+        }
+        return true;
+    }
+
     if (spell.card == CardId::Channel) {
         // Until end of turn the controller may pay life for mana; the
         // payment itself happens inside mana planning.
@@ -2858,9 +3835,10 @@ ManaCost pass_dominance_available_mana(
         if (artifact.tapped) {
             continue;
         }
-        if (artifact.card == CardId::MoxSapphire) {
+        const CardId face = artifact_face(artifact);
+        if (face == CardId::MoxSapphire) {
             ++available.blue;
-        } else if (artifact.card == CardId::SolRing) {
+        } else if (face == CardId::SolRing) {
             available.generic += 2;
         }
     }
@@ -3494,8 +4472,9 @@ bool default_mulligan_choice(const std::vector<CardId>& hand) {
         const auto& definition = card_definition(card);
         if (definition.type == CardType::Land ||
             card == CardId::MoxSapphire || card == CardId::MoxPearl ||
-            card == CardId::MoxRuby || card == CardId::SolRing ||
-            card == CardId::BlackLotus ||
+            card == CardId::MoxRuby || card == CardId::MoxEmerald ||
+            card == CardId::MoxJet || card == CardId::FellwarStone ||
+            card == CardId::SolRing || card == CardId::BlackLotus ||
             card == CardId::LlanowarElves) {
             ++sources;
         }
@@ -3526,8 +4505,9 @@ bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
     for (const CardId card : hand) {
         if (card_definition(card).type == CardType::Land ||
             card == CardId::MoxSapphire || card == CardId::MoxPearl ||
-            card == CardId::MoxRuby || card == CardId::SolRing ||
-            card == CardId::BlackLotus) {
+            card == CardId::MoxRuby || card == CardId::MoxEmerald ||
+            card == CardId::MoxJet || card == CardId::FellwarStone ||
+            card == CardId::SolRing || card == CardId::BlackLotus) {
             ++sources;
         }
     }
@@ -3545,6 +4525,12 @@ void begin_turn(GameState& state, std::size_t player) {
     }
     auto& player_state = state.players.at(player);
     player_state.land_played_this_turn = false;
+    // Mana Drain: the countered spell's mana arrives at this turn's
+    // beginning and lasts through the first main phase.
+    if (player_state.pending_mana > 0) {
+        player_state.mana_pool.generic += player_state.pending_mana;
+        player_state.pending_mana = 0;
+    }
     // Upkeep triggers, resolved deterministically at turn start:
     // each Serendib Efreet stings its controller; each opposing Black
     // Vise squeezes the active player for cards above four in hand.
@@ -3555,7 +4541,7 @@ void begin_turn(GameState& state, std::size_t player) {
     }
     const auto& opponent_state = state.players.at(opponent_of(player));
     for (const auto& artifact : opponent_state.artifacts) {
-        if (artifact.card == CardId::BlackVise) {
+        if (artifact_face(artifact) == CardId::BlackVise) {
             player_state.life -= std::max(
                 0, static_cast<int>(player_state.hand.size()) - 4);
         }
@@ -3696,6 +4682,7 @@ PlayerObservation observe_game_state(const GameState& state,
             .artifacts = source.artifacts,
             .enchantments = source.enchantments,
             .mana_pool = source.mana_pool,
+            .pending_mana = source.pending_mana,
             .land_played_this_turn = source.land_played_this_turn,
         };
     }
@@ -4007,9 +4994,77 @@ Game::continue_priority_window(bool sorcery_actions,
                                PriorityState priority) {
     const bool notify_observers = has_human_observer();
     while (true) {
-        const auto actions =
+        auto actions =
             legal_priority_actions(state_, priority.player,
                                    sorcery_actions);
+        const HumanController* controller =
+            human_controller(priority.player);
+        if (controller != nullptr && controller->offers_mana_taps) {
+            // Manual mana floating for the arena's human seat: one
+            // option per producible face of each untapped land. Bot
+            // seats and SPZ search never see these.
+            static constexpr std::array<int ManaCost::*, 6> kFaces = {
+                &ManaCost::generic, &ManaCost::green, &ManaCost::red,
+                &ManaCost::blue,    &ManaCost::white, &ManaCost::black,
+            };
+            for (const auto& land :
+                 state_.players[priority.player].lands) {
+                if (land.tapped) {
+                    continue;
+                }
+                if (land.card != CardId::CityOfBrass &&
+                    land_mana(land.card).generic > 0) {
+                    actions.push_back(
+                        PriorityAction::tap_land_for_mana(land.id, 0));
+                }
+                for (std::size_t face = 1; face < kFaces.size();
+                     ++face) {
+                    if (land_provides(land.card, kFaces[face])) {
+                        actions.push_back(
+                            PriorityAction::tap_land_for_mana(
+                                land.id, static_cast<int>(face)));
+                    }
+                }
+            }
+            for (const auto& artifact :
+                 state_.players[priority.player].artifacts) {
+                if (artifact.tapped) {
+                    continue;
+                }
+                const CardId artifact_card =
+                    artifact.is_copy ? artifact.copy_of
+                                     : artifact.card;
+                if (artifact_card == CardId::FellwarStone) {
+                    for (std::size_t face = 1; face < kFaces.size();
+                         ++face) {
+                        actions.push_back(
+                            PriorityAction::tap_land_for_mana(
+                                artifact.id,
+                                static_cast<int>(face)));
+                    }
+                    continue;
+                }
+                for (std::size_t face = 0; face < kFaces.size();
+                     ++face) {
+                    if (artifact_mana(artifact_card).*kFaces[face] >
+                        0) {
+                        actions.push_back(
+                            PriorityAction::tap_land_for_mana(
+                                artifact.id,
+                                static_cast<int>(face)));
+                    }
+                }
+            }
+            for (const auto& creature :
+                 state_.players[priority.player].creatures) {
+                if (creature.card == CardId::LlanowarElves &&
+                    !creature.tapped && !creature.summoning_sick) {
+                    actions.push_back(
+                        PriorityAction::tap_land_for_mana(
+                            creature.id, 1));
+                }
+            }
+        }
         const PriorityAction action =
             choose_priority_action(actions, priority.player,
                                    sorcery_actions, phase);
@@ -4231,6 +5286,86 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         potential_burn_damage(player_state) >= opponent_state.life;
 
     switch (action.kind) {
+    case PriorityActionKind::TapLandForMana:
+        // Human-only manual float; bots never receive it.
+        return -10'000.0;
+    case PriorityActionKind::CastManaDrain:
+        return 2'700.0;
+    case PriorityActionKind::CastFireball: {
+        if (action.target.has_value() &&
+            !action.target->creature.has_value() &&
+            action.target->player == opponent) {
+            if (action.x_value >= opponent_state.life) {
+                return 10'000.0;
+            }
+            return 900.0 + 40.0 * action.x_value;
+        }
+        if (action.target.has_value() &&
+            action.target->creature.has_value() &&
+            action.target->player == opponent) {
+            const auto* victim = find_creature(
+                state_.players[opponent], *action.target->creature);
+            if (victim != nullptr &&
+                creature_toughness(*victim) - victim->damage <=
+                    action.x_value) {
+                return 1'500.0 +
+                       handcrafted_card_value(victim->card) / 2.0 -
+                       60.0 * action.x_value;
+            }
+        }
+        return -500.0;
+    }
+    case PriorityActionKind::CastMindTwist:
+        return 700.0 +
+               180.0 * std::min<int>(
+                           action.x_value,
+                           static_cast<int>(
+                               state_.players[opponent].hand.size()));
+    case PriorityActionKind::CastRecall:
+        return 550.0;
+    case PriorityActionKind::CastDemonicTutor:
+        return 2'000.0 +
+               (action.chosen_card.has_value()
+                    ? handcrafted_card_value(*action.chosen_card) /
+                          2.0
+                    : 0.0);
+    case PriorityActionKind::CastCopyArtifact:
+        return 900.0;
+    case PriorityActionKind::ActivateSage: {
+        // A card is worth roughly a thousand points; sacrificing a
+        // better artifact than that is value destruction.
+        if (action.target.has_value() &&
+            action.target->creature.has_value()) {
+            for (const auto& artifact : player_state.artifacts) {
+                if (artifact.id == *action.target->creature) {
+                    return 1'000.0 -
+                           handcrafted_card_value(
+                               artifact_face(artifact));
+                }
+            }
+        }
+        return -500.0;
+    }
+    case PriorityActionKind::ActivateTriskelion: {
+        if (action.target.has_value() &&
+            action.target->creature.has_value() &&
+            action.target->player == opponent) {
+            const auto* victim = find_creature(
+                state_.players[opponent], *action.target->creature);
+            if (victim != nullptr &&
+                creature_toughness(*victim) - victim->damage <= 1) {
+                return 2'000.0 +
+                       handcrafted_card_value(victim->card) / 2.0;
+            }
+            return -300.0;
+        }
+        if (action.target.has_value() &&
+            action.target->player == opponent &&
+            state_.players[opponent].life <= 3) {
+            return 9'000.0;
+        }
+        return -200.0;
+    }
     case PriorityActionKind::Pass:
         if (!state_.stack.empty() &&
             state_.stack.back().controller == player) {
@@ -4316,6 +5451,41 @@ double Game::handcrafted_action_score(const PriorityAction& action,
                 return 9'800.0;
             }
             return -200.0;
+        }
+        if (action.card == CardId::Armageddon) {
+            // Worth casting only from ahead: rocks survive the wrath
+            // and a bigger board closes the game it stalls.
+            const auto rocks = [](const PlayerState& side) {
+                int count = 0;
+                for (const auto& artifact : side.artifacts) {
+                    const CardId face = artifact_face(artifact);
+                    if (mana_total(artifact_mana(face)) > 0 ||
+                        face == CardId::BlackLotus) {
+                        ++count;
+                    }
+                }
+                return count;
+            };
+            const auto board_power = [](const PlayerState& side) {
+                int total = 0;
+                for (const auto& creature : side.creatures) {
+                    total += creature_power(creature);
+                }
+                return total;
+            };
+            return -600.0 +
+                   500.0 * (rocks(player_state) -
+                            rocks(opponent_state)) +
+                   60.0 * (board_power(player_state) -
+                           board_power(opponent_state));
+        }
+        if (action.card == CardId::WheelOfFortune ||
+            action.card == CardId::Timetwister) {
+            // Refill spells: strong with a spent hand, waste with a
+            // full one. Count cards drawn beyond what is discarded.
+            const int kept =
+                static_cast<int>(player_state.hand.size()) - 1;
+            return 250.0 * (7 - kept) - 200.0;
         }
         const auto count_islands = [](const PlayerState& state) {
             return std::count_if(
@@ -5465,6 +6635,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return burn_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::Robots:
+        return robots_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -5480,13 +6652,13 @@ SimulationSummary run_simulation(std::size_t games, std::uint64_t seed,
 std::string_view deck_name(DeckId deck) {
     switch (deck) {
     case DeckId::Green:
-        return "Green";
+        return "Green Growth";
     case DeckId::Red:
-        return "Red";
+        return "Creatures & Bolts";
     case DeckId::Blue:
-        return "Blue";
+        return "Counter Flyer";
     case DeckId::White:
-        return "White";
+        return "Moat Mill";
     case DeckId::RUAggro:
         return "RU Aggro";
     case DeckId::LotusCombo:
@@ -5494,7 +6666,9 @@ std::string_view deck_name(DeckId deck) {
     case DeckId::Burn:
         return "Burn";
     case DeckId::UWR:
-        return "UWR Aggro";
+        return "Lion-dib-bolt";
+    case DeckId::Robots:
+        return "Robots";
     }
     return "Unknown";
 }
@@ -5516,22 +6690,34 @@ std::string_view deck_list(DeckId deck) {
     case DeckId::White:
         return "22 Plains / 3 Millstone / 15 Moat";
     case DeckId::RUAggro:
-        return "10 Mountain / 7 Island / 4 Flying Men / "
-               "4 Ironclaw Orcs / 3 Gray Ogre / 2 Hill Giant / "
-               "4 Lightning Bolt / 4 Force Spike / 2 Counterspell";
+        return "13 Mountain / 4 Island / 3 Flying Men / "
+               "5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / "
+               "3 Lightning Bolt / 2 Disintegrate";
     case DeckId::LotusCombo:
         return "20 Black Lotus / 10 Channel / 10 Disintegrate";
     case DeckId::Burn:
-        return "15 Mountain / 25 Lightning Bolt";
+        return "12 Mountain / 18 Lightning Bolt";
     case DeckId::UWR:
         return "4 Savannah Lions / 4 Serendib Efreet / 2 Serra Angel / "
                "4 Black Vise / Mox Pearl / Mox Ruby / Mox Sapphire / "
                "Sol Ring / Ancestral Recall / 4 Disenchant / "
                "8 Lightning Bolt / 4 Psionic Blast / "
                "3 Swords to Plowshares / Time Walk / "
-               "2 Wheel of Fortune / Library of Alexandria / "
+               "Wheel of Fortune / Timetwister / "
+               "Library of Alexandria / "
                "4 Mishra's Factory / 1 Plains / 4 Plateau / "
                "Strip Mine / 4 Tundra / 4 Volcanic Island";
+    case DeckId::Robots:
+        return "4 Su-Chi / 3 Sage of Lat-Nam / 3 Triskelion / "
+               "3 Counterspell / 4 Lightning Bolt / 2 Psionic Blast / "
+               "Ancestral Recall / Mana Drain / Armageddon / "
+               "Demonic Tutor / Fireball / Mind Twist / Recall / "
+               "Time Walk / Wheel of Fortune / 4 Copy Artifact / "
+               "Black Lotus / Fellwar Stone / Mox Emerald / Mox Jet / "
+               "Mox Pearl / Mox Ruby / Mox Sapphire / Sol Ring / "
+               "4 Mishra's Factory / 4 Tundra / 3 City of Brass / "
+               "3 Volcanic Island / 2 Underground Sea / Badlands / "
+               "Library of Alexandria / Strip Mine";
     }
     return "Unknown";
 }
@@ -5752,6 +6938,7 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::LotusCombo),
         deck_cards(DeckId::Burn),
         deck_cards(DeckId::UWR),
+        deck_cards(DeckId::Robots),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

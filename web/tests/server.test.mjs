@@ -135,7 +135,7 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   assert.equal(response.status, 200);
   assert.deepEqual(
     body.decks.map(({ id }) => id),
-    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr"],
+    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots"],
   );
   assert.match(
     body.decks.find(({ id }) => id === "blue").deckList,

@@ -523,6 +523,31 @@ const CARD_RULES_TEXT: Record<string, string> = {
     "{1}: Becomes a 2/2 artifact creature until end of turn (it can still tap for {1}).",
   "Strip Mine":
     "Tap: Add {1}. Or sacrifice Strip Mine: Destroy target land.",
+  "Su-Chi": "When Su-Chi dies, add {4} (house rule: kept as pool mana).",
+  "Sage of Lat-Nam":
+    "Tap, Sacrifice an artifact: Draw a card.",
+  Triskelion:
+    "Enters with three +1/+1 counters. Remove a +1/+1 counter: Triskelion deals 1 damage to any target.",
+  "Mana Drain":
+    "Counter target spell. At the beginning of your next main phase, add {1} for each mana in its cost.",
+  Armageddon: "Destroy all lands.",
+  "Demonic Tutor":
+    "Search your library for a card and put it into your hand.",
+  Fireball: "Fireball deals X damage to any target.",
+  "Mind Twist": "Target opponent discards X cards at random.",
+  Recall:
+    "Discard X cards, then return X cards from your graveyard to your hand.",
+  "Copy Artifact":
+    "Enters the battlefield as a copy of any artifact on the battlefield.",
+  "Fellwar Stone": "Tap: Add one mana of any color.",
+  "Mox Emerald": "Tap: Add {G}.",
+  "Mox Jet": "Tap: Add {B}.",
+  "City of Brass":
+    "Whenever City of Brass becomes tapped, it deals 1 damage to you. Tap: Add one mana of any color.",
+  "Underground Sea": "Tap: Add {U} or {B}.",
+  Badlands: "Tap: Add {B} or {R}.",
+  Timetwister:
+    "Each player shuffles their hand and graveyard into their library, then draws seven cards.",
 };
 
 function ManaCostPips({ card }: { card: Card }) {
@@ -539,6 +564,7 @@ function ManaCostPips({ card }: { card: Card }) {
   for (const [color, count] of [
     ["white", cost?.white ?? 0],
     ["blue", cost?.blue ?? 0],
+    ["black", cost?.black ?? 0],
     ["red", cost?.red ?? 0],
     ["green", cost?.green ?? 0],
   ] as Array<[string, number]>) {
@@ -1344,20 +1370,9 @@ function BattlefieldSide({
     <section
       className={`battlefield-side ${opponent ? "opponent-side" : "player-side"} ${
         active ? "is-active" : ""
-      } ${priorityPlayTarget ? "is-play-destination" : ""} ${
-        priorityPlayTarget && draggingPriority ? "is-drop-target" : ""
       }`}
       aria-label={`${playerLabel(snapshot, seat)} battlefield`}
       data-arrow-player={seat}
-      data-priority-play-target={priorityPlayTarget || undefined}
-      onClick={(event) => {
-        if (!priorityPlayTarget) return;
-        const target = event.target as HTMLElement;
-        if (target.closest("button")) return;
-        onChoosePriorityPlay?.();
-      }}
-      onDragOver={(event) => onPriorityDragOver?.("play", event)}
-      onDrop={(event) => onPriorityDrop?.("play", event)}
     >
       {opponent && (
         <div className="opponent-hand-space">
@@ -1448,11 +1463,6 @@ function BattlefieldSide({
           onDragOverTarget={onBlockDragOver}
           onDropTarget={onBlockDrop}
         />
-        {nonlands.length === 0 &&
-          combatAttackers.length === 0 &&
-          (player.lands ?? []).length === 0 && (
-          <span className="open-ground">Open battlefield</span>
-          )}
       </div>
     </section>
   );
@@ -1569,6 +1579,8 @@ function StackRail({
   onPriorityDrop,
   onPass,
   passBusy,
+  respondToOwnSpells,
+  onToggleRespondToOwnSpells,
 }: {
   stack: StackEntry[];
   observerSeat: PlayerIndex;
@@ -1586,6 +1598,8 @@ function StackRail({
   ) => void;
   onPass?: () => void;
   passBusy?: boolean;
+  respondToOwnSpells?: boolean;
+  onToggleRespondToOwnSpells?: () => void;
 }) {
   return (
     <aside
@@ -1696,6 +1710,16 @@ function StackRail({
         >
           Pass priority
         </button>
+      )}
+      {onToggleRespondToOwnSpells && (
+        <label className="stack-respond-toggle">
+          <input
+            type="checkbox"
+            checked={Boolean(respondToOwnSpells)}
+            onChange={onToggleRespondToOwnSpells}
+          />
+          Respond to own spells/abilities
+        </label>
       )}
     </aside>
   );
@@ -3561,6 +3585,32 @@ export default function App() {
   const [selectedBlockerId, setSelectedBlockerId] = useState<string | null>(
     null,
   );
+  const [respondToOwnSpells, setRespondToOwnSpells] = useState<boolean>(
+    () => {
+      try {
+        return (
+          window.localStorage.getItem("arena-respond-own-spells") === "1"
+        );
+      } catch {
+        return false;
+      }
+    },
+  );
+  const toggleRespondToOwnSpells = () => {
+    setRespondToOwnSpells((previous) => {
+      const next = !previous;
+      try {
+        window.localStorage.setItem(
+          "arena-respond-own-spells",
+          next ? "1" : "0",
+        );
+      } catch {
+        // Private-mode storage failures just lose persistence.
+      }
+      return next;
+    });
+  };
+  const autoSubmittedOwnSpellPass = useRef<string | null>(null);
   const [autoAdvanceFailedDecision, setAutoAdvanceFailedDecision] = useState<
     string | null
   >(null);
@@ -3810,6 +3860,47 @@ export default function App() {
       () => setAutoAdvanceFailedDecision(decisionKey),
     );
   }, [act, acting, autoAdvanceFailedDecision, snapshot]);
+
+  // Your own spell or ability sits on top of the stack: pass priority
+  // back automatically so it resolves without a click, unless the
+  // player opted into responding to their own plays.
+  useEffect(() => {
+    const decision = snapshot?.decision;
+    const seat = currentConfig?.players.findIndex(
+      (player) => player.policyId === "human",
+    );
+    if (
+      snapshot?.status !== "playing" ||
+      decision?.kind !== "priority" ||
+      respondToOwnSpells ||
+      currentConfig?.bluffMode ||
+      acting
+    )
+      return;
+    const stack = snapshot.state?.stack ?? [];
+    if (stack.length === 0) return;
+    const top = stack[stack.length - 1];
+    if (top?.controller === undefined || top.controller !== seat) return;
+    const pass = decision.options.find(
+      (option) => option.kind === "pass",
+    );
+    if (!pass) return;
+    const decisionKey = `${snapshot.id}:${String(decision.decisionId)}`;
+    if (autoAdvanceFailedDecision === decisionKey) return;
+    if (autoSubmittedOwnSpellPass.current === decisionKey) return;
+    autoSubmittedOwnSpellPass.current = decisionKey;
+    act(
+      { decisionId: decision.decisionId, index: pass.index },
+      () => setAutoAdvanceFailedDecision(decisionKey),
+    );
+  }, [
+    act,
+    acting,
+    autoAdvanceFailedDecision,
+    currentConfig,
+    respondToOwnSpells,
+    snapshot,
+  ]);
 
   useEffect(() => {
     if (
@@ -4219,6 +4310,11 @@ export default function App() {
       destinations.has("play")
     ) {
       submitPriorityOption(options[0]);
+    } else if (options.length > 1) {
+      // A land or artifact with several modes (tap for a mana face,
+      // animate, activate an ability): open the chooser right away
+      // instead of waiting for a second click on the play area.
+      setPendingPriorityOptions(options);
     }
   };
   const startPriorityPermanentDrag = (
@@ -4384,7 +4480,28 @@ export default function App() {
       }
     >
               <TargetArrows snapshot={snapshot} />
-              <div className="battlefield">
+              <div
+                className={`battlefield ${
+                  priorityPlayOptions.length > 0 ? "is-play-destination" : ""
+                } ${
+                  priorityPlayOptions.length > 0 && draggedPriorityOrigin
+                    ? "is-drop-target"
+                    : ""
+                }`}
+                data-priority-play-target={
+                  priorityPlayOptions.length > 0 || undefined
+                }
+                onClick={(event) => {
+                  if (priorityPlayOptions.length === 0) return;
+                  const target = event.target as HTMLElement;
+                  if (target.closest("button")) return;
+                  choosePriorityDestination("play");
+                }}
+                onDragOver={(event) =>
+                  dragOverPriorityDestination("play", event)
+                }
+                onDrop={(event) => dropPriorityDestination("play", event)}
+              >
                 <BattlefieldSide
                   player={state.players[farSeat]}
                   seat={farSeat}
@@ -4577,6 +4694,8 @@ export default function App() {
                   : undefined
               }
               passBusy={acting}
+              respondToOwnSpells={respondToOwnSpells}
+              onToggleRespondToOwnSpells={toggleRespondToOwnSpells}
             />
           </div>
           {acting && snapshot.status === "playing" ? (

@@ -214,6 +214,25 @@ std::string action_name(const PlayerObservation& observation,
     switch (action.kind) {
     case PriorityActionKind::Pass:
         return "Pass priority";
+    case PriorityActionKind::CastManaDrain:
+        return "Cast Mana Drain targeting a stack spell";
+    case PriorityActionKind::CastFireball:
+        return "Cast " + card + " (X=" +
+               std::to_string(action.x_value) + ")";
+    case PriorityActionKind::CastMindTwist:
+        return "Cast Mind Twist (X=" +
+               std::to_string(action.x_value) + ")";
+    case PriorityActionKind::CastRecall:
+        return "Cast Recall (X=" +
+               std::to_string(action.x_value) + ")";
+    case PriorityActionKind::CastDemonicTutor:
+        return "Cast Demonic Tutor";
+    case PriorityActionKind::CastCopyArtifact:
+        return "Cast Copy Artifact";
+    case PriorityActionKind::ActivateSage:
+        return "Activate Sage of Lat-Nam";
+    case PriorityActionKind::ActivateTriskelion:
+        return "Activate Triskelion";
     case PriorityActionKind::CastPsionicBlast:
     case PriorityActionKind::CastSwordsToPlowshares:
     case PriorityActionKind::CastDisenchant:
@@ -242,6 +261,17 @@ std::string action_name(const PlayerObservation& observation,
     case PriorityActionKind::CastArtifact:
     case PriorityActionKind::CastEnchantment:
         return "Cast " + card;
+    case PriorityActionKind::TapLandForMana: {
+        static constexpr std::array<const char*, 6> kFaceNames = {
+            "{1}", "{G}", "{R}", "{U}", "{W}", "{B}",
+        };
+        const int face = action.x_value >= 0 && action.x_value < 6
+                             ? action.x_value
+                             : 0;
+        return "Tap land #" +
+               std::to_string(action.source_permanent.value_or(0)) +
+               " for " + kFaceNames[static_cast<std::size_t>(face)];
+    }
     case PriorityActionKind::CastLightningBolt:
     case PriorityActionKind::CastGiantGrowth:
     case PriorityActionKind::CastAncestralRecall:
@@ -1438,6 +1468,8 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return burn_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::Robots:
+        return robots_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

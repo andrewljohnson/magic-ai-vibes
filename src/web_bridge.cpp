@@ -45,6 +45,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return burn_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::Robots:
+        return robots_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -95,6 +97,8 @@ std::string_view deck_id_token(DeckId deck) {
         return "burn";
     case DeckId::UWR:
         return "uwr";
+    case DeckId::Robots:
+        return "robots";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -205,6 +209,24 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "cast_braingeyser";
     case PriorityActionKind::CastForceSpike:
         return "cast_force_spike";
+    case PriorityActionKind::CastManaDrain:
+        return "cast_mana_drain";
+    case PriorityActionKind::CastFireball:
+        return "cast_fireball";
+    case PriorityActionKind::CastMindTwist:
+        return "cast_mind_twist";
+    case PriorityActionKind::CastRecall:
+        return "cast_recall";
+    case PriorityActionKind::CastDemonicTutor:
+        return "cast_demonic_tutor";
+    case PriorityActionKind::CastCopyArtifact:
+        return "cast_copy_artifact";
+    case PriorityActionKind::ActivateSage:
+        return "activate_sage";
+    case PriorityActionKind::TapLandForMana:
+        return "tap_land_for_mana";
+    case PriorityActionKind::ActivateTriskelion:
+        return "activate_triskelion";
     case PriorityActionKind::ActivateMillstone:
         return "activate_millstone";
     case PriorityActionKind::CastPsionicBlast:
@@ -321,7 +343,8 @@ void write_mana(std::ostream& output, const ManaCost& mana) {
            << ",\"green\":" << mana.green
            << ",\"red\":" << mana.red
            << ",\"blue\":" << mana.blue
-           << ",\"white\":" << mana.white << '}';
+           << ",\"white\":" << mana.white
+           << ",\"black\":" << mana.black << '}';
 }
 
 std::string mana_label(const ManaCost& mana) {
@@ -333,6 +356,7 @@ std::string mana_label(const ManaCost& mana) {
     result.append(static_cast<std::size_t>(mana.red), 'R');
     result.append(static_cast<std::size_t>(mana.blue), 'U');
     result.append(static_cast<std::size_t>(mana.white), 'W');
+    result.append(static_cast<std::size_t>(mana.black), 'B');
     return result;
 }
 
@@ -420,6 +444,42 @@ std::string action_label(const PlayerObservation& observation,
                          const PriorityAction& action) {
     if (action.kind == PriorityActionKind::Pass) {
         return "Pass priority";
+    }
+    if (action.kind == PriorityActionKind::TapLandForMana) {
+        static constexpr std::array<const char*, 6> kFaceNames = {
+            "{1}", "{G}", "{R}", "{U}", "{W}", "{B}",
+        };
+        const int face = action.x_value >= 0 && action.x_value < 6
+                             ? action.x_value
+                             : 0;
+        std::string source_name = "permanent";
+        const auto& mine =
+            observation.players[observation.observer];
+        if (action.source_permanent.has_value()) {
+            for (const auto& land : mine.lands) {
+                if (land.id == *action.source_permanent) {
+                    source_name = std::string(
+                        card_definition(land.card).name);
+                }
+            }
+            for (const auto& artifact : mine.artifacts) {
+                if (artifact.id == *action.source_permanent) {
+                    source_name = std::string(
+                        card_definition(artifact.is_copy
+                                            ? artifact.copy_of
+                                            : artifact.card)
+                            .name);
+                }
+            }
+            for (const auto& creature : mine.creatures) {
+                if (creature.id == *action.source_permanent) {
+                    source_name = std::string(
+                        card_definition(creature.card).name);
+                }
+            }
+        }
+        return "Tap " + source_name + " for " +
+               kFaceNames[static_cast<std::size_t>(face)];
     }
     const std::string card(card_definition(action.card).name);
     const bool activation =
@@ -513,10 +573,13 @@ void write_creature(std::ostream& output,
            << (creature.summoning_sick ? "true" : "false")
            << ",\"damage\":" << creature.damage
            << ",\"power\":"
-           << definition.power + creature.temporary_power_bonus
+           << definition.power + creature.temporary_power_bonus +
+                  creature.plus_counters
            << ",\"toughness\":"
            << definition.toughness +
-                  creature.temporary_toughness_bonus
+                  creature.temporary_toughness_bonus +
+                  creature.plus_counters
+           << ",\"plusCounters\":" << creature.plus_counters
            << '}';
 }
 
@@ -525,6 +588,10 @@ void write_artifact(std::ostream& output,
     output << "{\"permanentId\":" << artifact.id
            << ",\"card\":";
     write_card(output, artifact.card);
+    if (artifact.is_copy) {
+        output << ",\"copyOf\":";
+        write_card(output, artifact.copy_of);
+    }
     output << ",\"tapped\":"
            << (artifact.tapped ? "true" : "false") << '}';
 }
@@ -874,6 +941,7 @@ class JsonController {
                 },
             .reveal_opponent_hand = reveal_opponent_hand_,
             .bluff_mode = bluff_mode_,
+            .offers_mana_taps = true,
         };
     }
 
@@ -1342,6 +1410,9 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "ru-aggro" || value == "ru") {
         return DeckId::RUAggro;
+    }
+    if (value == "robots") {
+        return DeckId::Robots;
     }
     if (value == "lotus-combo" || value == "lotus") {
         return DeckId::LotusCombo;

@@ -15,8 +15,8 @@ struct InteractiveMatchResult {
 };
 
 struct InteractiveMatchup {
-    DeckId human_deck = DeckId::RUAggro;
-    DeckId opponent_deck = DeckId::RUAggro;
+    DeckId human_deck = DeckId::UWR;
+    DeckId opponent_deck = DeckId::UWR;
 
     bool operator==(const InteractiveMatchup&) const = default;
 };

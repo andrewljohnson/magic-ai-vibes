@@ -94,7 +94,8 @@ void subtract_public_zones(CardCountArray& counts,
 }
 
 int mana_pool_total(const ManaCost& pool) {
-    return pool.generic + pool.green + pool.red + pool.blue + pool.white;
+    return pool.generic + pool.green + pool.red + pool.blue + pool.white +
+           pool.black;
 }
 
 void append_player_scalars(std::vector<float>& features,
@@ -126,11 +127,13 @@ void append_player_scalars(std::vector<float>& features,
     std::size_t ready_creatures = 0;
     for (const auto& creature : player.creatures) {
         const auto& definition = card_definition(creature.card);
-        const int creature_power =
-            definition.power + creature.temporary_power_bonus;
+        const int creature_power = definition.power +
+                                   creature.temporary_power_bonus +
+                                   creature.plus_counters;
         power += creature_power;
-        toughness +=
-            definition.toughness + creature.temporary_toughness_bonus;
+        toughness += definition.toughness +
+                     creature.temporary_toughness_bonus +
+                     creature.plus_counters;
         damage += creature.damage;
         bonus_power += creature.temporary_power_bonus;
         if (!creature.tapped) {
@@ -175,10 +178,11 @@ constexpr std::size_t kCardBlockCount = 11;
 
 std::size_t spz_feature_count_colors() {
     // v1 plus, per player: untapped basic lands by color (4), the
-    // floating mana pool by color (4), and how much of the board is
+    // floating mana pool by color (5), Mana Drain's pending generic
+    // mana, and how much of the board is
     // temporary (expiring creature forms and pump totals) — so the net
     // can tell phantom presence from lasting presence.
-    return spz_feature_count() + 2 * 10;
+    return spz_feature_count() + 2 * 12;
 }
 
 std::vector<float> spz_features_colors(
@@ -211,6 +215,8 @@ std::vector<float> spz_features_colors(
         features.push_back(state.mana_pool.red / 4.0f);
         features.push_back(state.mana_pool.blue / 4.0f);
         features.push_back(state.mana_pool.white / 4.0f);
+        features.push_back(state.mana_pool.black / 4.0f);
+        features.push_back(state.pending_mana / 4.0f);
         // Impermanence: creature forms that revert at cleanup (a card
         // whose printed type is not Creature is an animated permanent)
         // and until-end-of-turn pump on real creatures.
@@ -237,14 +243,16 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
         ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
+        robots_deck(),
     };
     return decks;
 }
 
 std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
-        "Green", "Red", "Blue", "White", "RU Aggro", "Lotus Combo",
-        "Burn", "UWR Aggro",
+        "Green Growth", "Creatures & Bolts", "Counter Flyer",
+        "Moat Mill", "RU Aggro", "Lotus Combo", "Burn",
+        "Lion-dib-bolt", "Robots",
     };
     return names.at(deck_index);
 }
@@ -362,12 +370,12 @@ constexpr std::size_t kRaceFeatures = 10;
 
 int creature_current_power(const CreaturePermanent& creature) {
     return card_definition(creature.card).power +
-           creature.temporary_power_bonus;
+           creature.temporary_power_bonus + creature.plus_counters;
 }
 
 int creature_current_toughness(const CreaturePermanent& creature) {
     return card_definition(creature.card).toughness +
-           creature.temporary_toughness_bonus;
+           creature.temporary_toughness_bonus + creature.plus_counters;
 }
 
 void append_creature_slots_range(std::vector<float>& features,
@@ -443,12 +451,12 @@ void append_creature_slots_range(std::vector<float>& features,
 // give their color, Mox Sapphire blue, Sol Ring two generic. Colored costs
 // draw from matching producers first, generic from what remains.
 struct ManaAvailable {
-    int green = 0, red = 0, blue = 0, white = 0, generic = 0;
+    int green = 0, red = 0, blue = 0, white = 0, black = 0, generic = 0;
     // Mana usable as any single color (Black Lotus, Channel life).
     int wild = 0;
 
     int total() const {
-        return green + red + blue + white + generic + wild;
+        return green + red + blue + white + black + generic + wild;
     }
 };
 
@@ -466,6 +474,9 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
             case CardId::Plateau:
             case CardId::Tundra:
             case CardId::VolcanicIsland:
+            case CardId::UndergroundSea:
+            case CardId::Badlands:
+            case CardId::CityOfBrass:
                 mana.wild += 1;
                 break;
             default: mana.generic += 1; break;
@@ -475,15 +486,23 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
         if (artifact.tapped) {
             continue;
         }
-        if (artifact.card == CardId::MoxSapphire) {
+        const CardId face =
+            artifact.is_copy ? artifact.copy_of : artifact.card;
+        if (face == CardId::MoxSapphire) {
             mana.blue += 1;
-        } else if (artifact.card == CardId::MoxPearl) {
+        } else if (face == CardId::MoxPearl) {
             mana.white += 1;
-        } else if (artifact.card == CardId::MoxRuby) {
+        } else if (face == CardId::MoxRuby) {
             mana.red += 1;
-        } else if (artifact.card == CardId::SolRing) {
+        } else if (face == CardId::SolRing) {
             mana.generic += 2;
-        } else if (artifact.card == CardId::BlackLotus) {
+        } else if (face == CardId::MoxEmerald) {
+            mana.green += 1;
+        } else if (face == CardId::MoxJet) {
+            mana.black += 1;
+        } else if (face == CardId::FellwarStone) {
+            mana.wild += 1;
+        } else if (face == CardId::BlackLotus) {
             mana.wild += 3;
         }
     }
@@ -500,6 +519,7 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
     mana.red += player.mana_pool.red;
     mana.blue += player.mana_pool.blue;
     mana.white += player.mana_pool.white;
+    mana.black += player.mana_pool.black;
     mana.generic += player.mana_pool.generic;
     return mana;
 }
@@ -522,11 +542,12 @@ bool roughly_castable(const CardDefinition& definition,
     if (shortfall(mana.green, cost.green) ||
         shortfall(mana.red, cost.red) ||
         shortfall(mana.blue, cost.blue) ||
-        shortfall(mana.white, cost.white)) {
+        shortfall(mana.white, cost.white) ||
+        shortfall(mana.black, cost.black)) {
         return false;
     }
     const int leftover = mana.total() - cost.green - cost.red -
-                         cost.blue - cost.white;
+                         cost.blue - cost.white - cost.black;
     return leftover >= cost.generic;
 }
 
@@ -835,6 +856,7 @@ GameState reconstruct_observed_state(const PlayerObservation& observation) {
         reconstructed.artifacts = public_state.artifacts;
         reconstructed.enchantments = public_state.enchantments;
         reconstructed.mana_pool = public_state.mana_pool;
+        reconstructed.pending_mana = public_state.pending_mana;
         reconstructed.land_played_this_turn =
             public_state.land_played_this_turn;
         reconstructed.channel_active = public_state.channel_active;
@@ -1372,8 +1394,10 @@ SpzNet load_spz_net(const std::string& path) {
 std::size_t spz_action_feature_count() {
     // kind one-hot + card one-hot + target class (none/self/opponent
     // player, own/enemy creature) + target creature card + countered spell
-    // card + x scale + source-permanent flag.
-    return 20 + kCardCount + 5 + kCardCount + kCardCount + 1 + 1;
+    // card + chosen card (tutor/copy choice) + x scale +
+    // source-permanent flag.
+    return 29 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
+           1 + 1;
 }
 
 std::vector<float> spz_action_features(const PriorityAction& action,
@@ -1382,7 +1406,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 20;
+    offset += 29;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {
@@ -1415,6 +1439,11 @@ std::vector<float> spz_action_features(const PriorityAction& action,
                 break;
             }
         }
+    }
+    offset += kCardCount;
+    if (action.chosen_card.has_value()) {
+        features[offset + static_cast<std::size_t>(*action.chosen_card)] =
+            1.0f;
     }
     offset += kCardCount;
     features[offset] = static_cast<float>(action.x_value) / 4.0f;
@@ -2165,6 +2194,7 @@ struct SpzAgent {
                 other->tapped != creature.tapped ||
                 other->summoning_sick != creature.summoning_sick ||
                 other->damage != creature.damage ||
+                other->plus_counters != creature.plus_counters ||
                 other->exile_on_death_this_turn !=
                     creature.exile_on_death_this_turn) {
                 return false;
@@ -2224,6 +2254,7 @@ struct SpzAgent {
             counted(acted_opponent.enchantments) !=
                 counted(passed_opponent.enchantments) ||
             acted_opponent.mana_pool != passed_opponent.mana_pool ||
+            acted_opponent.pending_mana != passed_opponent.pending_mana ||
             acted_opponent.land_played_this_turn !=
                 passed_opponent.land_played_this_turn ||
             !same_permanents_allowing_extra_taps(
@@ -2249,6 +2280,7 @@ struct SpzAgent {
                multiset_subset(counted(passed_self.graveyard),
                                counted(acted_self.graveyard)) &&
                mana_leq(acted_self.mana_pool, passed_self.mana_pool) &&
+               acted_self.pending_mana <= passed_self.pending_mana &&
                same_permanents_allowing_extra_taps(
                    acted_self.lands, passed_self.lands, true) &&
                same_permanents_allowing_extra_taps(
@@ -2290,7 +2322,8 @@ struct SpzAgent {
             if (other == nullptr || other->card != creature.card ||
                 other->tapped != creature.tapped ||
                 other->summoning_sick != creature.summoning_sick ||
-                other->damage != creature.damage) {
+                other->damage != creature.damage ||
+                other->plus_counters != creature.plus_counters) {
                 return false;
             }
             if (creature.temporary_power_bonus <

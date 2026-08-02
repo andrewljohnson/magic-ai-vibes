@@ -30,7 +30,7 @@ if (args.includes("--evolve-json")) {
   }
 
   const generations = Number(valueAfter("--generations", "3"));
-  const population = Number(valueAfter("--population", "8"));
+  const population = Number(valueAfter("--population", "9"));
   const gamesPerOpponent = Number(valueAfter("--games", "1"));
   const cardIds = Array.from(
     { length: 40 },
@@ -38,14 +38,15 @@ if (args.includes("--evolve-json")) {
   );
   if (args.includes("--evolution-invalid")) cardIds[0] = 1;
   const opponentDecks = [
-    ["green", "Green"],
-    ["red", "Red"],
-    ["blue", "Blue"],
-    ["white", "White"],
+    ["green", "Green Growth"],
+    ["red", "Creatures & Bolts"],
+    ["blue", "Counter Flyer"],
+    ["white", "Moat Mill"],
     ["ru-aggro", "RU Aggro"],
     ["lotus-combo", "Lotus Combo"],
     ["burn", "Burn"],
-    ["uwr", "UWR Aggro"],
+    ["uwr", "Lion-dib-bolt"],
+    ["robots", "Robots"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {
