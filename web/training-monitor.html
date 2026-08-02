@@ -56,7 +56,7 @@
   <p class="sub" id="status">Waiting for telemetry…</p>
   <div class="tiles">
     <div class="tile"><div class="k">Iterations · games</div><div class="v" id="t-iter">–</div><div class="lift" id="t-games"></div></div>
-    <div class="tile"><div class="k">vs Deep MC</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
+    <div class="tile"><div class="k">vs Handcrafted</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
     <div class="tile"><div class="k">Mean deck lift</div><div class="v" id="t-lift">–</div><div class="lift">bot pilot vs Handcrafted pilot</div></div>
   </div>
 
@@ -65,7 +65,7 @@
     <p class="desc">Paired win rate of the current net. Probes run beside training on spare cores and land every ~40 iterations at low reps (±12 points of noise per dot — watch trends, not wiggles). Above the gray 50% line means winning.</p>
     <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
     <div class="legend">
-      <span style="--c: var(--s2)">vs Deep Monte Carlo</span>
+      <span style="--c: var(--s1)">vs Handcrafted</span>
     </div>
   </section>
 
@@ -206,7 +206,7 @@ function drawChart(svgId, tipId, data, seriesList, yDomain, yFmt, refLine) {
 }
 
 const PROBE_KEYS = [
-  { key: "vs_deep_monte_carlo", label: "vs Deep Monte Carlo", color: "--s2" },
+  { key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1" },
 ];
 // Deck colors follow the deck identity, alphabetical-stable order.
 const DECK_KEYS = [
@@ -235,7 +235,7 @@ function render() {
   document.getElementById("t-iter").textContent = last.iteration;
   document.getElementById("t-games").textContent = last.games.toLocaleString() + " games";
 
-  const tiles = [["vs_deep_monte_carlo", "t-champ", "l-champ"]];
+  const tiles = [["vs_handcrafted", "t-champ", "l-champ"]];
   for (const [key, valueId, liftId] of tiles) {
     const has = lastProbe && lastProbe[key] !== undefined;
     document.getElementById(valueId).textContent = has ? fmtPct(lastProbe[key]) : "–";
