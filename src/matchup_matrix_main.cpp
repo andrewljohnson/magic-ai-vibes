@@ -231,6 +231,11 @@ int main(int argc, char** argv) {
                                               policy, nullptr, nullptr,
                                               spz_advantage_net);
              }});
+        if (spz_advantage_net) {
+            // Head ablation row: the same champion net deciding ties
+            // by rollout noise instead of the advantage head.
+            add_spz_bot("spz-nohead", spz_net, nullptr);
+        }
     }
     {
         std::ifstream prev_probe("data/spz-champion-prev.txt");
