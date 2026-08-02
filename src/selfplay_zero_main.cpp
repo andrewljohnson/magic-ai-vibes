@@ -59,6 +59,7 @@ struct Arguments {
     std::size_t schema = 0;
     bool hard_targets = false;
     double gamma = 1.0;
+    double td_lambda = 1.0;
     std::uint64_t seed = 20260729;
     std::size_t threads = 1;
     std::size_t max_turns = 0;  // 0 selects the per-command default.
@@ -144,6 +145,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.schema = 4;
         } else if (flag == "--hard-targets") {
             arguments.hard_targets = true;
+        } else if (flag == "--td-lambda") {
+            arguments.td_lambda = std::stod(next());
         } else if (flag == "--gamma") {
             arguments.gamma = std::stod(next());
         } else if (flag == "--hidden") {
@@ -206,6 +209,7 @@ int run_train(const Arguments& raw_arguments) {
     config.schema = arguments.schema;
     config.discounted_targets = !arguments.hard_targets;
     config.gamma = arguments.gamma;
+    config.td_lambda = arguments.td_lambda;
     config.seed = arguments.seed;
     config.threads = arguments.threads;
     config.learning_rate = arguments.learning_rate;

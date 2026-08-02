@@ -4045,6 +4045,94 @@ struct SpzAgent {
                 greedy_attack_set(sampled_worlds.front(), seat, eligible);
             add_candidate(greedy_set);
             add_candidate(eligible);
+            // Exact subset screen: with eight or fewer eligible
+            // attackers, every attack subset is settled against the
+            // predicted defense and scored in one batched forward
+            // pass; the best screened subsets join the rollout-judged
+            // finalists. Greedy proposals stay in the pool, so this
+            // only widens the search.
+            if (eligible.size() >= 2 && eligible.size() <= 8) {
+                const std::size_t subset_count =
+                    std::size_t{1} << eligible.size();
+                struct ScreenEntry {
+                    std::size_t mask = 0;
+                    double total = 0.0;
+                    std::size_t pending = 0;
+                    bool legal = true;
+                };
+                std::vector<ScreenEntry> screen;
+                screen.reserve(subset_count - 1);
+                std::vector<std::vector<float>> screen_rows;
+                std::vector<std::size_t> row_owner;
+                for (std::size_t mask = 1; mask < subset_count;
+                     ++mask) {
+                    ScreenEntry entry{mask};
+                    std::vector<PermanentId> attack_set;
+                    for (std::size_t bit = 0; bit < eligible.size();
+                         ++bit) {
+                        if (mask & (std::size_t{1} << bit)) {
+                            attack_set.push_back(eligible[bit]);
+                        }
+                    }
+                    for (const GameState& world : sampled_worlds) {
+                        GameState simulation = world;
+                        const auto predicted_blocks =
+                            predicted_defense(world, seat, attack_set);
+                        if (!resolve_combat(simulation, seat,
+                                            attack_set,
+                                            predicted_blocks)) {
+                            entry.legal = false;
+                            break;
+                        }
+                        if (const auto terminal =
+                                terminal_value(simulation)) {
+                            entry.total += *terminal;
+                            continue;
+                        }
+                        entry.pending += 1;
+                        row_owner.push_back(screen.size());
+                        screen_rows.push_back(spz_features_for(
+                            net->input_count(),
+                            observe_game_state(simulation, seat),
+                            decks, TurnPhase::SecondMain));
+                    }
+                    screen.push_back(std::move(entry));
+                }
+                const std::vector<double> screen_values =
+                    net->value_batch(screen_rows);
+                for (std::size_t row = 0; row < screen_values.size();
+                     ++row) {
+                    screen[row_owner[row]].total += screen_values[row];
+                }
+                std::vector<std::size_t> ranked;
+                for (std::size_t index = 0; index < screen.size();
+                     ++index) {
+                    if (screen[index].legal) {
+                        ranked.push_back(index);
+                    }
+                }
+                std::sort(ranked.begin(), ranked.end(),
+                          [&](std::size_t left, std::size_t right) {
+                              return screen[left].total >
+                                     screen[right].total;
+                          });
+                constexpr std::size_t kScreenFinalists = 4;
+                for (std::size_t position = 0;
+                     position <
+                     std::min(kScreenFinalists, ranked.size());
+                     ++position) {
+                    const std::size_t mask =
+                        screen[ranked[position]].mask;
+                    std::vector<PermanentId> attack_set;
+                    for (std::size_t bit = 0; bit < eligible.size();
+                         ++bit) {
+                        if (mask & (std::size_t{1} << bit)) {
+                            attack_set.push_back(eligible[bit]);
+                        }
+                    }
+                    add_candidate(std::move(attack_set));
+                }
+            }
             constexpr std::size_t kEditLimit = 3;
             std::size_t additions = 0;
             for (const PermanentId attacker : eligible) {
@@ -5045,6 +5133,65 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             }
             for (std::size_t seat = 0; seat < 2; ++seat) {
                 auto& seat_recorder = record.recorders[seat];
+                // TD(lambda): bootstrap each state's target from the
+                // frozen net's value of the NEXT recorded state, mixed
+                // with the tail return; at lambda 1.0 this is exactly
+                // the Monte Carlo label path below.
+                std::vector<float> td_targets;
+                if (config.td_lambda < 1.0 &&
+                    !seat_recorder.feature_rows.empty()) {
+                    const std::size_t rows =
+                        seat_recorder.feature_rows.size();
+                    const std::vector<double> bootstraps =
+                        frozen->value_batch(
+                            seat_recorder.feature_rows);
+                    td_targets.resize(rows);
+                    const double z =
+                        record.result.winner == -1
+                            ? 0.5
+                            : (static_cast<std::size_t>(
+                                   record.result.winner) == seat
+                                   ? 1.0
+                                   : 0.0);
+                    const auto turn_of = [&](std::size_t index) {
+                        return index <
+                                       seat_recorder.feature_turns
+                                           .size()
+                                   ? seat_recorder
+                                         .feature_turns[index]
+                                   : 0;
+                    };
+                    const auto discount =
+                        [&](std::size_t from_turn,
+                            std::size_t to_turn) {
+                            if (config.gamma >= 1.0) {
+                                return 1.0;
+                            }
+                            const double elapsed =
+                                to_turn > from_turn
+                                    ? static_cast<double>(to_turn -
+                                                          from_turn)
+                                    : 0.0;
+                            return std::pow(config.gamma, elapsed);
+                        };
+                    double tail = 0.5 +
+                                  (z - 0.5) *
+                                      discount(turn_of(rows - 1),
+                                               record.result.turns);
+                    td_targets[rows - 1] =
+                        static_cast<float>(tail);
+                    for (std::size_t index = rows - 1; index-- > 0;) {
+                        const double step = discount(
+                            turn_of(index), turn_of(index + 1));
+                        const double mixed =
+                            (1.0 - config.td_lambda) *
+                                (bootstraps[index + 1] - 0.5) +
+                            config.td_lambda * (tail - 0.5);
+                        tail = 0.5 + step * mixed;
+                        td_targets[index] =
+                            static_cast<float>(tail);
+                    }
+                }
                 for (std::size_t row_index = 0;
                      row_index < seat_recorder.feature_rows.size();
                      ++row_index) {
@@ -5054,9 +5201,13 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         row_index < seat_recorder.feature_turns.size()
                             ? seat_recorder.feature_turns[row_index]
                             : 0;
-                    const float target = outcome_target(
-                        record.result, seat, config.discounted_targets,
-                        config.gamma, sample_turn);
+                    const float target =
+                        !td_targets.empty()
+                            ? td_targets[row_index]
+                            : outcome_target(
+                                  record.result, seat,
+                                  config.discounted_targets,
+                                  config.gamma, sample_turn);
                     SpzSample sample{row, target};
                     if (replay.size() < config.replay_capacity) {
                         replay.push_back(std::move(sample));

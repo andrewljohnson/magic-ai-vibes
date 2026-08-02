@@ -446,6 +446,11 @@ struct SpzTrainConfig {
     // Length-discounted outcome targets (the engine's canonical soft label)
     // instead of raw 0/0.5/1 outcomes. Superseded by gamma below.
     bool discounted_targets = true;
+    // TD(lambda) value targets: 1.0 keeps pure Monte Carlo outcome
+    // labels; below 1.0 each recorded state's target mixes the frozen
+    // net's bootstrap of the next recorded state with the tail return,
+    // letting terminal signals propagate through slow win conditions.
+    double td_lambda = 1.0;
     // Per-state discount: a sample recorded at turn t of a game ending at
     // turn T trains toward 0.5 + (z - 0.5) * gamma^(T - t). 1.0 disables
     // (and defers to discounted_targets for backward compatibility).
