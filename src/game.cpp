@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bitset>
 #include <array>
 #include <bit>
 #include <cerrno>
@@ -596,16 +597,20 @@ ManaCost artifact_mana(CardId card) {
     }
 }
 
+// Zone sizes are bounded by the sixty-card deck, so payment plans use
+// fixed bitsets: planning allocates nothing and copies are trivial.
+inline constexpr std::size_t kPlanSlots = 64;
+
 struct ManaPaymentPlan {
     bool possible = false;
-    std::vector<bool> tap_lands;
-    std::vector<bool> tap_artifacts;
+    std::bitset<kPlanSlots> tap_lands;
+    std::bitset<kPlanSlots> tap_artifacts;
     // Mana creatures (Llanowar Elves) tap for their color; summoning
     // sickness gates the tap ability like attacking.
-    std::vector<bool> tap_creatures;
+    std::bitset<kPlanSlots> tap_creatures;
     // Black Lotus is sacrificed, not tapped, and yields three mana of one
     // chosen color (tracked by adding it directly to the pool).
-    std::vector<bool> sacrifice_artifacts;
+    std::bitset<kPlanSlots> sacrifice_artifacts;
     // Channel converts life into mana, one for one, down to one life.
     int channel_life = 0;
     ManaCost remaining_pool;
@@ -621,16 +626,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         return {};
     }
 
-    ManaPaymentPlan plan{
-        .tap_lands = std::vector<bool>(player.lands.size(), false),
-        .tap_artifacts =
-            std::vector<bool>(player.artifacts.size(), false),
-        .sacrifice_artifacts =
-            std::vector<bool>(player.artifacts.size(), false),
-        .tap_creatures =
-            std::vector<bool>(player.creatures.size(), false),
-        .remaining_pool = player.mana_pool,
-    };
+    ManaPaymentPlan plan;
+    plan.remaining_pool = player.mana_pool;
 
     const auto tap_land = [&](std::size_t index) {
         plan.tap_lands[index] = true;
@@ -799,26 +796,30 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             }
             return score;
         };
-        std::vector<std::size_t> order;
+        std::array<std::size_t, kPlanSlots> order;
+        std::size_t order_count = 0;
         for (std::size_t index = 0; index < player.lands.size();
              ++index) {
             if (!player.lands[index].tapped &&
                 !plan.tap_lands[index]) {
-                order.push_back(index);
+                order[order_count++] = index;
             }
         }
-        std::stable_sort(order.begin(), order.end(),
+        std::stable_sort(order.begin(),
+                         order.begin() +
+                             static_cast<std::ptrdiff_t>(order_count),
                          [&](std::size_t left, std::size_t right) {
                              return land_score(
                                         player.lands[left].card) <
                                     land_score(
                                         player.lands[right].card);
                          });
-        for (const std::size_t index : order) {
+        for (std::size_t position = 0; position < order_count;
+             ++position) {
             if (!needs_more_mana()) {
                 break;
             }
-            tap_land(index);
+            tap_land(order[position]);
         }
     }
     for (std::size_t index = 0;
@@ -1598,6 +1599,30 @@ legal_priority_actions(const GameState& state, std::size_t player,
         sorcery_actions && player == state.active_player &&
         state.stack.empty();
 
+    // The player's mana does not change while enumerating, so identical
+    // costs (eight Bolts, four Psionics...) plan payment exactly once.
+    struct CostMemo {
+        ManaCost cost;
+        bool payable;
+    };
+    std::array<CostMemo, 12> cost_memo{};
+    std::size_t cost_memo_count = 0;
+    const auto can_pay_memo = [&](const ManaCost& cost) {
+        for (std::size_t entry = 0; entry < cost_memo_count; ++entry) {
+            const ManaCost& seen = cost_memo[entry].cost;
+            if (seen.generic == cost.generic &&
+                seen.green == cost.green && seen.red == cost.red &&
+                seen.blue == cost.blue && seen.white == cost.white) {
+                return cost_memo[entry].payable;
+            }
+        }
+        const bool payable = can_pay(player_state, cost);
+        if (cost_memo_count < cost_memo.size()) {
+            cost_memo[cost_memo_count++] = {cost, payable};
+        }
+        return payable;
+    };
+
     if (has_sorcery_timing && !player_state.land_played_this_turn) {
         std::vector<CardId> seen_lands;
         for (const CardId card : player_state.hand) {
@@ -1614,7 +1639,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
         for (const CardId creature : kCreatureCards) {
             const auto& definition = card_definition(creature);
             if (has_card(player_state.hand, creature) &&
-                can_pay(player_state, definition.cost)) {
+                can_pay_memo(definition.cost)) {
                 actions.push_back(
                     PriorityAction::cast_creature(creature));
             }
@@ -1622,7 +1647,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
         for (const CardId sorcery : kSorceryCards) {
             const auto& definition = card_definition(sorcery);
             if (has_card(player_state.hand, sorcery) &&
-                can_pay(player_state, definition.cost)) {
+                can_pay_memo(definition.cost)) {
                 actions.push_back(
                     PriorityAction::cast_sorcery(sorcery));
             }
@@ -1630,7 +1655,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
         for (const CardId artifact : kArtifactCards) {
             const auto& definition = card_definition(artifact);
             if (has_card(player_state.hand, artifact) &&
-                can_pay(player_state, definition.cost)) {
+                can_pay_memo(definition.cost)) {
                 actions.push_back(
                     PriorityAction::cast_artifact(artifact));
             }
@@ -1638,7 +1663,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
         for (const CardId enchantment : kEnchantmentCards) {
             const auto& definition = card_definition(enchantment);
             if (has_card(player_state.hand, enchantment) &&
-                can_pay(player_state, definition.cost)) {
+                can_pay_memo(definition.cost)) {
                 actions.push_back(
                     PriorityAction::cast_enchantment(enchantment));
             }
@@ -1687,7 +1712,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
     const auto& ancestral =
         card_definition(CardId::AncestralRecall);
     if (has_card(player_state.hand, CardId::AncestralRecall) &&
-        can_pay(player_state, ancestral.cost)) {
+        can_pay_memo(ancestral.cost)) {
         for (std::size_t target = 0;
              target < state.players.size(); ++target) {
             actions.push_back(
@@ -1698,7 +1723,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
 
     const auto& bolt = card_definition(CardId::LightningBolt);
     if (has_card(player_state.hand, CardId::LightningBolt) &&
-        can_pay(player_state, bolt.cost)) {
+        can_pay_memo(bolt.cost)) {
         for (std::size_t controller = 0; controller < state.players.size();
              ++controller) {
             actions.push_back(PriorityAction::cast_lightning_bolt(
@@ -1712,7 +1737,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
 
     const auto& psionic = card_definition(CardId::PsionicBlast);
     if (has_card(player_state.hand, CardId::PsionicBlast) &&
-        can_pay(player_state, psionic.cost)) {
+        can_pay_memo(psionic.cost)) {
         for (std::size_t controller = 0;
              controller < state.players.size(); ++controller) {
             actions.push_back(PriorityAction::cast_psionic_blast(
@@ -1727,7 +1752,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
 
     const auto& swords = card_definition(CardId::SwordsToPlowshares);
     if (has_card(player_state.hand, CardId::SwordsToPlowshares) &&
-        can_pay(player_state, swords.cost)) {
+        can_pay_memo(swords.cost)) {
         for (std::size_t controller = 0;
              controller < state.players.size(); ++controller) {
             for (const auto& creature :
@@ -1740,7 +1765,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
 
     const auto& disenchant = card_definition(CardId::Disenchant);
     if (has_card(player_state.hand, CardId::Disenchant) &&
-        can_pay(player_state, disenchant.cost)) {
+        can_pay_memo(disenchant.cost)) {
         for (std::size_t owner = 0; owner < state.players.size();
              ++owner) {
             for (const auto& artifact :
@@ -1762,7 +1787,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
     const auto& giant_growth =
         card_definition(CardId::GiantGrowth);
     if (has_card(player_state.hand, CardId::GiantGrowth) &&
-        can_pay(player_state, giant_growth.cost)) {
+        can_pay_memo(giant_growth.cost)) {
         for (std::size_t controller = 0;
              controller < state.players.size(); ++controller) {
             for (const auto& creature :
@@ -1777,7 +1802,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
 
     const auto& counterspell = card_definition(CardId::Counterspell);
     if (has_card(player_state.hand, CardId::Counterspell) &&
-        can_pay(player_state, counterspell.cost)) {
+        can_pay_memo(counterspell.cost)) {
         for (const auto& spell : state.stack) {
             if (spell.kind == StackObjectKind::Spell) {
                 actions.push_back(
@@ -1789,7 +1814,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
     const auto& force_spike =
         card_definition(CardId::ForceSpike);
     if (has_card(player_state.hand, CardId::ForceSpike) &&
-        can_pay(player_state, force_spike.cost)) {
+        can_pay_memo(force_spike.cost)) {
         for (const auto& spell : state.stack) {
             if (spell.kind == StackObjectKind::Spell) {
                 actions.push_back(
@@ -1817,7 +1842,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
         const ManaCost animation_cost =
             land.tapped ? ManaCost{.generic = 1}
                         : ManaCost{.generic = 2};
-        if (can_pay(player_state, animation_cost)) {
+        if (can_pay_memo(animation_cost)) {
             actions.push_back(
                 PriorityAction::animate_factory(land.id));
         }
@@ -1838,7 +1863,7 @@ legal_priority_actions(const GameState& state, std::size_t player,
             }
         }
     }
-    if (can_pay(player_state, kMillstoneActivationCost)) {
+    if (can_pay_memo(kMillstoneActivationCost)) {
         for (const auto& artifact : player_state.artifacts) {
             if (artifact.card != CardId::Millstone ||
                 artifact.tapped) {

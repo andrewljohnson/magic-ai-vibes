@@ -14,6 +14,7 @@ AUDIT_CHAMPION := $(BUILD_DIR)/audit-champion
 MATCHUP_MATRIX := $(BUILD_DIR)/matchup-matrix
 COMBO_PROBE := $(BUILD_DIR)/combo-probe
 PILOT_COMPARE := $(BUILD_DIR)/pilot-compare
+SIM_BENCH := $(BUILD_DIR)/sim-bench
 REPLAY := $(BUILD_DIR)/replay
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
 GAME_TESTS := $(BUILD_DIR)/old-school-tests
@@ -41,6 +42,7 @@ $(eval $(call link_program,$(AUDIT_CHAMPION),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SO
 $(eval $(call link_program,$(MATCHUP_MATRIX),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/matchup_matrix_main.cpp))
 $(eval $(call link_program,$(COMBO_PROBE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/combo_probe_main.cpp))
 $(eval $(call link_program,$(PILOT_COMPARE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/pilot_compare_main.cpp))
+$(eval $(call link_program,$(SIM_BENCH),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/sim_bench_main.cpp))
 $(eval $(call link_program,$(REPLAY),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/replay_main.cpp))
 $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
 $(eval $(call link_program,$(GAME_TESTS),$(ENGINE_SOURCE) src/interactive.cpp tests/test_game.cpp))
