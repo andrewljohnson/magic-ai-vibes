@@ -991,6 +991,7 @@ function PermanentRow({
   blockAssignments,
   permanentNames,
   targetedByStackIds,
+  abilityGlowIds,
   draggingPriority,
   onToggle,
   onChoosePriorityDestination,
@@ -1016,6 +1017,7 @@ function PermanentRow({
   blockAssignments?: Readonly<Record<string, string>>;
   permanentNames?: Readonly<Record<string, string>>;
   targetedByStackIds?: ReadonlySet<string>;
+  abilityGlowIds?: ReadonlySet<string>;
   draggingPriority?: boolean;
   onToggle?: (id: string) => void;
   onChoosePriorityDestination?: (id: string) => void;
@@ -1051,6 +1053,7 @@ function PermanentRow({
           const priorityDestination =
             priorityDestinationIds?.has(id) ?? false;
           const priorityOrigin = priorityOriginIds?.has(id) ?? false;
+          const abilityActive = abilityGlowIds?.has(id) ?? false;
           const blockerOrigin = blockerOriginIds?.has(id) ?? false;
           const onClick = priorityDestination
             ? () => onChoosePriorityDestination?.(id)
@@ -1071,7 +1074,7 @@ function PermanentRow({
                 blockAssignments?.[id] ? "is-blocking" : ""
               } ${
                 targetedByStackIds?.has(id) ? "is-spell-target" : ""
-              } ${
+              } ${abilityActive ? "is-ability-active" : ""} ${
                 slamState.slamIds.has(id)
                   ? slamState.direction === -1
                     ? "is-slamming-up"
@@ -1282,6 +1285,7 @@ function BattlefieldSide({
   blockAssignments,
   permanentNames,
   targetedByStackIds,
+  abilityGlowIds,
   draggingBlocker,
   onSelectBlocker,
   onStartBlockerDrag,
@@ -1330,6 +1334,7 @@ function BattlefieldSide({
   blockAssignments?: Readonly<Record<string, string>>;
   permanentNames?: Readonly<Record<string, string>>;
   targetedByStackIds?: ReadonlySet<string>;
+  abilityGlowIds?: ReadonlySet<string>;
   draggingBlocker?: boolean;
   onSelectBlocker?: (id: string) => void;
   onStartBlockerDrag?: (
@@ -1447,6 +1452,7 @@ function BattlefieldSide({
           blockerOriginIds={blockerOriginIds}
           selectedBlockerId={selectedBlockerId}
           blockAssignments={blockAssignments}
+          abilityGlowIds={abilityGlowIds}
           onSelectBlocker={onSelectBlocker}
           onStartBlockerDrag={onStartBlockerDrag}
           onEndBlockerDrag={onEndBlockerDrag}
@@ -1470,6 +1476,7 @@ function BattlefieldSide({
           blockAssignments={blockAssignments}
           permanentNames={permanentNames}
           targetedByStackIds={targetedByStackIds}
+          abilityGlowIds={abilityGlowIds}
           onSelectBlocker={onSelectBlocker}
           onStartBlockerDrag={onStartBlockerDrag}
           onEndBlockerDrag={onEndBlockerDrag}
@@ -3412,9 +3419,22 @@ function TargetArrows({ snapshot }: { snapshot: GameSnapshot }) {
   const stack = snapshot.state?.stack ?? [];
   const arrowTargets = stack.map((entry) => {
     const target = entry.target;
-    return typeof target === "object" && target !== null
-      ? target
-      : null;
+    if (typeof target !== "object" || target === null) return null;
+    // Self-activations (an ability aimed at its controller's own
+    // land, e.g. a Factory animating) draw no arrow — the permanent
+    // glows instead.
+    if (
+      "creature" in target &&
+      target.creature !== undefined &&
+      target.player === entry.controller &&
+      typeof entry.controller === "number" &&
+      (snapshot.state?.players?.[entry.controller]?.lands ?? []).some(
+        (land) => String(land.permanentId) === String(target.creature),
+      )
+    ) {
+      return null;
+    }
+    return target;
   });
   const signature = JSON.stringify(
     arrowTargets.map((target, index) => [
@@ -4102,15 +4122,36 @@ export default function App() {
         creature.card?.name ?? "creature";
     }
   }
+  // An ability whose "target" is its controller's own land is the land
+  // activating itself (Factory animation): no target arrow or ring —
+  // the permanent gets an ability glow instead.
+  const selfActivationIds = new Set<string>();
   const targetedByStackIds = new Set(
     (snapshot.state?.stack ?? []).flatMap((entry) => {
       const target = entry.target;
-      return typeof target === "object" &&
-             target !== null &&
-             "creature" in target &&
-             target.creature !== undefined
-        ? [String(target.creature)]
-        : [];
+      if (
+        typeof target !== "object" ||
+        target === null ||
+        !("creature" in target) ||
+        target.creature === undefined
+      ) {
+        return [];
+      }
+      const id = String(target.creature);
+      const controllerLands =
+        typeof entry.controller === "number"
+          ? snapshot.state?.players?.[entry.controller]?.lands ?? []
+          : [];
+      if (
+        target.player === entry.controller &&
+        controllerLands.some(
+          (land) => String(land.permanentId) === id,
+        )
+      ) {
+        selfActivationIds.add(id);
+        return [];
+      }
+      return [id];
     }),
   );
   const combatAttackerIds = new Set([
@@ -4556,6 +4597,7 @@ export default function App() {
                   blockAssignments={mergedBlockAssignments}
                   permanentNames={permanentNames}
                   targetedByStackIds={targetedByStackIds}
+                  abilityGlowIds={selfActivationIds}
                   draggingBlocker={Boolean(selectedBlockerId)}
                   onChooseBlockTarget={chooseBlockTarget}
                   onBlockDragOver={dragOverBlockTarget}
@@ -4605,6 +4647,7 @@ export default function App() {
                   blockAssignments={mergedBlockAssignments}
                   permanentNames={permanentNames}
                   targetedByStackIds={targetedByStackIds}
+                  abilityGlowIds={selfActivationIds}
                   onSelectBlocker={selectBlocker}
                   onStartBlockerDrag={startBlockerDrag}
                   onEndBlockerDrag={finishBlockerDrag}

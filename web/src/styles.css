@@ -3870,6 +3870,38 @@ select {
   }
 }
 
+@keyframes impact-burst {
+  0% { opacity: 0; transform: scale(.2); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: scale(2.1); }
+}
+
+.permanent-slot.is-hit::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  pointer-events: none;
+  z-index: 7;
+  opacity: 0;
+  background:
+    radial-gradient(circle,
+      rgba(255, 240, 190, 0.95) 0%,
+      rgba(255, 170, 80, 0.55) 22%,
+      rgba(255, 110, 60, 0) 46%),
+    conic-gradient(
+      rgba(255, 220, 140, 0.9) 0deg 6deg, transparent 6deg 60deg,
+      rgba(255, 220, 140, 0.9) 60deg 66deg, transparent 66deg 120deg,
+      rgba(255, 220, 140, 0.9) 120deg 126deg, transparent 126deg 180deg,
+      rgba(255, 220, 140, 0.9) 180deg 186deg, transparent 186deg 240deg,
+      rgba(255, 220, 140, 0.9) 240deg 246deg, transparent 246deg 300deg,
+      rgba(255, 220, 140, 0.9) 300deg 306deg, transparent 306deg 360deg);
+  mask-image: radial-gradient(circle,
+    black 0%, black 40%, transparent 68%);
+  -webkit-mask-image: radial-gradient(circle,
+    black 0%, black 40%, transparent 68%);
+  animation: impact-burst 0.5s ease-out 0.26s both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -4117,40 +4149,77 @@ select {
   background: rgba(0, 0, 0, 0.4);
 }
 
+/* A permanent whose own ability is on the stack (Factory animating):
+   bright breathing glow instead of a self-pointing target arrow. */
+@keyframes ability-glow {
+  0%, 100% {
+    filter: brightness(1.12)
+      drop-shadow(0 0 6px rgba(120, 220, 255, 0.75));
+  }
+  50% {
+    filter: brightness(1.35)
+      drop-shadow(0 0 18px rgba(120, 220, 255, 1));
+  }
+}
+
+.permanent-slot.is-ability-active .card-face {
+  animation: ability-glow 0.9s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* Attack lunge: wind-up away from the enemy, accelerate hard into
+   them with a tilt, snap back with a small overshoot. */
 @keyframes slam-up {
-  0% { transform: translateY(0); }
-  35% { transform: translateY(-26px) scale(1.06); }
-  55% { transform: translateY(4px); }
-  100% { transform: translateY(0); }
+  0% { transform: translateY(0) rotate(0deg); }
+  22% { transform: translateY(9px) rotate(-3deg); }
+  45% { transform: translateY(-44px) scale(1.12) rotate(2deg); }
+  62% { transform: translateY(6px) scale(1.02) rotate(-1deg); }
+  100% { transform: translateY(0) rotate(0deg); }
 }
 
 @keyframes slam-down {
-  0% { transform: translateY(0); }
-  35% { transform: translateY(26px) scale(1.06); }
-  55% { transform: translateY(-4px); }
-  100% { transform: translateY(0); }
+  0% { transform: translateY(0) rotate(0deg); }
+  22% { transform: translateY(-9px) rotate(3deg); }
+  45% { transform: translateY(44px) scale(1.12) rotate(-2deg); }
+  62% { transform: translateY(-6px) scale(1.02) rotate(1deg); }
+  100% { transform: translateY(0) rotate(0deg); }
 }
 
 .permanent-slot.is-slamming-up {
-  animation: slam-up 0.55s cubic-bezier(0.3, 0, 0.2, 1);
+  animation: slam-up 0.6s cubic-bezier(0.5, -0.3, 0.25, 1);
   z-index: 6;
 }
 
 .permanent-slot.is-slamming-down {
-  animation: slam-down 0.55s cubic-bezier(0.3, 0, 0.2, 1);
+  animation: slam-down 0.6s cubic-bezier(0.5, -0.3, 0.25, 1);
   z-index: 6;
 }
 
+/* Impact: white flash + red shock on the struck card, plus an
+   expanding starburst ring bursting out of the point of contact. */
 @keyframes hit-flash {
-  0%, 100% { filter: none; }
-  40% {
-    filter: brightness(1.7) saturate(1.6)
-      drop-shadow(0 0 14px rgba(255, 90, 60, 0.85));
+  0% { filter: none; }
+  30% {
+    filter: brightness(2.2) saturate(0.4)
+      drop-shadow(0 0 4px rgba(255, 255, 255, 0.9));
   }
+  55% {
+    filter: brightness(1.6) saturate(1.8)
+      drop-shadow(0 0 16px rgba(255, 90, 60, 0.9));
+  }
+  100% { filter: none; }
+}
+
+@keyframes hit-shudder {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(-3px, 2px) rotate(-2deg); }
+  55% { transform: translate(3px, -1px) rotate(1.5deg); }
+  75% { transform: translate(-2px, 0) rotate(-0.5deg); }
 }
 
 .permanent-slot.is-hit .card-face {
-  animation: hit-flash 0.55s ease 0.18s;
+  animation: hit-flash 0.55s ease 0.24s,
+    hit-shudder 0.4s ease 0.26s;
 }
 
 @keyframes stage-rumble {
@@ -4169,8 +4238,14 @@ select {
   .permanent-slot.is-slamming-up,
   .permanent-slot.is-slamming-down,
   .permanent-slot.is-hit .card-face,
+  .permanent-slot.is-hit::after,
+  .permanent-slot.is-ability-active .card-face,
   .table-stage.is-rumbling {
     animation: none;
+  }
+  .permanent-slot.is-ability-active .card-face {
+    filter: brightness(1.25)
+      drop-shadow(0 0 10px rgba(120, 220, 255, 0.9));
   }
 }
 
