@@ -181,8 +181,11 @@ std::size_t spz_feature_count_colors() {
     // floating mana pool by color (5), Mana Drain's pending generic
     // mana, and how much of the board is
     // temporary (expiring creature forms and pump totals) — so the net
-    // can tell phantom presence from lasting presence.
-    return spz_feature_count() + 2 * 12;
+    // can tell phantom presence from lasting presence. Plus one
+    // observer-relative race block (12): precomputed clock arithmetic
+    // (ratios, turns-to-lethal, lethal flags, evasive clocks) that a
+    // single tanh layer cannot reliably derive from raw scalars.
+    return spz_feature_count() + 2 * 12 + 12;
 }
 
 std::vector<float> spz_features_colors(
@@ -231,6 +234,76 @@ std::vector<float> spz_features_colors(
         }
         features.push_back(expiring_creatures / 4.0f);
         features.push_back(temporary_power / 6.0f);
+    }
+    {
+        // Race arithmetic, observer-relative. Ready = untapped and
+        // not summoning sick; evasive clock counts flying power the
+        // defender has no untapped flyer to answer.
+        const auto& mine = observation.players[me];
+        const auto& theirs = observation.players[1 - me];
+        const auto tally = [](const PublicPlayerState& side) {
+            struct Tally {
+                int ready = 0;
+                int untapped = 0;
+                int flying_ready = 0;
+                int untapped_flyers = 0;
+            } tally;
+            for (const auto& creature : side.creatures) {
+                const auto& definition =
+                    card_definition(creature.card);
+                const int power =
+                    definition.power +
+                    creature.temporary_power_bonus +
+                    creature.plus_counters;
+                if (!creature.tapped) {
+                    tally.untapped += power;
+                    if (definition.flying) {
+                        tally.untapped_flyers += 1;
+                    }
+                    if (!creature.summoning_sick) {
+                        tally.ready += power;
+                        if (definition.flying) {
+                            tally.flying_ready += power;
+                        }
+                    }
+                }
+            }
+            return tally;
+        };
+        const auto my_tally = tally(mine);
+        const auto their_tally = tally(theirs);
+        const auto clipped_ratio = [](double numerator,
+                                      double denominator) {
+            return std::min(2.0,
+                            numerator / std::max(1.0, denominator));
+        };
+        const auto push = [&features](double value) {
+            features.push_back(static_cast<float>(value));
+        };
+        push(clipped_ratio(my_tally.ready, theirs.life));
+        push(clipped_ratio(their_tally.ready, mine.life));
+        push(my_tally.ready >= theirs.life ? 1.0 : 0.0);
+        push(their_tally.ready >= mine.life ? 1.0 : 0.0);
+        push(std::min(10.0,
+                      theirs.life /
+                          std::max(1.0, double(my_tally.ready))) /
+             10.0);
+        push(std::min(10.0,
+                      mine.life /
+                          std::max(1.0, double(their_tally.ready))) /
+             10.0);
+        push(clipped_ratio(my_tally.untapped, their_tally.untapped));
+        push((my_tally.ready - their_tally.ready) / 12.0);
+        push((static_cast<double>(mine.creatures.size()) -
+              static_cast<double>(theirs.creatures.size())) /
+             6.0);
+        push(clipped_ratio(their_tally.untapped, mine.life));
+        push(their_tally.untapped_flyers == 0
+                 ? clipped_ratio(my_tally.flying_ready, theirs.life)
+                 : 0.0);
+        push(my_tally.untapped_flyers == 0
+                 ? clipped_ratio(their_tally.flying_ready, mine.life)
+                 : 0.0);
     }
     if (features.size() != spz_feature_count_colors()) {
         throw std::logic_error(
@@ -834,6 +907,14 @@ std::vector<float> spz_features_for(
     }
     if (input_count == spz_feature_count_colors()) {
         return spz_features_colors(observation, original_decks, phase);
+    }
+    // 423-era colors nets (pre race block): the old vector is a strict
+    // prefix of the current one, so truncation reproduces it exactly.
+    if (input_count + 12 == spz_feature_count_colors()) {
+        auto features =
+            spz_features_colors(observation, original_decks, phase);
+        features.resize(input_count);
+        return features;
     }
     throw std::invalid_argument(
         "unknown SPZ feature schema for input count " +
@@ -4598,6 +4679,10 @@ struct SpzBehaviorRates {
     double growth_save = 0.0;
     double spike_good = 0.0;
     double spike_restraint = 0.0;
+    // Removal beats racing when their clock is faster than ours.
+    double race_removal = 0.0;
+    // Do not walk the only threat into open counter mana.
+    double counter_respect = 0.0;
 };
 
 // Move every card visible in the seat's zones plus its hand out of the
@@ -4863,6 +4948,66 @@ SpzBehaviorRates run_behavior_probes(
         } else {
             rates.spike_good = hit ? 1.0 : 0.0;
         }
+    }
+
+    // 6. Race read: we are dead to their ready attacker before our
+    // burn race gets there; the bolt must become removal.
+    {
+        BehaviorFixture fixture;
+        fixture.decks = {red, red};
+        fixture.state.turn_number = 9;
+        auto& self = fixture.state.players[0];
+        self.life = 3;
+        self.hand = {CardId::LightningBolt};
+        self.lands.assign(1,
+                          LandPermanent{.card = CardId::Mountain});
+        auto& enemy = fixture.state.players[1];
+        enemy.life = 5;
+        enemy.creatures = {CreaturePermanent{
+            .id = 21,
+            .card = CardId::HillGiant,
+            .tapped = false,
+            .summoning_sick = false,
+            .damage = 0,
+        }};
+        enemy.lands.assign(3, LandPermanent{.card = CardId::Mountain,
+                                            .tapped = true});
+        fixture.emerged = [](const PriorityAction& action) {
+            return action.kind ==
+                       PriorityActionKind::CastLightningBolt &&
+                   action.target.has_value() &&
+                   action.target->creature.has_value();
+        };
+        finish_behavior_fixture(fixture);
+        rates.race_removal =
+            run_behavior_fixture(fixture, net, mix_seed(seed, 60))
+                ? 1.0
+                : 0.0;
+    }
+
+    // 7. Counter respect: the opponent holds two untapped Islands and
+    // unknown cards; leading the cheap artifact (or waiting) instead
+    // of walking the only big threat into the open mana.
+    {
+        const auto robots = robots_deck();
+        BehaviorFixture fixture;
+        fixture.decks = {robots, blue};
+        fixture.state.turn_number = 6;
+        auto& self = fixture.state.players[0];
+        self.hand = {CardId::SuChi, CardId::MoxRuby};
+        self.lands.assign(
+            4, LandPermanent{.card = CardId::VolcanicIsland});
+        auto& enemy = fixture.state.players[1];
+        enemy.lands.assign(2, LandPermanent{.card = CardId::Island});
+        enemy.hand.assign(3, CardId::Island);
+        fixture.emerged = [](const PriorityAction& action) {
+            return action.kind != PriorityActionKind::CastCreature;
+        };
+        finish_behavior_fixture(fixture);
+        rates.counter_respect =
+            run_behavior_fixture(fixture, net, mix_seed(seed, 70))
+                ? 1.0
+                : 0.0;
     }
     return rates;
 }
@@ -5701,7 +5846,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << behavior_rates.growth_save
                         << " spike-good " << behavior_rates.spike_good
                         << " spike-restraint "
-                        << behavior_rates.spike_restraint;
+                        << behavior_rates.spike_restraint
+                        << " race-removal "
+                        << behavior_rates.race_removal
+                        << " counter-respect "
+                        << behavior_rates.counter_respect;
                     config.log(behavior_line.str());
                 }
             }
@@ -5783,7 +5932,11 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << ",\"spike_good\":"
                         << behavior_rates.spike_good
                         << ",\"spike_restraint\":"
-                        << behavior_rates.spike_restraint << '}';
+                        << behavior_rates.spike_restraint
+                        << ",\"race_removal\":"
+                        << behavior_rates.race_removal
+                        << ",\"counter_respect\":"
+                        << behavior_rates.counter_respect << '}';
                 }
                 if (have_deck_lift) {
                     telemetry
