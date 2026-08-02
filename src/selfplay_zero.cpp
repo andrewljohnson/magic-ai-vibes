@@ -5647,6 +5647,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << behavior_rates.spike_restraint << '}';
                 }
                 if (have_deck_lift) {
+                    telemetry
+                        << ",\"deck_lift_baseline\":\"handcrafted\"";
                     telemetry << ",\"deck_lift\":{";
                     for (std::size_t deck = 0; deck < kSpzDeckCount;
                          ++deck) {
