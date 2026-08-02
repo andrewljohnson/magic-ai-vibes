@@ -957,11 +957,23 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             tap_artifact(index);
         }
     }
+    // Mana artifacts (moxen, Fellwar copies) go right after Sol Ring:
+    // spending a Mox is painless and keeps every land's options open.
+    for (std::size_t index = 0;
+         index < player.artifacts.size() && needs_more_mana();
+         ++index) {
+        if (!player.artifacts[index].tapped &&
+            !plan.tap_artifacts[index] &&
+            mana_total(artifact_mana(
+                artifact_face(player.artifacts[index]))) > 0) {
+            tap_artifact(index);
+        }
+    }
     {
-        // Generic payment prefers the lands the rest of the hand wants
-        // least: rank each color by how many hand cards still demand
-        // it, then spend low-demand basics first and flexible duals
-        // last, so held instants and abilities keep their colors open.
+        // Generic payment then walks the lands in strict tiers -
+        // basics, duals, City of Brass (life ping), ability lands -
+        // with each tier ranked by how little the rest of the hand
+        // wants that land's colors.
         std::array<int, 4> demand{};  // green, red, blue, white
         for (const CardId held : player.hand) {
             const auto& held_cost = card_definition(held).cost;
@@ -984,22 +996,27 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             if (land_provides(land, &ManaCost::white)) {
                 score += 1 + demand[3] * 4;
             }
-            // City of Brass pings its controller when tapped: for a
-            // generic cost it goes after every painless source.
-            if (land == CardId::CityOfBrass) {
-                score += 8;
-            }
-            // Ability lands are the very last resort for generic
-            // costs (after City's life ping): their activations are
-            // usually worth more than one mana.
-            if (land == CardId::LibraryOfAlexandria) {
-                score += 40;
-            } else if (land == CardId::MishrasFactory) {
-                score += 34;
-            } else if (land == CardId::StripMine) {
-                score += 30;
-            }
             return score;
+        };
+        const auto land_tier = [](CardId land) {
+            switch (land) {
+            case CardId::Plateau:
+            case CardId::Tundra:
+            case CardId::VolcanicIsland:
+            case CardId::UndergroundSea:
+            case CardId::Badlands:
+                return 1;  // duals after basics
+            case CardId::CityOfBrass:
+                return 2;  // the life ping
+            case CardId::StripMine:
+                return 3;
+            case CardId::MishrasFactory:
+                return 4;
+            case CardId::LibraryOfAlexandria:
+                return 5;  // ability lands dead last
+            default:
+                return 0;  // basics
+            }
         };
         std::array<std::size_t, kPlanSlots> order;
         std::size_t order_count = 0;
@@ -1010,53 +1027,25 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                 order[order_count++] = index;
             }
         }
-        std::stable_sort(order.begin(),
-                         order.begin() +
-                             static_cast<std::ptrdiff_t>(order_count),
-                         [&](std::size_t left, std::size_t right) {
-                             return land_score(
-                                        player.lands[left].card) <
-                                    land_score(
-                                        player.lands[right].card);
-                         });
-        const auto painful = [](CardId land) {
-            return land == CardId::CityOfBrass ||
-                   land == CardId::LibraryOfAlexandria ||
-                   land == CardId::MishrasFactory ||
-                   land == CardId::StripMine;
-        };
-        // Painless lands first...
+        std::stable_sort(
+            order.begin(),
+            order.begin() +
+                static_cast<std::ptrdiff_t>(order_count),
+            [&](std::size_t left, std::size_t right) {
+                const CardId left_card = player.lands[left].card;
+                const CardId right_card = player.lands[right].card;
+                if (land_tier(left_card) != land_tier(right_card)) {
+                    return land_tier(left_card) <
+                           land_tier(right_card);
+                }
+                return land_score(left_card) < land_score(right_card);
+            });
         for (std::size_t position = 0; position < order_count;
              ++position) {
             if (!needs_more_mana()) {
                 break;
             }
-            if (!painful(player.lands[order[position]].card)) {
-                tap_land(order[position]);
-            }
-        }
-        // ...then mana artifacts (moxen come before City's life ping
-        // or spending an ability land)...
-        for (std::size_t index = 0;
-             index < player.artifacts.size() && needs_more_mana();
-             ++index) {
-            if (!player.artifacts[index].tapped &&
-                !plan.tap_artifacts[index] &&
-                mana_total(artifact_mana(
-                    artifact_face(player.artifacts[index]))) > 0) {
-                tap_artifact(index);
-            }
-        }
-        // ...and only then City of Brass and ability lands, still in
-        // score order (City before Strip Mine/Factory/Library).
-        for (std::size_t position = 0; position < order_count;
-             ++position) {
-            if (!needs_more_mana()) {
-                break;
-            }
-            if (painful(player.lands[order[position]].card)) {
-                tap_land(order[position]);
-            }
+            tap_land(order[position]);
         }
     }
     while (needs_more_mana() && tap_elf()) {
