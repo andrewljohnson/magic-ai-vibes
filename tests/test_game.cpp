@@ -4877,6 +4877,33 @@ TEST(payment_variants_fire_only_on_ability_lands_or_dual_choices) {
         3);
     CHECK(quiet.empty());
 
+    // An untapped Factory can pay a generic cost instead of a basic:
+    // the spend-ability direction becomes a variant.
+    player.lands = {
+        {.id = 131, .card = old_school::CardId::Mountain,
+         .tapped = false},
+        {.id = 132, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 133, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 134,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false},
+    };
+    const auto spend_ability = old_school::alternative_payments(
+        player,
+        old_school::card_definition(old_school::CardId::GrayOgre)
+            .cost,
+        3);
+    CHECK(!spend_ability.empty());
+    bool taps_factory = false;
+    for (const auto& taps : spend_ability) {
+        for (const auto& tap : taps) {
+            taps_factory = taps_factory || tap.permanent == 134;
+        }
+    }
+    CHECK(taps_factory);
+
     // Two different dual types can pay the same blue need: each
     // alternative becomes a variant, and each variant applies.
     player.lands = {

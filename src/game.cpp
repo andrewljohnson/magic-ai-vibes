@@ -1134,10 +1134,12 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
     const PlayerState& player, const ManaCost& cost,
     std::size_t max_variants) {
     // Branch only where payment choice genuinely matters:
-    //  1. the auto plan taps an ability land (Library / Factory /
-    //     Strip Mine) -> offer the cover that avoids them;
-    //  2. a colored need could be paid by different dual-land types
-    //     (Volcanic Island vs Tundra for {U}) -> offer the swap.
+    //  1. ability lands (Library / Factory / Strip Mine): whichever
+    //     way the auto plan went, offer the other direction — the
+    //     cover that avoids them, or the cover that spends them to
+    //     keep basics/duals/rocks open;
+    //  2. a colored need payable by different dual-land types
+    //     (Volcanic Island vs Tundra for {U}) -> one swap per type.
     // The base tiers (rocks, basics, duals, City) stay the planner's.
     const auto is_ability_land = [](CardId land) {
         return land == CardId::LibraryOfAlexandria ||
@@ -1184,8 +1186,12 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
     };
     const auto provides_face = [&](const Source& source, int face) {
         if (face == 0) {
-            return !source.is_land &&
-                   artifact_mana(source.card).generic > 0;
+            if (source.is_land) {
+                // City of Brass makes colored mana only.
+                return source.card != CardId::CityOfBrass &&
+                       land_mana(source.card).generic > 0;
+            }
+            return artifact_mana(source.card).generic > 0;
         }
         if (source.is_land) {
             return land_provides(
@@ -1198,10 +1204,13 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
         return artifact_mana(source.card).*kFaces[static_cast<
                    std::size_t>(face)] > 0;
     };
-    // Greedy cover in planner tier order. `exclude_ability` drops
-    // ability lands from the pool; `prefer_face`/`prefer_dual` bumps
-    // one dual type to the front of that face's colored payment.
-    const auto cover = [&](bool exclude_ability, int prefer_face,
+    // Greedy cover in tier order. Mode 0 mirrors the planner
+    // (ability lands dead last), mode 1 excludes ability lands, mode
+    // 2 spends ability lands FIRST so everything else stays open.
+    // `prefer_face`/`prefer_dual` bumps one dual type to the front of
+    // that face's colored payment.
+    enum { kLikePlanner = 0, kAvoidAbility = 1, kSpendAbility = 2 };
+    const auto cover = [&](int mode, int prefer_face,
                            CardId prefer_dual)
         -> std::optional<std::vector<PaymentTap>> {
         std::vector<Source> pool;
@@ -1219,29 +1228,31 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
                               artifact_mana(face_card).generic)});
             }
         }
-        std::vector<Source> lands;
         for (const auto& land : player.lands) {
             if (land.tapped ||
-                (exclude_ability && is_ability_land(land.card))) {
+                (mode == kAvoidAbility &&
+                 is_ability_land(land.card))) {
                 continue;
             }
-            lands.push_back({land.id, land.card, true, 1});
+            pool.push_back({land.id, land.card, true, 1});
         }
-        const auto land_tier = [&](CardId card) {
-            if (is_dual(card)) {
+        const auto spend_rank = [&](const Source& source) {
+            if (!source.is_land) {
                 return 1;
             }
-            if (card == CardId::CityOfBrass) {
-                return 2;
+            if (is_ability_land(source.card)) {
+                return mode == kSpendAbility ? 0 : 5;
             }
-            return is_ability_land(card) ? 3 : 0;
+            if (is_dual(source.card)) {
+                return 3;
+            }
+            return source.card == CardId::CityOfBrass ? 4 : 2;
         };
         std::stable_sort(
-            lands.begin(), lands.end(),
+            pool.begin(), pool.end(),
             [&](const Source& left, const Source& right) {
-                return land_tier(left.card) < land_tier(right.card);
+                return spend_rank(left) < spend_rank(right);
             });
-        pool.insert(pool.end(), lands.begin(), lands.end());
 
         std::vector<PaymentTap> taps;
         std::vector<bool> used(pool.size(), false);
@@ -1333,8 +1344,19 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
         seen.push_back(std::move(signature));
         variants.push_back(std::move(*candidate));
     };
+    // Both directions of the ability-land decision reach the search:
+    // a plan that tapped one offers the avoiding cover, and a plan
+    // that spared one offers the cover spending it.
+    bool has_untapped_ability = false;
+    for (const auto& land : player.lands) {
+        has_untapped_ability =
+            has_untapped_ability ||
+            (!land.tapped && is_ability_land(land.card));
+    }
     if (default_taps_ability) {
-        emit(cover(true, 0, CardId::Forest));
+        emit(cover(kAvoidAbility, 0, CardId::Forest));
+    } else if (has_untapped_ability) {
+        emit(cover(kSpendAbility, 0, CardId::Forest));
     }
     // Dual-choice branching: a colored need payable by two or more
     // distinct dual types gets one variant per alternative type.
@@ -1357,7 +1379,7 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
             continue;
         }
         for (const CardId dual : dual_types) {
-            emit(cover(false, face, dual));
+            emit(cover(kLikePlanner, face, dual));
         }
     }
     return variants;
