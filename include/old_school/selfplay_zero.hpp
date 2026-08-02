@@ -99,6 +99,11 @@ class SpzNet {
     // Win probability in [0, 1] for the perspective the features encode.
     double value(const std::vector<float>& features) const;
 
+    // Batched forward pass: one row per position, evaluated together so
+    // rollout search amortizes the matrix work across candidates.
+    std::vector<double> value_batch(
+        const std::vector<std::vector<float>>& feature_rows) const;
+
     // One SGD-with-momentum minibatch step on binary cross-entropy.
     // Returns the mean pre-update loss of the batch.
     double train_batch(const std::vector<const std::vector<float>*>& features,

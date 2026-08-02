@@ -987,6 +987,86 @@ double SpzNet::value(const std::vector<float>& features) const {
 #endif
 }
 
+std::vector<double> SpzNet::value_batch(
+    const std::vector<std::vector<float>>& feature_rows) const {
+    const std::size_t rows = feature_rows.size();
+    std::vector<double> outputs(rows);
+    if (rows == 0) {
+        return outputs;
+    }
+    if (rows == 1) {
+        outputs[0] = value(feature_rows[0]);
+        return outputs;
+    }
+#ifdef __APPLE__
+    for (const auto& row : feature_rows) {
+        if (row.size() != inputs_) {
+            throw std::invalid_argument(
+                "SpzNet feature size mismatch");
+        }
+    }
+    thread_local std::vector<double> input_matrix;
+    input_matrix.resize(rows * inputs_);
+    for (std::size_t row = 0; row < rows; ++row) {
+        vDSP_vspdp(feature_rows[row].data(), 1,
+                   input_matrix.data() + row * inputs_, 1, inputs_);
+    }
+    thread_local std::vector<double> activations;
+    activations.resize(rows * hidden_);
+    for (std::size_t row = 0; row < rows; ++row) {
+        std::memcpy(activations.data() + row * hidden_,
+                    hidden_bias_.data(), hidden_ * sizeof(double));
+    }
+    // activations[rows x hidden] += input[rows x inputs] * W^T
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                static_cast<int>(rows), static_cast<int>(hidden_),
+                static_cast<int>(inputs_), 1.0, input_matrix.data(),
+                static_cast<int>(inputs_), hidden_weights_.data(),
+                static_cast<int>(inputs_), 1.0, activations.data(),
+                static_cast<int>(hidden_));
+    const int activation_count = static_cast<int>(rows * hidden_);
+    vvtanh(activations.data(), activations.data(),
+           &activation_count);
+    if (hidden2_ == 0) {
+        for (std::size_t row = 0; row < rows; ++row) {
+            outputs[row] = sigmoid(
+                output_bias_ +
+                cblas_ddot(static_cast<int>(hidden_),
+                           output_weights_.data(), 1,
+                           activations.data() + row * hidden_, 1));
+        }
+        return outputs;
+    }
+    thread_local std::vector<double> second;
+    second.resize(rows * hidden2_);
+    for (std::size_t row = 0; row < rows; ++row) {
+        std::memcpy(second.data() + row * hidden2_,
+                    hidden2_bias_.data(), hidden2_ * sizeof(double));
+    }
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                static_cast<int>(rows), static_cast<int>(hidden2_),
+                static_cast<int>(hidden_), 1.0, activations.data(),
+                static_cast<int>(hidden_), hidden2_weights_.data(),
+                static_cast<int>(hidden_), 1.0, second.data(),
+                static_cast<int>(hidden2_));
+    const int second_count = static_cast<int>(rows * hidden2_);
+    vvtanh(second.data(), second.data(), &second_count);
+    for (std::size_t row = 0; row < rows; ++row) {
+        outputs[row] = sigmoid(
+            output_bias_ +
+            cblas_ddot(static_cast<int>(hidden2_),
+                       output_weights_.data(), 1,
+                       second.data() + row * hidden2_, 1));
+    }
+    return outputs;
+#else
+    for (std::size_t row = 0; row < rows; ++row) {
+        outputs[row] = value(feature_rows[row]);
+    }
+    return outputs;
+#endif
+}
+
 double SpzNet::train_batch(
     const std::vector<const std::vector<float>*>& features,
     const std::vector<float>& targets, double learning_rate) {
@@ -2333,8 +2413,40 @@ struct SpzAgent {
             state, priority.player, sorcery,
             std::min(priority.consecutive_passes, 1),
             PriorityAction::pass());
-        double best_value = -std::numeric_limits<double>::infinity();
-        PriorityAction chosen = actions[0];
+        // Two passes: settle every candidate and stage the non-terminal
+        // net evaluations, then run them as one batched forward pass.
+        struct Staged {
+            const PriorityAction* action;
+            double value = 0.0;
+            std::ptrdiff_t batch_slot = -1;
+        };
+        std::vector<Staged> staged;
+        staged.reserve(actions.size());
+        std::vector<std::vector<float>> feature_rows;
+        feature_rows.reserve(actions.size());
+        const auto stage_state = [&](Staged& entry,
+                                     const GameState& settled,
+                                     std::size_t perspective,
+                                     TurnPhase value_phase) {
+            const bool self_dead =
+                settled.players[perspective].life <= 0 ||
+                settled.failed_draw[perspective];
+            const bool opponent_dead =
+                settled.players[1 - perspective].life <= 0 ||
+                settled.failed_draw[1 - perspective];
+            if (self_dead || opponent_dead) {
+                entry.value = self_dead && opponent_dead
+                                  ? 0.5
+                                  : (self_dead ? 0.0 : 1.0);
+                return;
+            }
+            entry.batch_slot =
+                static_cast<std::ptrdiff_t>(feature_rows.size());
+            feature_rows.push_back(spz_features_for(
+                net->input_count(),
+                observe_game_state(settled, perspective), decks,
+                value_phase));
+        };
         for (const PriorityAction& action : actions) {
             const auto consequence = resolve_priority_action_consequence(
                 state, priority.player, sorcery,
@@ -2348,15 +2460,15 @@ struct SpzAgent {
                                       *pass_settled)) {
                 continue;
             }
-            double value = 0.0;
+            Staged entry{&action};
             if (consequence->terminal) {
-                value = consequence->winner == -1
-                            ? 0.5
-                            : (static_cast<std::size_t>(
-                                   consequence->winner) ==
-                                       priority.player
-                                   ? 1.0
-                                   : 0.0);
+                entry.value = consequence->winner == -1
+                                  ? 0.5
+                                  : (static_cast<std::size_t>(
+                                         consequence->winner) ==
+                                             priority.player
+                                         ? 1.0
+                                         : 0.0);
             } else if (pending != nullptr) {
                 // Post-blockers response: judge each candidate through
                 // the declared combat, exactly as the root does, so a
@@ -2365,20 +2477,32 @@ struct SpzAgent {
                 GameState post_combat = consequence->state;
                 resolve_declared_combat(post_combat, *pending);
                 if (const auto terminal = terminal_value(post_combat)) {
-                    value = priority.player == seat
-                                ? *terminal
-                                : 1.0 - *terminal;
+                    entry.value = priority.player == seat
+                                      ? *terminal
+                                      : 1.0 - *terminal;
                 } else {
-                    value = value_for(post_combat, priority.player,
-                                      TurnPhase::SecondMain);
+                    stage_state(entry, post_combat, priority.player,
+                                TurnPhase::SecondMain);
                 }
             } else {
-                value = value_for(consequence->state, priority.player,
-                                  phase);
+                stage_state(entry, consequence->state, priority.player,
+                            phase);
             }
+            staged.push_back(entry);
+        }
+        const std::vector<double> batch_values =
+            net->value_batch(feature_rows);
+        double best_value = -std::numeric_limits<double>::infinity();
+        PriorityAction chosen = actions[0];
+        for (const Staged& entry : staged) {
+            const double value =
+                entry.batch_slot >= 0
+                    ? batch_values[static_cast<std::size_t>(
+                          entry.batch_slot)]
+                    : entry.value;
             if (value > best_value) {
                 best_value = value;
-                chosen = action;
+                chosen = *entry.action;
             }
         }
         return chosen;
