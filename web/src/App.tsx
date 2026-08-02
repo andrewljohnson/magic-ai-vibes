@@ -1358,13 +1358,34 @@ function BattlefieldSide({
   const combatAttackers = (player.creatures ?? []).filter((permanent) =>
     combatAttackerIds?.has(permanentId(permanent)),
   );
+  // Mana rocks live with the lands (Arena-style mana row); other
+  // artifacts stay among the permanents.
+  const MANA_ROCK_NAMES = new Set([
+    "Mox Sapphire",
+    "Mox Pearl",
+    "Mox Ruby",
+    "Mox Emerald",
+    "Mox Jet",
+    "Sol Ring",
+    "Fellwar Stone",
+  ]);
+  const isManaRock = (permanent: Permanent) => {
+    const face =
+      (permanent as { copyOf?: { name?: string } }).copyOf?.name ??
+      permanent.card?.name;
+    return face !== undefined && MANA_ROCK_NAMES.has(face);
+  };
+  const manaRocks = (player.artifacts ?? []).filter(isManaRock);
   const nonlands = [
     ...(player.creatures ?? []).filter(
       (permanent) => !combatAttackerIds?.has(permanentId(permanent)),
     ),
-    ...(player.artifacts ?? []),
+    ...(player.artifacts ?? []).filter(
+      (permanent) => !isManaRock(permanent),
+    ),
     ...(player.enchantments ?? []),
   ];
+  const manaRow = [...(player.lands ?? []), ...manaRocks];
 
   return (
     <section
@@ -1432,7 +1453,7 @@ function BattlefieldSide({
         />
         <PermanentRow
           title="Lands"
-          permanents={player.lands ?? []}
+          permanents={manaRow}
           targetedIds={targetedPermanentIds}
           priorityDestinationIds={priorityDestinationIds}
           priorityOriginIds={priorityOriginIds}
