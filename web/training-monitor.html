@@ -56,10 +56,8 @@
   <p class="sub" id="status">Waiting for telemetry…</p>
   <div class="tiles">
     <div class="tile"><div class="k">Iterations · games</div><div class="v" id="t-iter">–</div><div class="lift" id="t-games"></div></div>
-    <div class="tile"><div class="k">vs Random</div><div class="v" id="t-rand">–</div><div class="lift" id="l-rand"></div></div>
-    <div class="tile"><div class="k">vs Handcrafted</div><div class="v" id="t-hc">–</div><div class="lift" id="l-hc"></div></div>
     <div class="tile"><div class="k">vs Deep MC</div><div class="v" id="t-champ">–</div><div class="lift" id="l-champ"></div></div>
-    <div class="tile"><div class="k">Mean deck lift</div><div class="v" id="t-lift">–</div><div class="lift">bot pilot vs Random pilot</div></div>
+    <div class="tile"><div class="k">Mean deck lift</div><div class="v" id="t-lift">–</div><div class="lift">bot pilot vs Handcrafted pilot</div></div>
   </div>
 
   <section>
@@ -67,15 +65,13 @@
     <p class="desc">Paired win rate of the current net. Probes run beside training on spare cores and land every ~40 iterations at low reps (±12 points of noise per dot — watch trends, not wiggles). Above the gray 50% line means winning.</p>
     <div class="chartwrap"><svg id="strength" viewBox="0 0 960 300"></svg><div class="tooltip" id="tip-strength"></div></div>
     <div class="legend">
-      <span style="--c: var(--s1)">vs Handcrafted</span>
       <span style="--c: var(--s2)">vs Deep Monte Carlo</span>
-      <span style="--c: var(--s3)">vs Random</span>
     </div>
   </section>
 
   <section>
-    <h2>Deck lift over Random pilots</h2>
-    <p class="desc">For each metagame deck, on identical pairings: its win rate piloted by the current net minus its win rate piloted by Random — e.g. +40 means the bot turns a 20% deck into a 60% deck. Higher is better piloting; the zero line means no better than random play.</p>
+    <h2>Deck lift over Handcrafted pilots</h2>
+    <p class="desc">For each metagame deck, on identical pairings: its win rate piloted by the current net minus its win rate when Handcrafted pilots it against the same field. Above zero means the learned bot flies that deck better than the rules bot.</p>
     <div class="chartwrap"><svg id="deck-lift" viewBox="0 0 960 280"></svg><div class="tooltip" id="tip-deck-lift"></div></div>
     <div class="legend">
       <span style="--c: var(--s1)">Blue</span>
@@ -86,19 +82,6 @@
       <span style="--c: var(--s6)">Lotus Combo</span>
       <span style="--c: var(--s7)">Burn</span>
       <span style="--c: var(--s8)">UWR Aggro</span>
-    </div>
-  </section>
-
-  <section>
-    <h2>Behavior emergence</h2>
-    <p class="desc">Hand-built probe situations checked at every strength probe: does the net play its land, keep burn off its own face, Giant Growth a dying blocked attacker, Force Spike the caster who cannot pay — and hold the Spike against open mana? Each line is the pass rate; watch for the iteration where a behavior locks in at 1.</p>
-    <div class="chartwrap"><svg id="behaviors" viewBox="0 0 960 240"></svg><div class="tooltip" id="tip-behaviors"></div></div>
-    <div class="legend">
-      <span style="--c: var(--s1)">land drop</span>
-      <span style="--c: var(--s2)">no self-bolt</span>
-      <span style="--c: var(--s3)">growth save</span>
-      <span style="--c: var(--s4)">spike (works)</span>
-      <span style="--c: var(--s5)">spike restraint</span>
     </div>
   </section>
 
@@ -223,9 +206,7 @@ function drawChart(svgId, tipId, data, seriesList, yDomain, yFmt, refLine) {
 }
 
 const PROBE_KEYS = [
-  { key: "vs_handcrafted", label: "vs Handcrafted", color: "--s1" },
   { key: "vs_deep_monte_carlo", label: "vs Deep Monte Carlo", color: "--s2" },
-  { key: "vs_random", label: "vs Random", color: "--s3" },
 ];
 // Deck colors follow the deck identity, alphabetical-stable order.
 const DECK_KEYS = [
@@ -254,7 +235,7 @@ function render() {
   document.getElementById("t-iter").textContent = last.iteration;
   document.getElementById("t-games").textContent = last.games.toLocaleString() + " games";
 
-  const tiles = [["vs_random", "t-rand", "l-rand"], ["vs_handcrafted", "t-hc", "l-hc"], ["vs_deep_monte_carlo", "t-champ", "l-champ"]];
+  const tiles = [["vs_deep_monte_carlo", "t-champ", "l-champ"]];
   for (const [key, valueId, liftId] of tiles) {
     const has = lastProbe && lastProbe[key] !== undefined;
     document.getElementById(valueId).textContent = has ? fmtPct(lastProbe[key]) : "–";
@@ -285,27 +266,6 @@ function render() {
     drawChart("deck-lift", "tip-deck-lift", liftRows,
       DECK_KEYS.map(s => ({ key: "lift_" + s.deck, label: s.deck, color: s.color, dots: true })),
       [Math.min(0, -0.05), bound], v => fmtDelta(v), 0);
-  }
-
-  const behaviorRows = rows
-    .filter(r => r.behaviors)
-    .map(r => {
-      const probeIter = r.probe_iteration ?? r.iteration;
-      const gamesPerIter = r.iteration > 0 ? r.games / r.iteration : 0;
-      return {
-        iteration: probeIter,
-        games: Math.round(probeIter * gamesPerIter),
-        ...r.behaviors,
-      };
-    });
-  if (behaviorRows.length) {
-    drawChart("behaviors", "tip-behaviors", behaviorRows,
-      [{ key: "land_drop", label: "land drop", color: "--s1", dots: true },
-       { key: "no_self_bolt", label: "no self-bolt", color: "--s2", dots: true },
-       { key: "growth_save", label: "growth save", color: "--s3", dots: true },
-       { key: "spike_good", label: "spike (works)", color: "--s4", dots: true },
-       { key: "spike_restraint", label: "spike restraint", color: "--s5", dots: true }],
-      [0, 1.05], v => v.toFixed(2), null);
   }
 
   const mullRows = rows

@@ -5435,15 +5435,6 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                     probe_policy, 200, probe_threads);
                             outcome.vs_random =
                                 random_probe.aggregate.win_rate();
-                            for (std::size_t deck = 0;
-                                 deck < kSpzDeckCount; ++deck) {
-                                outcome.deck_lift[deck] =
-                                    random_probe.per_deck[deck]
-                                        .win_rate() -
-                                    random_probe
-                                        .baseline_deck_win_rate(deck);
-                            }
-                            outcome.have_deck_lift = true;
                         } catch (const std::exception& error) {
                             if (log) {
                                 log(std::string(
@@ -5471,14 +5462,28 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                             }
                         }
                         try {
-                            outcome.vs_handcrafted =
+                            const auto handcrafted_probe =
                                 run_spz_benchmark(
                                     probe_net, BotKind::Handcrafted,
                                     probe_reps,
                                     mix_seed(base_seed,
                                              9100 + launched_iteration),
-                                    probe_policy, 200, probe_threads)
-                                    .aggregate.win_rate();
+                                    probe_policy, 200, probe_threads);
+                            outcome.vs_handcrafted =
+                                handcrafted_probe.aggregate
+                                    .win_rate();
+                            // Deck lift over HANDCRAFTED pilots: how
+                            // much better the net flies each deck than
+                            // the rules bot does on the same pairings.
+                            for (std::size_t deck = 0;
+                                 deck < kSpzDeckCount; ++deck) {
+                                outcome.deck_lift[deck] =
+                                    handcrafted_probe.per_deck[deck]
+                                        .win_rate() -
+                                    handcrafted_probe
+                                        .baseline_deck_win_rate(deck);
+                            }
+                            outcome.have_deck_lift = true;
                         } catch (const std::exception& error) {
                             if (log) {
                                 log(std::string(
