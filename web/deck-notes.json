@@ -1,0 +1,100 @@
+{
+ "green": {
+  "deck": "Green Growth",
+  "style": "Plays a textbook ramp curve: Llanowar Elves on turns 1-3, then Grizzly Bears into Moss Beast, Ironroot Treefolk, and Forest Colossus. It is patient with combat - it holds attackers home until the board math favors it, uses creatures as blockers to trade up, and saves Giant Growth for its own declared blockers or a lethal alpha strike rather than casting it on offense early.",
+  "good": "Giant Growth timing is disciplined: seen used as a combat trick on a blocking creature (turn 8, vs Creatures & Bolts) and to push the final attack. Trades bodies willingly because the deck out-sizes everyone late.",
+  "mistakes": "Against Moat Mill it has no plan: one loss sat essentially passive for 32 turns and double-cast Giant Growth on its own creature with a Moat in play - pure waste, since ground creatures could not attack anyway. Turn-1 Lotus Combo kills are unwinnable and show up as instant losses.",
+  "replays": [
+   "scout-green-0",
+   "scout-green-2",
+   "scout-green-3"
+  ]
+ },
+ "red": {
+  "deck": "Creatures & Bolts",
+  "style": "Aggressive curve deck that sends nearly every Lightning Bolt at the opponent's face - consistent with the engine finding face damage premium (defender-favored combat). Ironclaw Orcs on turn 3, Gray Ogres and Hill Giants after, attacking in ones and twos while bolts finish.",
+  "good": "Switches bolts to creatures when tempo demands it: in the RU Aggro match it used three bolts on blockers to keep its attack flowing. Wins burn-race mirrors by curving creatures while the opponent draws lands.",
+  "mistakes": "Fires bolts at the face early against Moat Mill, then gets locked: one loss spent five bolts on a 20-life mill deck before the Moats landed, leaving no reach to finish. Against control it can end up hellbent with nothing to do by turn 10.",
+  "replays": [
+   "scout-red-1",
+   "scout-red-2",
+   "scout-red-4"
+  ]
+ },
+ "blue": {
+  "deck": "Counter Flyer",
+  "style": "The cleanest control pilot in the pool. Turn-1 Ancestral Recall / Mox Sapphire starts when drawn, Force Spike on curve, Counterspell held for real threats (it consistently counters the opponent's expensive plays, not their first spell), Braingeyser to refill, then Flying Men and Air Elementals close over 2-4 attack turns.",
+  "good": "Counter discipline stands out vs Robots: it answered Su-Chi and the big artifacts on the stack and won 5 of 6 scouting games. Knows when to stop holding mana and deploy - Air Elementals arrive once the coast is clear, and one game ended with a six-flyer alpha.",
+  "mistakes": "Nothing systematic in these games. The single loss was a turn-2 Lotus Combo kill through a Force Spike - it spiked the Channel but the second wave got through; effectively unwinnable.",
+  "replays": [
+   "scout-blue-0",
+   "scout-blue-5",
+   "scout-blue-3"
+  ]
+ },
+ "white": {
+  "deck": "Moat Mill",
+  "style": "Does exactly what the deck says: Plains, Moat as soon as ground pressure appears, Millstone engine online by the mid-game, then Millstone activations every single turn - often two per turn late - while Moats stack up.",
+  "good": "Against ground creature decks the plan works start to finish: the RU Aggro and Green Growth wins never dropped below 20 life while milling 30-plus cards. Sequencing is right: Moat before Millstone when under pressure, Millstone first when free.",
+  "mistakes": "The deck's losses look structural rather than misplays: Burn kills it through the Moat (it never interacts with face damage), fliers (Serendib, animated Factories) attack over Moat while the mill clock is too slow, and Robots simply out-values it. It also double-mulliganed into a 35-turn grind vs Robots it nearly stole. The pilot mills relentlessly but cannot fix the deck's blind spots.",
+  "replays": [
+   "scout-white-0",
+   "scout-white-4",
+   "scout-white-5"
+  ]
+ },
+ "ru": {
+  "deck": "RU Aggro",
+  "style": "True tempo: Flying Men turn 2, Ironclaw Orcs (which cannot block, and it attacks with them accordingly), removal pointed at whatever blocks, Hill Giants as the top end. Bolts and small Disintegrates go at creatures far more often than face with this deck - it clears the ground so the team keeps swinging.",
+  "good": "Sharp removal instincts: it bolted a mana Elf on turn 2 vs Green, and bolted an animated Mishra's Factory mid-combat vs Robots - exactly the kind of tempo play the deck wants. Blocks with spare bodies to blunt races.",
+  "mistakes": "When behind against fliers it keeps deploying Hill Giants that cannot interact: the Lion-dib-bolt loss cast four Giants while Serendibs and Factories flew over for lethal. No air defense is partly the deck, but the pilot does not race back aggressively enough in those spots.",
+  "replays": [
+   "scout-ru-3",
+   "scout-ru-2",
+   "scout-ru-5"
+  ]
+ },
+ "lotus": {
+  "deck": "Lotus Combo",
+  "style": "Mulligans aggressively toward the Lotus-Lotus-Channel-Disintegrate hand and executes the kill the moment it exists - usually turn 1, occasionally turn 3 after a dig. Every kill in these six games was an exactly-lethal X=20.",
+  "good": "6-for-6 with perfect kill math. Waits when the hand is one piece short rather than committing pieces early.",
+  "mistakes": "One visible tic: when flooded with spare Lotus mana it sometimes casts a zero-effect Disintegrate X=0 at itself before the lethal one (two of six games). It costs nothing - the lethal still resolves - but it is a wasted card and a tell that tie-band arbitration lets a no-op through when the win is already locked.",
+  "replays": [
+   "scout-lotus-1",
+   "scout-lotus-2"
+  ]
+ },
+ "burn": {
+  "deck": "Burn",
+  "style": "Pure face-race: Mountain, Bolt, Bolt, repeat. It happily throws three bolts in a turn when mana allows and treats its 12 lands as exactly enough to empty its hand.",
+  "good": "Wins every race against slow decks - the Moat Mill kill took 8 turns and every bolt hit face. Occasionally spends one bolt on a must-kill creature (an early Savannah Lions, a Su-Chi) and that restraint is usually right.",
+  "mistakes": "It races even when the race is lost: against Green Growth and Counter Flyer it kept pointing bolts at face while the opponent's board ran away with the game (final life 2 vs -7 board swing). With 18 bolts and 20 life to burn through, one countered or wasted bolt often decides it - but there is no alternate plan available, so this reads as deck limit more than pilot error.",
+  "replays": [
+   "scout-burn-5",
+   "scout-burn-2",
+   "scout-burn-4"
+  ]
+ },
+ "uwr": {
+  "deck": "Lion-dib-bolt",
+  "style": "The most texture-rich pilot: early Black Vise (then Wheel of Fortune while the opponent's hand is full - the Vise-Wheel squeeze appeared twice), Savannah Lions and Serendib Efreet on the clock, Swords/Bolt/Psionic Blast clearing blockers, Mishra's Factories attacking every turn, Library of Alexandria activated at exactly seven cards, and Strip Mine used as land destruction on the opponent's best land.",
+  "good": "Resource sequencing is excellent: Ancestral early, Library held to seven, Wheel timed with Vise, Factories animated to attack but kept as mana when defense matters. Removal goes at real threats (a leading Moat got Disenchanted on sight).",
+  "mistakes": "The Robots loss showed it durdling under pressure: it spent turns on Library activations and a Wheel while Su-Chis attacked, and animated Factories into open removal repeatedly. Against fast artifact starts it needs to trade earlier instead of accumulating card advantage.",
+  "replays": [
+   "scout-uwr-1",
+   "scout-uwr-0",
+   "scout-uwr-4"
+  ]
+ },
+ "robots": {
+  "deck": "Robots",
+  "style": "Plays like a power-artifact toolbox: explosive starts (turn-2 Black Lotus into Mind Twist for the opponent's hand, or Lotus into Su-Chi plus Strip Mine on their only land), Mana Drain absorbing a spell and banking the mana into next turn's Su-Chi, Demonic Tutor fetching the right answer mid-game, and Triskelion arriving late to ping the board then Mind Twist as a finisher. Mishra's Factories carry early beats while the big artifacts assemble.",
+  "good": "The Mana Drain line is genuinely sophisticated: drain on turn 7, then Su-Chi + Ancestral + double Mox on turn 8 off the banked mana. Strip Mine consistently hits the opponent's most important land on tempo. Sage of Lat-Nam converts spent artifacts into cards late.",
+  "mistakes": "Against Counter Flyer it over-extends: animated Factories attacked into open blue mana turn after turn and the big artifacts walked into Counterspells one at a time - the loss saw it feed threats piecemeal instead of forcing a counter war on one turn. That matchup (71% for blue in the matrix) is the deck's real weakness.",
+  "replays": [
+   "scout-robots-4",
+   "scout-robots-3",
+   "scout-robots-2"
+  ]
+ }
+}

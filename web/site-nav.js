@@ -6,6 +6,7 @@
     ["monitor.html", "Monitor"],
     ["matchup-matrix.html", "Bot comparison"],
     ["decks.html", "Decks"],
+    ["deck-scouting.html", "Scouting"],
     ["replay.html", "Replays"],
   ];
   const here = location.pathname.split("/").pop() || "monitor.html";

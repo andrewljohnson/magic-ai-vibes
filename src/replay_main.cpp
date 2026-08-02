@@ -152,16 +152,7 @@ int main(int argc, char** argv) {
     (void)web;
 
     const auto net = std::make_shared<const spz::SpzNet>(
-        spz::load_spz_net("data/spz-champion-v11.txt"));
-    std::shared_ptr<const spz::SpzAdvantageNet> advantage;
-    {
-        std::ifstream probe("data/spz-advantage-v8.txt");
-        if (probe) {
-            advantage = std::make_shared<const spz::SpzAdvantageNet>(
-                spz::load_spz_advantage_net(
-                    "data/spz-advantage-v8.txt"));
-        }
-    }
+        spz::load_spz_net("data/spz-champion.txt"));
     const auto& decks = spz::spz_decks();
     const std::array<std::vector<CardId>, 2> game_decks = {
         decks[opp_deck], decks[spz_deck]};
@@ -241,13 +232,11 @@ int main(int argc, char** argv) {
         policy.block_prediction_worlds = 4;
         policy.rollout = true;
         policy.gamma_per_turn = 0.98;
-        if (advantage) {
-        }
         // Match the arena bridge exactly for seat 1.
         policy.seed = seat == 1 ? (seed ^ 0x53505AULL)
                                 : (seed ^ 0x53505AULL) + 1;
         HumanController controller = spz::make_spz_controller(
-            net, game_decks, seat, policy, nullptr, nullptr, advantage);
+            net, game_decks, seat, policy, nullptr, nullptr, nullptr);
         if (seat == watched_seat) {
             controller.observe = observe;
         }
