@@ -21,12 +21,16 @@ echo "headless gate rate: $RATE" >> "$LOG"
 PASS=$(python3 -c "print(1 if float('$RATE') >= 0.615 else 0)")
 if [ "$PASS" = "1" ]; then
   echo "GATE CLEARED: promoting HEADLESS champion, retiring the head" >> "$LOG"
-  cp data/spz-champion.txt data/spz-champion-prev.txt
-  [ -f data/spz-advantage.txt ] && mv data/spz-advantage.txt data/spz-advantage-prev.txt
+  # The 415-feature era artifacts cannot run on the 419-feature
+  # binaries: delete rather than special-case (git history keeps them).
+  rm -f data/spz-champion-prev.txt data/spz-advantage-prev.txt
+  rm -f data/spz-advantage.txt
   cp data/spz-headless-td09.txt data/spz-champion.txt
+  make >> "$LOG" 2>&1
+  make matchup-matrix >> "$LOG" 2>&1 || ./build/matchup-matrix --threads 10 >/dev/null 2>&1 || true
   ./build/matchup-matrix --threads 10 > build/telemetry/matrix-regen.log 2>&1
-  echo "PROMOTED headless + matrices regenerated" >> "$LOG"
+  echo "PROMOTED headless + bridge/matrix rebuilt + matrices regenerated" >> "$LOG"
 else
-  echo "GATE NOT CLEARED: no promotion (deployed champion stands)" >> "$LOG"
+  echo "GATE NOT CLEARED: no promotion (deployed 415-era champion stands on the old binaries)" >> "$LOG"
 fi
 echo "=== headless experiment complete ===" >> "$LOG"

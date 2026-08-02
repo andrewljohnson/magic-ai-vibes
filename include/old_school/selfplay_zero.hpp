@@ -250,10 +250,6 @@ SpzAdvantageNet load_spz_advantage_net(const std::string& path);
 struct SpzPolicyConfig {
     // Determinized worlds averaged per priority-action evaluation.
     std::size_t worlds = 2;
-    // Experiment knob: also refuse own-turn FIRST-MAIN factory
-    // animations (they can wait for begin-combat; observed 40% never
-    // attack afterwards). A/B evidence decides whether this ships on.
-    bool defer_factory_animation = false;
     // Worlds averaged when predicting opponent blocks during attack search.
     std::size_t block_prediction_worlds = 2;
     // Epsilon-greedy exploration over priority actions and combat choices.

@@ -17,6 +17,16 @@ make test       # every C++ suite plus the web tests
 Use C++20 and keep `-Wall -Wextra -Wpedantic -Werror` clean. Preserve
 deterministic behavior for a fixed seed.
 
+## No card-specific behavior patches
+
+Do not hard-code narrowly targeted play rules into the learned bot
+(e.g. "never animate Mishra's Factory in this phase"). When the bot
+misplays a card, find the general mechanism — a search inconsistency,
+a feature the net cannot observe, a credit-assignment gap — and fix
+that, gated by a paired experiment. Card-specific prunes hide the
+defect, rot as the pool grows, and teach us nothing. The Handcrafted
+baseline bot is the only place card-specific strategy belongs.
+
 ## Evaluation discipline
 
 - Use the paired benchmark (`selfplay-zero benchmark`) for bot-strength

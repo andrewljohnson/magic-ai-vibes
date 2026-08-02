@@ -174,9 +174,11 @@ constexpr std::size_t kCardBlockCount = 11;
 }  // namespace
 
 std::size_t spz_feature_count_colors() {
-    // v1 plus, per player: untapped basic lands by color (4) and the
-    // floating mana pool by color (4).
-    return spz_feature_count() + 2 * 8;
+    // v1 plus, per player: untapped basic lands by color (4), the
+    // floating mana pool by color (4), and how much of the board is
+    // temporary (expiring creature forms and pump totals) — so the net
+    // can tell phantom presence from lasting presence.
+    return spz_feature_count() + 2 * 10;
 }
 
 std::vector<float> spz_features_colors(
@@ -209,6 +211,20 @@ std::vector<float> spz_features_colors(
         features.push_back(state.mana_pool.red / 4.0f);
         features.push_back(state.mana_pool.blue / 4.0f);
         features.push_back(state.mana_pool.white / 4.0f);
+        // Impermanence: creature forms that revert at cleanup (a card
+        // whose printed type is not Creature is an animated permanent)
+        // and until-end-of-turn pump on real creatures.
+        int expiring_creatures = 0;
+        int temporary_power = 0;
+        for (const auto& creature : state.creatures) {
+            if (card_definition(creature.card).type !=
+                CardType::Creature) {
+                expiring_creatures += 1;
+            }
+            temporary_power += creature.temporary_power_bonus;
+        }
+        features.push_back(expiring_creatures / 4.0f);
+        features.push_back(temporary_power / 6.0f);
     }
     if (features.size() != spz_feature_count_colors()) {
         throw std::logic_error(
@@ -2006,6 +2022,12 @@ struct SpzAgent {
         std::vector<std::pair<PermanentId, PermanentId>> blocks;
     };
     std::optional<PendingCombat> pending_combat;
+    // Set at each rollout start; the deciding seat's FIRST imagined
+    // combat prices its attack against the root's robust defense
+    // predictor (with an explicit decline branch) so rollouts stop
+    // paying for attacks the root policy would never make. One robust
+    // check per rollout keeps the cost bounded.
+    mutable bool rollout_robust_combat_spent_ = false;
 
     void on_event(const GameEvent& event) {
         switch (event.kind) {
@@ -2022,54 +2044,6 @@ struct SpzAgent {
             default:
                 break;
         }
-    }
-
-    // A factory animation that can no longer fight is a paid no-op:
-    // the creature form expires at its controller's own cleanup, so on
-    // your own turn any animation after the attack declaration is
-    // dead, and re-animating a factory whose animation is already on
-    // the stack only fizzles. Rules-only, card-exact — same family as
-    // the no-upside prune.
-    template <class Stack>
-    static bool pointless_factory_animation(
-        const PriorityAction& action, std::size_t actor,
-        std::size_t active_player, TurnPhase phase,
-        const Stack& stack) {
-        if (action.kind != PriorityActionKind::ActivateMishrasFactory ||
-            !action.source_permanent.has_value()) {
-            return false;
-        }
-        for (const StackObject& object : stack) {
-            if (object.kind == StackObjectKind::ActivatedAbility &&
-                object.card == CardId::MishrasFactory &&
-                object.target.has_value() &&
-                object.target->creature == *action.source_permanent) {
-                return true;
-            }
-        }
-        if (actor == active_player &&
-            (phase == TurnPhase::DeclareBlockers ||
-             phase == TurnPhase::DamageOrder ||
-             phase == TurnPhase::EndCombat ||
-             phase == TurnPhase::SecondMain)) {
-            return true;
-        }
-        return false;
-    }
-
-    bool pointless_or_deferred_factory_animation(
-        const PriorityAction& action, std::size_t actor,
-        std::size_t active_player, TurnPhase phase,
-        const auto& stack) const {
-        if (pointless_factory_animation(action, actor, active_player,
-                                        phase, stack)) {
-            return true;
-        }
-        return config.defer_factory_animation &&
-               action.kind ==
-                   PriorityActionKind::ActivateMishrasFactory &&
-               actor == active_player &&
-               phase == TurnPhase::FirstMain;
     }
 
     // ------------------------------------------------------------------
@@ -2448,11 +2422,6 @@ struct SpzAgent {
         const BannedAction* banned = nullptr) const {
         auto actions =
             legal_priority_actions(state, priority.player, sorcery);
-        std::erase_if(actions, [&](const PriorityAction& action) {
-            return pointless_or_deferred_factory_animation(
-                action, priority.player, state.active_player, phase,
-                state.stack);
-        });
         if (banned != nullptr && priority.player == banned->seat) {
             std::erase_if(actions, [&](const PriorityAction& action) {
                 return action.kind == banned->kind &&
@@ -2653,8 +2622,26 @@ struct SpzAgent {
         const auto eligible =
             old_school::legal_attackers(state, attacking_player);
         if (!eligible.empty()) {
-            const auto attack_set =
+            auto attack_set =
                 greedy_attack_set(state, attacking_player, eligible);
+            if (!attack_set.empty() &&
+                attacking_player == seat &&
+                !rollout_robust_combat_spent_) {
+                rollout_robust_combat_spent_ = true;
+                const auto robust_blocks =
+                    predicted_defense(state, seat, attack_set);
+                GameState attacked = state;
+                if (resolve_combat(attacked, seat, attack_set,
+                                   robust_blocks)) {
+                    const double attack_value = value_for(
+                        attacked, seat, TurnPhase::SecondMain);
+                    const double decline_value = value_for(
+                        state, seat, TurnPhase::SecondMain);
+                    if (decline_value > attack_value) {
+                        attack_set.clear();
+                    }
+                }
+            }
             if (!attack_set.empty()) {
                 const auto blocks = greedy_blocks(
                     state, attacking_player, attack_set, nullptr);
@@ -2753,6 +2740,7 @@ struct SpzAgent {
                                    std::size_t cycles,
                                    const BannedAction* banned =
                                        nullptr) const {
+        rollout_robust_combat_spent_ = false;
         const std::size_t root_turn = state.turn_number;
         const auto settle = [&](double value) {
             return discount_outcome(value, root_turn,
@@ -3441,13 +3429,6 @@ struct SpzAgent {
         // are safe here — any action that reveals hidden cards settles to a
         // different observation and is therefore retained.
         std::vector<bool> dominated(actions.size(), false);
-        for (std::size_t index = 0; index < actions.size(); ++index) {
-            if (pointless_or_deferred_factory_animation(
-                    actions[index], seat, observation.active_player,
-                    phase, observation.stack)) {
-                dominated[index] = true;
-            }
-        }
         if (config.pass_dominance_prune) {
             const auto dominance = diagnose_value_pass_dominance(
                 reconstructed, seat, sorcery_actions, phase, 0);
