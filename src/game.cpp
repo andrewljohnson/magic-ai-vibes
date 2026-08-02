@@ -1130,6 +1130,175 @@ bool land_provides(CardId land, int ManaCost::*color) {
 }
 
 
+std::vector<std::vector<PaymentTap>> alternative_payments(
+    const PlayerState& player, const ManaCost& cost,
+    std::size_t max_variants) {
+    // Greedy exact covers of the cost under different source
+    // preferences, expressed as pre-tap lists. Colored needs are
+    // satisfied first (from the most restrictive source the policy
+    // allows), then the generic remainder. Lotus sacrifice and
+    // Channel life cannot be expressed as taps, so plans never rely
+    // on them.
+    struct Source {
+        PermanentId id = 0;
+        CardId card = CardId::Forest;
+        bool is_land = false;
+        int amount = 1;  // generic face amount (Sol Ring = 2)
+    };
+    std::vector<Source> sources;
+    for (const auto& land : player.lands) {
+        if (!land.tapped) {
+            sources.push_back(
+                {land.id, land.card, true,
+                 std::max(1, land_mana(land.card).generic)});
+        }
+    }
+    for (const auto& artifact : player.artifacts) {
+        if (artifact.tapped) {
+            continue;
+        }
+        const CardId face = artifact_face(artifact);
+        if (face == CardId::FellwarStone) {
+            sources.push_back({artifact.id, face, false, 1});
+        } else if (mana_total(artifact_mana(face)) > 0) {
+            sources.push_back({artifact.id, face, false,
+                               std::max(1, artifact_mana(face).generic)});
+        }
+    }
+    static constexpr std::array<int ManaCost::*, 6> kFaces = {
+        &ManaCost::generic, &ManaCost::green, &ManaCost::red,
+        &ManaCost::blue,    &ManaCost::white, &ManaCost::black,
+    };
+    const auto provides_face = [](const Source& source, int face) {
+        if (face == 0) {
+            return source.is_land
+                       ? land_mana(source.card).generic > 0 &&
+                             source.card != CardId::CityOfBrass
+                       : artifact_mana(source.card).generic > 0;
+        }
+        if (source.is_land) {
+            return land_provides(source.card, kFaces[static_cast<
+                                                  std::size_t>(face)]);
+        }
+        if (source.card == CardId::FellwarStone) {
+            return true;
+        }
+        return artifact_mana(source.card).*kFaces[static_cast<
+                   std::size_t>(face)] > 0;
+    };
+    const auto colored_flexibility = [&](const Source& source) {
+        int count = 0;
+        for (int face = 1; face <= 5; ++face) {
+            count += provides_face(source, face) ? 1 : 0;
+        }
+        return count;
+    };
+    // Policy = ordering preference for spending, smaller spends first.
+    // 0: rocks first (mirrors the planner's family, other tie-breaks)
+    // 1: rocks last (save moxen, spend lands)
+    // 2: painful first (spend City/ability lands, keep everything else)
+    const auto spend_rank = [&](const Source& source, int policy) {
+        const bool painful =
+            source.is_land && (source.card == CardId::CityOfBrass ||
+                               source.card == CardId::StripMine ||
+                               source.card == CardId::MishrasFactory ||
+                               source.card ==
+                                   CardId::LibraryOfAlexandria);
+        switch (policy) {
+        case 1:
+            return (painful ? 2 : source.is_land ? 0 : 1) * 10 +
+                   colored_flexibility(source);
+        case 2:
+            return (painful ? 0 : source.is_land ? 1 : 2) * 10 +
+                   colored_flexibility(source);
+        default:
+            return (source.is_land ? (painful ? 2 : 1) : 0) * 10 +
+                   colored_flexibility(source);
+        }
+    };
+    std::vector<std::vector<PaymentTap>> variants;
+    std::vector<std::vector<PermanentId>> seen_sets;
+    for (int policy = 0; policy < 3; ++policy) {
+        std::vector<Source> pool = sources;
+        std::stable_sort(pool.begin(), pool.end(),
+                         [&](const Source& left, const Source& right) {
+                             return spend_rank(left, policy) <
+                                    spend_rank(right, policy);
+                         });
+        std::vector<PaymentTap> taps;
+        std::vector<bool> used(pool.size(), false);
+        bool feasible = true;
+        // Colored needs first, net of already-floated pool.
+        int pool_spent_on_color = 0;
+        for (int face = 1; face <= 5 && feasible; ++face) {
+            const int have =
+                player.mana_pool.*kFaces[static_cast<std::size_t>(
+                    face)];
+            const int want =
+                cost.*kFaces[static_cast<std::size_t>(face)];
+            pool_spent_on_color += std::min(have, want);
+            int needed = std::max(0, want - have);
+            for (std::size_t index = 0;
+                 index < pool.size() && needed > 0; ++index) {
+                if (used[index] ||
+                    !provides_face(pool[index], face)) {
+                    continue;
+                }
+                used[index] = true;
+                taps.push_back({pool[index].id, face});
+                --needed;
+            }
+            feasible = needed == 0;
+        }
+        // Generic remainder, net of whatever floated pool is left.
+        const int pool_total =
+            player.mana_pool.generic + player.mana_pool.green +
+            player.mana_pool.red + player.mana_pool.blue +
+            player.mana_pool.white + player.mana_pool.black;
+        int generic_needed = std::max(
+            0, cost.generic - (pool_total - pool_spent_on_color));
+        for (std::size_t index = 0;
+             index < pool.size() && generic_needed > 0; ++index) {
+            if (used[index]) {
+                continue;
+            }
+            // Any face pays generic; prefer the pure-generic face.
+            int face = 0;
+            if (!provides_face(pool[index], 0)) {
+                face = 1;
+                while (face <= 5 &&
+                       !provides_face(pool[index], face)) {
+                    ++face;
+                }
+                if (face > 5) {
+                    continue;
+                }
+            }
+            used[index] = true;
+            taps.push_back({pool[index].id, face});
+            generic_needed -= pool[index].amount;
+        }
+        if (!feasible || generic_needed > 0 || taps.empty()) {
+            continue;
+        }
+        std::vector<PermanentId> signature;
+        for (const PaymentTap& tap : taps) {
+            signature.push_back(tap.permanent);
+        }
+        std::sort(signature.begin(), signature.end());
+        if (std::find(seen_sets.begin(), seen_sets.end(), signature) !=
+            seen_sets.end()) {
+            continue;
+        }
+        seen_sets.push_back(signature);
+        variants.push_back(std::move(taps));
+        if (variants.size() >= max_variants) {
+            break;
+        }
+    }
+    return variants;
+}
+
 bool can_pay(const PlayerState& player, const ManaCost& cost) {
     return plan_mana_payment(player, cost).possible;
 }
@@ -2378,6 +2547,25 @@ legal_priority_actions(const GameState& state, std::size_t player,
 bool apply_priority_action(GameState& state, std::size_t player,
                            const PriorityAction& action,
                            bool sorcery_actions) {
+    // A payment-variant action floats its exact taps first, then pays
+    // as the same spell with the pool consumed before anything else.
+    // On any failure the state is poisoned (like every partial apply)
+    // and the caller must discard it.
+    if (!action.pre_taps.empty()) {
+        for (const PaymentTap& tap : action.pre_taps) {
+            if (!apply_priority_action(
+                    state, player,
+                    PriorityAction::tap_land_for_mana(tap.permanent,
+                                                      tap.face),
+                    sorcery_actions)) {
+                return false;
+            }
+        }
+        PriorityAction stripped = action;
+        stripped.pre_taps.clear();
+        return apply_priority_action(state, player, stripped,
+                                     sorcery_actions);
+    }
     // Human-only manual mana taps are injected by the game loop, not
     // enumerated; their apply case below fully validates them.
     if (action.kind != PriorityActionKind::TapLandForMana) {
@@ -5051,6 +5239,61 @@ Game::continue_priority_window(bool sorcery_actions,
                     actions.push_back(
                         PriorityAction::tap_land_for_mana(
                             creature.id, 1));
+                }
+            }
+        }
+        if (controller != nullptr &&
+            controller->offers_payment_variants) {
+            // Payment-plan branching: every cast also appears with up
+            // to two explicit alternative payments, so the seat's
+            // search can judge WHICH sources to spend, not just what
+            // to cast.
+            const auto action_cost =
+                [](const PriorityAction& action)
+                -> std::optional<ManaCost> {
+                switch (action.kind) {
+                case PriorityActionKind::CastDisintegrate:
+                    return disintegrate_cost(action.x_value);
+                case PriorityActionKind::CastBraingeyser:
+                    return braingeyser_cost(action.x_value);
+                case PriorityActionKind::CastFireball:
+                    return fireball_cost(action.x_value);
+                case PriorityActionKind::CastMindTwist:
+                    return mind_twist_cost(action.x_value);
+                case PriorityActionKind::CastRecall:
+                    return recall_cost(action.x_value);
+                case PriorityActionKind::ActivateMillstone:
+                    return kMillstoneActivationCost;
+                case PriorityActionKind::ActivateMishrasFactory:
+                    return ManaCost{.generic = 1};
+                case PriorityActionKind::Pass:
+                case PriorityActionKind::PlayLand:
+                case PriorityActionKind::ActivateLibrary:
+                case PriorityActionKind::ActivateStripMine:
+                case PriorityActionKind::ActivateSage:
+                case PriorityActionKind::ActivateTriskelion:
+                case PriorityActionKind::TapLandForMana:
+                    return std::nullopt;
+                default: {
+                    const ManaCost cost =
+                        card_definition(action.card).cost;
+                    return mana_total(cost) > 0
+                               ? std::optional<ManaCost>(cost)
+                               : std::nullopt;
+                }
+                }
+            };
+            const std::size_t base_count = actions.size();
+            for (std::size_t index = 0; index < base_count; ++index) {
+                const auto cost = action_cost(actions[index]);
+                if (!cost.has_value()) {
+                    continue;
+                }
+                for (auto& taps : alternative_payments(
+                         state_.players[priority.player], *cost, 2)) {
+                    PriorityAction variant = actions[index];
+                    variant.pre_taps = std::move(taps);
+                    actions.push_back(std::move(variant));
                 }
             }
         }

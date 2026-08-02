@@ -4854,6 +4854,50 @@ TEST(manual_land_tap_floats_mana_and_pays_first) {
     CHECK(player.creatures[0].tapped);
 }
 
+TEST(payment_variants_cover_costs_and_apply_as_pre_taps) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::GrayOgre};
+    player.lands = {
+        {.id = 101, .card = old_school::CardId::Mountain,
+         .tapped = false},
+        {.id = 102,
+         .card = old_school::CardId::CityOfBrass,
+         .tapped = false},
+        {.id = 103, .card = old_school::CardId::Island,
+         .tapped = false},
+    };
+    player.artifacts = {
+        {.id = 104, .card = old_school::CardId::MoxRuby,
+         .tapped = false},
+    };
+    const auto variants = old_school::alternative_payments(
+        player, old_school::card_definition(
+                    old_school::CardId::GrayOgre)
+                    .cost,
+        3);
+    CHECK(!variants.empty());
+    // Every variant is a distinct source set and actually pays: the
+    // cast applies with the variant's taps and touches nothing else.
+    for (const auto& taps : variants) {
+        old_school::GameState trial = state;
+        auto variant = old_school::PriorityAction::cast_creature(
+            old_school::CardId::GrayOgre);
+        variant.pre_taps = taps;
+        CHECK(old_school::apply_priority_action(trial, 0, variant,
+                                                true));
+        std::size_t tapped = 0;
+        for (const auto& land : trial.players[0].lands) {
+            tapped += land.tapped ? 1 : 0;
+        }
+        for (const auto& artifact : trial.players[0].artifacts) {
+            tapped += artifact.tapped ? 1 : 0;
+        }
+        CHECK(tapped == taps.size());
+    }
+}
+
 TEST(generic_costs_prefer_moxen_over_city_of_brass) {
     old_school::GameState state;
     state.active_player = 0;

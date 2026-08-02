@@ -69,6 +69,7 @@ struct Arguments {
     std::size_t top_k = 5;
     std::size_t sims = 160;
     bool rollout = false;
+    bool payment_branching = false;
     bool ismcts = false;
     bool versus_champion = false;
     double learning_rate = 0.01;
@@ -165,6 +166,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.reps = std::stoull(next());
         } else if (flag == "--rollout") {
             arguments.rollout = true;
+        } else if (flag == "--payment-branching") {
+            arguments.payment_branching = true;
         } else if (flag == "--cycles") {
             arguments.cycles = std::stoull(next());
         } else if (flag == "--top-k") {
@@ -296,6 +299,7 @@ int run_benchmark(const Arguments& arguments) {
     policy.worlds = arguments.worlds == 0 ? 4 : arguments.worlds;
     policy.block_prediction_worlds = policy.worlds;
     policy.rollout = arguments.rollout;
+    policy.payment_branching = arguments.payment_branching;
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
     policy.gamma_per_turn = arguments.gamma;

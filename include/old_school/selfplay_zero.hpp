@@ -255,6 +255,10 @@ struct SpzPolicyConfig {
     // cannot tell futures apart, do not pay for one. Card-agnostic
     // successor to the retired advantage head's tie arbitration.
     bool frugal_tie_break = true;
+    // Experimental: the game offers each cast with up to two explicit
+    // alternative payment plans (pre-taps); rollout search judges which
+    // sources to spend. Off = the deterministic mana planner pays.
+    bool payment_branching = false;
     // Worlds averaged when predicting opponent blocks during attack search.
     std::size_t block_prediction_worlds = 2;
     // Epsilon-greedy exploration over priority actions and combat choices.

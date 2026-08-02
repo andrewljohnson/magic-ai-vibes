@@ -303,6 +303,16 @@ enum class PriorityActionKind : std::uint8_t {
     TapLandForMana,
 };
 
+// One explicit mana float: tap this permanent for the given face
+// (0 generic, 1 green, 2 red, 3 blue, 4 white, 5 black) before paying
+// a spell's cost. Carried by payment-variant actions.
+struct PaymentTap {
+    PermanentId permanent = 0;
+    int face = 0;
+
+    bool operator==(const PaymentTap&) const = default;
+};
+
 struct PriorityAction {
     PriorityActionKind kind = PriorityActionKind::Pass;
     CardId card = CardId::Forest;
@@ -312,6 +322,10 @@ struct PriorityAction {
     int x_value = 0;
     // Demonic Tutor's selected card.
     std::optional<CardId> chosen_card;
+    // Non-empty: pay by floating exactly these taps first (the auto
+    // payer then consumes the floated pool before touching anything
+    // else). Empty: the mana planner chooses the payment.
+    std::vector<PaymentTap> pre_taps;
 
     static PriorityAction pass();
     static PriorityAction play_land(CardId land);
@@ -373,6 +387,14 @@ bool can_pay(const PlayerState& player, const ManaCost& cost);
 bool pay_mana(PlayerState& player, const ManaCost& cost);
 // True when the land can produce the given colored mana face.
 bool land_provides(CardId land, int ManaCost::*color);
+
+// Alternative full payments for `cost` from this player's untapped
+// sources, as explicit pre-tap lists (never Lotus/Channel funded).
+// Distinct from each other and from the auto planner's choice; at most
+// `max_variants` entries.
+std::vector<std::vector<PaymentTap>> alternative_payments(
+    const PlayerState& player, const ManaCost& cost,
+    std::size_t max_variants);
 int maximum_available_mana(const PlayerState& player);
 
 std::vector<PriorityAction>
@@ -541,6 +563,9 @@ struct HumanController {
     // web arena's real human seat sets this; SPZ controller seats and
     // simulations keep the automatic payer exclusively.
     bool offers_mana_taps = false;
+    // Offer payment-plan variants of cast actions (same spell, an
+    // explicit alternative set of pre-taps). Experimental SPZ lever.
+    bool offers_payment_variants = false;
 };
 
 enum class PriorityPassResult : std::uint8_t {

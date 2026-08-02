@@ -3672,9 +3672,18 @@ struct SpzAgent {
                             (action.target->creature.has_value() ? 1
                                                                  : 0);
                     }
+                    int payment_signature = 0;
+                    for (const PaymentTap& tap : action.pre_taps) {
+                        payment_signature =
+                            payment_signature * 131 +
+                            static_cast<int>(tap.permanent) * 7 +
+                            tap.face + 1;
+                    }
                     const auto key = std::make_tuple(
                         static_cast<int>(action.kind),
-                        static_cast<int>(action.card), target_class);
+                        static_cast<int>(action.card) +
+                            payment_signature * 1000,
+                        target_class);
                     const auto found = best.find(key);
                     if (found == best.end() ||
                         totals[index] > totals[found->second]) {
@@ -3690,7 +3699,8 @@ struct SpzAgent {
                                  return totals[left] > totals[right];
                              });
             const std::size_t candidates = std::min(
-                std::max<std::size_t>(config.rollout_top_k, 2),
+                std::max<std::size_t>(config.rollout_top_k, 2) +
+                    (config.payment_branching ? 4 : 0),
                 order.size());
             std::vector<double> rollout_totals(actions.size(),
                                                kIllegalScore);
@@ -4558,6 +4568,7 @@ HumanController make_spz_controller(
                                  const GameEvent& event) {
         agent->on_event(event);
     };
+    controller.offers_payment_variants = config.payment_branching;
     return controller;
 }
 
