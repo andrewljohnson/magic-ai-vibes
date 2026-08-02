@@ -31,10 +31,12 @@ $(OBJ_DIR)/%.o: %.cpp
 	@mkdir -p "$(@D)"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c "$<" -o "$@"
 
+LDFLAGS ?= -framework Accelerate
+
 define link_program
 $(1): $(call source_objects,$(2))
 	@mkdir -p $(BUILD_DIR)
-	$$(CXX) $$(CPPFLAGS) $$(CXXFLAGS) $(call source_objects,$(2)) -o $$@
+	$$(CXX) $$(CPPFLAGS) $$(CXXFLAGS) $(call source_objects,$(2)) $$(LDFLAGS) -o $$@
 endef
 
 $(eval $(call link_program,$(SELFPLAY_ZERO),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/selfplay_zero_main.cpp))

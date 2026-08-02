@@ -16,6 +16,11 @@
 #include <stdexcept>
 #include <thread>
 #include <future>
+
+#ifdef __APPLE__
+#define ACCELERATE_NEW_LAPACK
+#include <Accelerate/Accelerate.h>
+#endif
 #include <utility>
 
 namespace old_school::selfplay_zero {
@@ -903,6 +908,51 @@ double SpzNet::value(const std::vector<float>& features) const {
     if (features.size() != inputs_) {
         throw std::invalid_argument("SpzNet feature size mismatch");
     }
+#ifdef __APPLE__
+    // Rollout search is dominated by this function, so the matvec and
+    // tanh run through Accelerate (AMX/vForce). BLAS accumulation
+    // order differs from the scalar loop in the last ulp; the strength
+    // gate covers that, and sim-bench's fingerprint is re-anchored.
+    thread_local std::vector<double> input_scratch;
+    thread_local std::vector<double> activation_scratch;
+    input_scratch.resize(inputs_);
+    vDSP_vspdp(features.data(), 1, input_scratch.data(), 1, inputs_);
+    activation_scratch.resize(hidden_);
+    std::memcpy(activation_scratch.data(), hidden_bias_.data(),
+                hidden_ * sizeof(double));
+    cblas_dgemv(CblasRowMajor, CblasNoTrans,
+                static_cast<int>(hidden_), static_cast<int>(inputs_),
+                1.0, hidden_weights_.data(),
+                static_cast<int>(inputs_), input_scratch.data(), 1,
+                1.0, activation_scratch.data(), 1);
+    const int hidden_count = static_cast<int>(hidden_);
+    vvtanh(activation_scratch.data(), activation_scratch.data(),
+           &hidden_count);
+    if (hidden2_ == 0) {
+        const double output =
+            output_bias_ +
+            cblas_ddot(hidden_count, output_weights_.data(), 1,
+                       activation_scratch.data(), 1);
+        return sigmoid(output);
+    }
+    thread_local std::vector<double> second_scratch;
+    second_scratch.resize(hidden2_);
+    std::memcpy(second_scratch.data(), hidden2_bias_.data(),
+                hidden2_ * sizeof(double));
+    cblas_dgemv(CblasRowMajor, CblasNoTrans,
+                static_cast<int>(hidden2_), static_cast<int>(hidden_),
+                1.0, hidden2_weights_.data(),
+                static_cast<int>(hidden_), activation_scratch.data(),
+                1, 1.0, second_scratch.data(), 1);
+    const int second_count = static_cast<int>(hidden2_);
+    vvtanh(second_scratch.data(), second_scratch.data(),
+           &second_count);
+    const double output =
+        output_bias_ +
+        cblas_ddot(second_count, output_weights_.data(), 1,
+                   second_scratch.data(), 1);
+    return sigmoid(output);
+#else
     if (hidden2_ == 0) {
         double output = output_bias_;
         for (std::size_t unit = 0; unit < hidden_; ++unit) {
@@ -934,6 +984,7 @@ double SpzNet::value(const std::vector<float>& features) const {
         output += output_weights_[unit] * std::tanh(activation);
     }
     return sigmoid(output);
+#endif
 }
 
 double SpzNet::train_batch(
