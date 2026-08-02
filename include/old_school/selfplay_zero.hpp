@@ -275,6 +275,12 @@ struct SpzPolicyConfig {
     // through before evaluating. 1 stops at the seat's next turn start; 2
     // additionally plays that turn and the following opponent turn.
     std::size_t rollout_turn_cycles = 1;
+    // Experimental: add one rollout cycle at root decisions in
+    // contested windows (opponent has two or more untapped mana
+    // sources and unknown cards in hand), so "hold and double-spell
+    // next turn" becomes visible where counter wars happen. Global
+    // 2-cycle depth measured -5.2 points; this tests selectivity.
+    bool adaptive_depth = false;
     // Priority-decision search mode. GreedyRollout is the deployed champion
     // behavior. Ismcts searches a per-world tree over both players' priority
     // decisions (combat stays on the greedy machinery) with value-net

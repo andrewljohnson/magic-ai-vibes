@@ -3702,6 +3702,19 @@ struct SpzAgent {
                 std::max<std::size_t>(config.rollout_top_k, 2) +
                     (config.payment_branching ? 2 : 0),
                 order.size());
+            std::size_t root_cycles = config.rollout_turn_cycles;
+            if (config.adaptive_depth) {
+                // Contested window: the opponent could interact on the
+                // stack (two or more untapped mana sources, unknown
+                // cards). One extra cycle here lets the rollout price
+                // holding a spell against walking it into that mana.
+                const PublicPlayerState& opponent_public =
+                    observation.players[1 - seat];
+                if (opponent_public.hand_size >= 1 &&
+                    available_mana(opponent_public).total() >= 2) {
+                    root_cycles += 1;
+                }
+            }
             std::vector<double> rollout_totals(actions.size(),
                                                kIllegalScore);
             for (std::size_t rank = 0; rank < candidates; ++rank) {
@@ -3713,7 +3726,7 @@ struct SpzAgent {
                 double total = 0.0;
                 for (const GameState& sampled : sampled_worlds) {
                     total += score_action(sampled, actions[index], true,
-                                          config.rollout_turn_cycles);
+                                          root_cycles);
                 }
                 rollout_totals[index] = total;
             }
