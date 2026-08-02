@@ -254,7 +254,7 @@ const POLICY_IDS = new Set(POLICIES.map(({ id }) => id));
 const DEFAULT_CONFIG = Object.freeze({
   players: [
     { deckId: "uwr", policyId: "human" },
-    { deckId: "ru-aggro", policyId: "handcrafted" },
+    { deckId: "uwr", policyId: "spz" },
   ],
   debugReveal: true,
   bluffMode: false,
