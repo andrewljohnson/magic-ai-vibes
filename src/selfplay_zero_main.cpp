@@ -367,6 +367,20 @@ int main(int argc, char** argv) {
     if (arguments.command == "train") {
         return run_train(arguments);
     }
+    if (arguments.command == "behavior-probe") {
+        const auto net = std::make_shared<const SpzNet>(
+            load_spz_net(arguments.model));
+        const auto rates =
+            run_behavior_probes(net, arguments.seed);
+        std::printf(
+            "land-drop %.2f no-self-bolt %.2f growth-save %.2f "
+            "spike-good %.2f spike-restraint %.2f race-removal %.2f "
+            "counter-respect %.2f\n",
+            rates.land_drop, rates.no_self_bolt, rates.growth_save,
+            rates.spike_good, rates.spike_restraint,
+            rates.race_removal, rates.counter_respect);
+        return 0;
+    }
     if (arguments.command == "benchmark") {
         return run_benchmark(arguments);
     }

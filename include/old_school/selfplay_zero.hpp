@@ -27,6 +27,7 @@ inline constexpr std::size_t kSpzDeckCount = 9;
 // The metagame environment, in canonical order: the five sample decks plus
 // the lotus-combo and burn stress decks.
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks();
+
 std::string_view spz_deck_name(std::size_t deck_index);
 
 // ---------------------------------------------------------------------------
@@ -353,6 +354,23 @@ struct SpzRecorder {
 // outside training. The controller owns an independent RNG stream seeded from
 // `config.seed`; a fixed (net, decks, seat, config) tuple replays the same
 // decisions for the same game.
+// Behavior-emergence probe rates: each in [0,1], the share of fixture
+// variants where the competence shows.
+struct SpzBehaviorRates {
+    double land_drop = 0.0;
+    double no_self_bolt = 0.0;
+    double growth_save = 0.0;
+    double spike_good = 0.0;
+    double spike_restraint = 0.0;
+    // Removal beats racing when their clock is faster than ours.
+    double race_removal = 0.0;
+    // Do not walk the only threat into open counter mana.
+    double counter_respect = 0.0;
+};
+
+SpzBehaviorRates run_behavior_probes(
+    const std::shared_ptr<const SpzNet>& net, std::uint64_t seed);
+
 HumanController make_spz_controller(
     std::shared_ptr<const SpzNet> net,
     const std::array<std::vector<CardId>, 2>& original_decks,

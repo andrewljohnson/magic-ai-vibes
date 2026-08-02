@@ -4673,18 +4673,6 @@ HumanController make_spz_controller(
 
 namespace {
 
-struct SpzBehaviorRates {
-    double land_drop = 0.0;
-    double no_self_bolt = 0.0;
-    double growth_save = 0.0;
-    double spike_good = 0.0;
-    double spike_restraint = 0.0;
-    // Removal beats racing when their clock is faster than ours.
-    double race_removal = 0.0;
-    // Do not walk the only threat into open counter mana.
-    double counter_respect = 0.0;
-};
-
 // Move every card visible in the seat's zones plus its hand out of the
 // deck; the remainder becomes the library, keeping conservation exact
 // for the determinizer.
@@ -4774,6 +4762,8 @@ bool run_behavior_fixture(const BehaviorFixture& fixture,
     }
     return fixture.emerged(actions[chosen]);
 }
+
+}  // namespace
 
 SpzBehaviorRates run_behavior_probes(
     const std::shared_ptr<const SpzNet>& net, std::uint64_t seed) {
@@ -4995,8 +4985,9 @@ SpzBehaviorRates run_behavior_probes(
         fixture.state.turn_number = 6;
         auto& self = fixture.state.players[0];
         self.hand = {CardId::SuChi, CardId::MoxRuby};
-        self.lands.assign(
-            4, LandPermanent{.card = CardId::VolcanicIsland});
+        // Robots runs exactly four Tundras; conservation would reject
+        // a fourth Volcanic Island.
+        self.lands.assign(4, LandPermanent{.card = CardId::Tundra});
         auto& enemy = fixture.state.players[1];
         enemy.lands.assign(2, LandPermanent{.card = CardId::Island});
         enemy.hand.assign(3, CardId::Island);
@@ -5011,6 +5002,9 @@ SpzBehaviorRates run_behavior_probes(
     }
     return rates;
 }
+
+namespace {
+
 
 }  // namespace
 
