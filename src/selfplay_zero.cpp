@@ -2024,6 +2024,54 @@ struct SpzAgent {
         }
     }
 
+    // A factory animation that can no longer fight is a paid no-op:
+    // the creature form expires at its controller's own cleanup, so on
+    // your own turn any animation after the attack declaration is
+    // dead, and re-animating a factory whose animation is already on
+    // the stack only fizzles. Rules-only, card-exact — same family as
+    // the no-upside prune.
+    template <class Stack>
+    static bool pointless_factory_animation(
+        const PriorityAction& action, std::size_t actor,
+        std::size_t active_player, TurnPhase phase,
+        const Stack& stack) {
+        if (action.kind != PriorityActionKind::ActivateMishrasFactory ||
+            !action.source_permanent.has_value()) {
+            return false;
+        }
+        for (const StackObject& object : stack) {
+            if (object.kind == StackObjectKind::ActivatedAbility &&
+                object.card == CardId::MishrasFactory &&
+                object.target.has_value() &&
+                object.target->creature == *action.source_permanent) {
+                return true;
+            }
+        }
+        if (actor == active_player &&
+            (phase == TurnPhase::DeclareBlockers ||
+             phase == TurnPhase::DamageOrder ||
+             phase == TurnPhase::EndCombat ||
+             phase == TurnPhase::SecondMain)) {
+            return true;
+        }
+        return false;
+    }
+
+    bool pointless_or_deferred_factory_animation(
+        const PriorityAction& action, std::size_t actor,
+        std::size_t active_player, TurnPhase phase,
+        const auto& stack) const {
+        if (pointless_factory_animation(action, actor, active_player,
+                                        phase, stack)) {
+            return true;
+        }
+        return config.defer_factory_animation &&
+               action.kind ==
+                   PriorityActionKind::ActivateMishrasFactory &&
+               actor == active_player &&
+               phase == TurnPhase::FirstMain;
+    }
+
     // ------------------------------------------------------------------
     // No-upside prune: a rules-only refusal of actions that cannot help.
     //
@@ -2400,6 +2448,11 @@ struct SpzAgent {
         const BannedAction* banned = nullptr) const {
         auto actions =
             legal_priority_actions(state, priority.player, sorcery);
+        std::erase_if(actions, [&](const PriorityAction& action) {
+            return pointless_or_deferred_factory_animation(
+                action, priority.player, state.active_player, phase,
+                state.stack);
+        });
         if (banned != nullptr && priority.player == banned->seat) {
             std::erase_if(actions, [&](const PriorityAction& action) {
                 return action.kind == banned->kind &&
@@ -3388,6 +3441,13 @@ struct SpzAgent {
         // are safe here — any action that reveals hidden cards settles to a
         // different observation and is therefore retained.
         std::vector<bool> dominated(actions.size(), false);
+        for (std::size_t index = 0; index < actions.size(); ++index) {
+            if (pointless_or_deferred_factory_animation(
+                    actions[index], seat, observation.active_player,
+                    phase, observation.stack)) {
+                dominated[index] = true;
+            }
+        }
         if (config.pass_dominance_prune) {
             const auto dominance = diagnose_value_pass_dominance(
                 reconstructed, seat, sorcery_actions, phase, 0);
