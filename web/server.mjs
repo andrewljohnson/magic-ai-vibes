@@ -301,8 +301,8 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "General self-taught bot: a value net trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 62.4% in paired benchmarks.",
-    versionDate: "2026-08-01",
+      "General self-taught bot: a value net trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 63.3% in paired benchmarks (first 64-card-era champion).",
+    versionDate: "2026-08-02",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
   },
