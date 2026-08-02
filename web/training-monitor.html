@@ -371,13 +371,8 @@ function render() {
   }
   const recent = tableRows.slice(-1000).reverse();
   document.getElementById("table").innerHTML =
-    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs Random</th><th>vs HC</th><th>vs DeepMC</th><th>mean lift</th><th>mulls \u00d71/\u00d72/\u00d73</th></tr>" +
+    "<table><tr><th>iter</th><th>games</th><th>loss</th><th>vs HC</th><th>mulls \u00d71/\u00d72/\u00d73</th></tr>" +
     recent.map(r => {
-      let lift = "";
-      if (r.deck_lift) {
-        const values = Object.values(r.deck_lift);
-        lift = fmtDelta(values.reduce((a, b) => a + b, 0) / values.length);
-      }
       const lossCell =
         r.loss > 0 ? r.loss.toFixed(3)
         : r.advantage_rank_loss > 0
@@ -385,9 +380,7 @@ function render() {
         : r.advantage_loss > 0 ? r.advantage_loss.toFixed(4) + " (adv)"
         : "frozen";
       return `<tr><td>${r.iteration}</td><td>${r.games}</td><td>${lossCell}</td>` +
-        `<td>${r.vs_random !== undefined ? fmtPct(r.vs_random) : ""}</td>` +
         `<td>${r.vs_handcrafted !== undefined ? fmtPct(r.vs_handcrafted) : ""}</td>` +
-        `<td>${r.vs_deep_monte_carlo !== undefined ? fmtPct(r.vs_deep_monte_carlo) : ""}</td><td>${lift}</td>` +
         `<td>${
           Array.isArray(r.mulligan_depths)
             ? r.mulligan_depths
