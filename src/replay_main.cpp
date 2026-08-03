@@ -130,6 +130,7 @@ int main(int argc, char** argv) {
     bool swap_pilots = false;
     bool web = true;
     std::string name = "replay";
+    std::string model = "data/spz-champion.txt";
     for (int arg = 1; arg < argc; ++arg) {
         const std::string flag = argv[arg];
         if (flag == "--seed") {
@@ -144,6 +145,8 @@ int main(int argc, char** argv) {
             swap_pilots = true;
         } else if (flag == "--name") {
             name = argv[++arg];
+        } else if (flag == "--model") {
+            model = argv[++arg];
         } else {
             std::cerr << "unknown flag " << flag << "\n";
             return 1;
@@ -152,7 +155,7 @@ int main(int argc, char** argv) {
     (void)web;
 
     const auto net = std::make_shared<const spz::SpzNet>(
-        spz::load_spz_net("data/spz-champion.txt"));
+        spz::load_spz_net(model));
     const auto& decks = spz::spz_decks();
     const std::array<std::vector<CardId>, 2> game_decks = {
         decks[opp_deck], decks[spz_deck]};
