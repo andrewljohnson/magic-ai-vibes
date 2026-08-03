@@ -5367,6 +5367,41 @@ TEST(payment_variants_fire_only_on_ability_lands_or_dual_choices) {
     }
 }
 
+TEST(payment_never_overpays_when_lotus_chunks_cover_the_cost) {
+    // Live bug report: Su-Chi {4} with Mox Sapphire + Factory +
+    // Black Lotus tapped ALL THREE (5 mana) and floated a wasted
+    // blue. The trim releases the Sapphire: Lotus 3 + Factory 1 pays
+    // exactly, and the blue source stays open.
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::SuChi,
+                   old_school::CardId::Counterspell};
+    player.lands = {
+        {.id = 241,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false},
+    };
+    player.artifacts = {
+        {.id = 242, .card = old_school::CardId::MoxSapphire,
+         .tapped = false},
+        {.id = 243, .card = old_school::CardId::BlackLotus,
+         .tapped = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_creature(
+            old_school::CardId::SuChi),
+        true));
+    CHECK(!player.artifacts[0].tapped);
+    CHECK(player.lands[0].tapped);
+    CHECK(player.artifacts.size() == 1);  // Lotus sacrificed
+    CHECK(player.mana_pool.generic + player.mana_pool.green +
+              player.mana_pool.red + player.mana_pool.blue +
+              player.mana_pool.white + player.mana_pool.black ==
+          0);
+}
+
 TEST(rocks_pay_generic_by_hand_demand_keeping_bolt_colors_up) {
     old_school::GameState state;
     state.active_player = 0;

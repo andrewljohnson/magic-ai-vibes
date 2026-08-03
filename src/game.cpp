@@ -1237,6 +1237,123 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
         return plan;
     }
 
+    // Trim overshoot: a Lotus chunk (or Sol Ring) can overpay, and
+    // the greedy walk may have tapped small sources it no longer
+    // needs. Release planned taps whose whole contribution is spare,
+    // most-wanted-untapped first (a Mox in the hand's colors beats a
+    // Factory tap that floats away). Colored requirements re-checked
+    // per release.
+    {
+        const auto releasable = [&](const ManaCost& contribution) {
+            const ManaCost after = {
+                .generic =
+                    plan.remaining_pool.generic - contribution.generic,
+                .green =
+                    plan.remaining_pool.green - contribution.green,
+                .red = plan.remaining_pool.red - contribution.red,
+                .blue = plan.remaining_pool.blue - contribution.blue,
+                .white =
+                    plan.remaining_pool.white - contribution.white,
+                .black =
+                    plan.remaining_pool.black - contribution.black,
+            };
+            return after.green >= cost.green &&
+                   after.red >= cost.red && after.blue >= cost.blue &&
+                   after.white >= cost.white &&
+                   after.black >= cost.black &&
+                   mana_total(after) >= required_total;
+        };
+        const auto remove_contribution =
+            [&](const ManaCost& contribution) {
+                plan.remaining_pool.generic -= contribution.generic;
+                plan.remaining_pool.green -= contribution.green;
+                plan.remaining_pool.red -= contribution.red;
+                plan.remaining_pool.blue -= contribution.blue;
+                plan.remaining_pool.white -= contribution.white;
+                plan.remaining_pool.black -= contribution.black;
+            };
+        std::array<int, 5> keep_demand{};
+        for (const CardId held : player.hand) {
+            const auto& held_cost = card_definition(held).cost;
+            keep_demand[0] += held_cost.green > 0 ? 1 : 0;
+            keep_demand[1] += held_cost.red > 0 ? 1 : 0;
+            keep_demand[2] += held_cost.blue > 0 ? 1 : 0;
+            keep_demand[3] += held_cost.white > 0 ? 1 : 0;
+            keep_demand[4] += held_cost.black > 0 ? 1 : 0;
+        }
+        const auto keep_score = [&](const ManaCost& mana) {
+            return mana.green * (1 + keep_demand[0] * 4) +
+                   mana.red * (1 + keep_demand[1] * 4) +
+                   mana.blue * (1 + keep_demand[2] * 4) +
+                   mana.white * (1 + keep_demand[3] * 4) +
+                   mana.black * (1 + keep_demand[4] * 4) +
+                   mana.generic;
+        };
+        struct Release {
+            bool is_land = false;
+            std::size_t index = 0;
+            ManaCost contribution;
+            int score = 0;
+        };
+        std::vector<Release> candidates;
+        for (std::size_t index = 0; index < player.artifacts.size();
+             ++index) {
+            if (plan.tap_artifacts[index]) {
+                const ManaCost mana = artifact_mana(
+                    artifact_face(player.artifacts[index]));
+                if (mana_total(mana) > 0) {
+                    candidates.push_back({false, index, mana,
+                                          keep_score(mana)});
+                }
+            }
+        }
+        for (std::size_t index = 0; index < player.lands.size();
+             ++index) {
+            if (!plan.tap_lands[index]) {
+                continue;
+            }
+            // Flexible lands (duals, City) credited whichever face
+            // the colored pass asked for - the trim cannot know
+            // which, so only fixed-face lands are releasable.
+            const CardId face = land_face(player.lands[index]);
+            int provided_colors = 0;
+            provided_colors +=
+                land_provides(face, &ManaCost::green) ? 1 : 0;
+            provided_colors +=
+                land_provides(face, &ManaCost::red) ? 1 : 0;
+            provided_colors +=
+                land_provides(face, &ManaCost::blue) ? 1 : 0;
+            provided_colors +=
+                land_provides(face, &ManaCost::white) ? 1 : 0;
+            provided_colors +=
+                land_provides(face, &ManaCost::black) ? 1 : 0;
+            if (provided_colors > 1) {
+                continue;
+            }
+            const ManaCost mana = land_mana(face);
+            if (mana_total(mana) > 0) {
+                candidates.push_back(
+                    {true, index, mana, keep_score(mana)});
+            }
+        }
+        std::stable_sort(candidates.begin(), candidates.end(),
+                         [](const Release& left,
+                            const Release& right) {
+                             return left.score > right.score;
+                         });
+        for (const Release& candidate : candidates) {
+            if (!releasable(candidate.contribution)) {
+                continue;
+            }
+            remove_contribution(candidate.contribution);
+            if (candidate.is_land) {
+                plan.tap_lands[candidate.index] = false;
+            } else {
+                plan.tap_artifacts[candidate.index] = false;
+            }
+        }
+    }
+
     plan.remaining_pool.green -= cost.green;
     plan.remaining_pool.red -= cost.red;
     plan.remaining_pool.blue -= cost.blue;
