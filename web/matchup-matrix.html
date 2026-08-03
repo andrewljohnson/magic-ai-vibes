@@ -100,16 +100,21 @@ async function load() {
     `${data.games_per_pairing} paired games per matchup · seed ${data.seed}` +
     ` · <a href="monitor.html">training monitor</a>`;
 
+  const fieldGames = data.field_games ||
+    Math.max(2, Math.floor(data.games_per_pairing / 2)) * (decks.length - 1);
+  const cellNoise = 100 / Math.sqrt(fieldGames);
+  const meanNoise = cellNoise / Math.sqrt(decks.length);
   document.getElementById("summary-desc").textContent =
-    "Each cell: this bot pilots the deck against the other six decks " +
-    `flown by ${data.reference_pilot}. A cell mixes deck strength with ` +
-    "pilot skill, so read DOWN a column (same deck, same opponents - " +
-    "only the pilot changes) or compare row means for overall pilot " +
-    `strength. The ${data.reference_pilot} row is its own baseline: ` +
-    "its cells measure raw deck strength and its mean sits near 50%. " +
-    `Each cell is ${3 * data.games_per_pairing} games (about \u00b1` +
-    `${(100 / Math.sqrt(3 * data.games_per_pairing)).toFixed(0)} points` +
-    " of noise) - treat small gaps as ties.";
+    "Each cell: this bot pilots the deck against the other " +
+    `${decks.length - 1} decks flown by ${data.reference_pilot}. A cell ` +
+    "mixes deck strength with pilot skill, so read DOWN a column (same " +
+    "deck, same opponents - only the pilot changes) or compare row means " +
+    `for overall pilot strength. The ${data.reference_pilot} row is its ` +
+    "own baseline: its cells measure raw deck strength and its mean sits " +
+    `near 50%. Each cell is ${fieldGames} games (about \u00b1` +
+    `${cellNoise.toFixed(1)} points of noise; row means about \u00b1` +
+    `${meanNoise.toFixed(1)}) - treat gaps inside the noise band as ` +
+    "ties, and settle close calls with the paired benchmark, not here.";
   document.getElementById("summary").innerHTML = matrixTable(
     [...decks, "mean"],
     data.bots.map((bot) => [...bot.vs_field,

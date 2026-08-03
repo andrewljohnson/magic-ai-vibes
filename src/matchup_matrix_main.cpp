@@ -72,7 +72,7 @@ void run_jobs(std::size_t job_count, std::size_t threads,
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::size_t games_per_pairing = 100;
+    std::size_t games_per_pairing = 300;
     std::uint64_t seed = 20260730;
     std::string output_path = "build/telemetry/matchup-matrix.json";
     std::string spz_model = "data/spz-champion.txt";
@@ -349,6 +349,9 @@ int main(int argc, char** argv) {
     {
         std::ostringstream head;
         head << "{\n  \"games_per_pairing\": " << games_per_pairing
+             << ",\n  \"field_games\": "
+             << ((std::max<std::size_t>(2, games_per_pairing / 2) & ~1ULL) *
+                 (deck_count - 1))
              << ",\n  \"seed\": " << seed
              << ",\n  \"reference_pilot\": \"" << reference.name
              << "\",\n  \"decks\": [";
