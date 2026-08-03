@@ -984,6 +984,22 @@ textarea:focus-visible,
   box-shadow: 0 0 0 5px rgba(241, 211, 138, 0.2);
 }
 
+
+/* Player-target mode: the whole placard is the touch target, teal-lit
+   to match, so Braingeyser/Bolt player picks never need pixel aim. */
+.player-hud.is-player-target {
+  cursor: pointer;
+  outline: 2px dashed #75d7c3;
+  outline-offset: 2px;
+  border-radius: 10px;
+  background: rgba(104, 183, 167, 0.10);
+}
+
+.player-hud.is-player-target:hover {
+  background: rgba(104, 183, 167, 0.2);
+  outline-style: solid;
+}
+
 .player-surface-action {
   inset: 5px;
 }

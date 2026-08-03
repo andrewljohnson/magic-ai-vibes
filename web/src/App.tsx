@@ -907,11 +907,24 @@ function PlayerHud({
     <div
       className={`player-hud ${active ? "is-active" : ""} ${
         opponent ? "is-opponent" : ""
-      }`}
+      } ${priorityTarget ? "is-player-target" : ""}`}
+      onClick={() => {
+        if (priorityTarget) {
+          onChoosePriorityTarget?.();
+        }
+      }}
       onDragOver={(event) =>
         onPriorityDragOver?.(`player:${seat}`, event)
       }
-      onDrop={(event) => onPriorityDrop?.(`player:${seat}`, event)}
+      onDrop={(event) => {
+        if (priorityTarget && draggingPriority) {
+          event.preventDefault();
+          event.stopPropagation();
+          onDropPriorityTarget?.();
+          return;
+        }
+        onPriorityDrop?.(`player:${seat}`, event);
+      }}
     >
       <div
         className={`identity-orb ${opponent ? "is-robot" : "is-human"}`}
