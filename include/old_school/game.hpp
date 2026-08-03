@@ -70,7 +70,6 @@ enum class CardId : std::uint8_t {
     ManaDrain,
     Armageddon,
     DemonicTutor,
-    Fireball,
     MindTwist,
     Recall,
     CopyArtifact,
@@ -88,10 +87,16 @@ enum class CardId : std::uint8_t {
     ChaosOrb,
     JalumTome,
     Crusade,
+    JuzamDjinn,
+    SedgeTroll,
+    HypnoticSpecter,
+    DarkRitual,
+    Shatter,
+    Swamp,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::Crusade) + 1;
+    static_cast<std::size_t>(CardId::Swamp) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -137,6 +142,7 @@ std::vector<CardId> white_control_deck();
 std::vector<CardId> ru_aggro_deck();
 std::vector<CardId> robots_deck();
 std::vector<CardId> white_weenie_deck();
+std::vector<CardId> br_midrange_deck();
 // Stress decks outside the five-deck metagame environment.
 std::vector<CardId> lotus_combo_deck();
 std::vector<CardId> burn_deck();
@@ -151,6 +157,10 @@ struct LandPermanent {
     // simplified Chaos Orb) needs stable identities. Defaulted last so
     // existing aggregate initializers stay valid.
     PermanentId id = 0;
+    // Copy Artifact aimed at an animated Factory yields an un-animated
+    // Factory land: physical card stays CopyArtifact, face lives here.
+    CardId copy_of = CardId::Forest;
+    bool is_copy = false;
 
     bool operator==(const LandPermanent&) const = default;
 };
@@ -169,6 +179,11 @@ struct CreaturePermanent {
     // Static +1/+1 from Crusades in play (recomputed after every
     // resolution; white creatures only).
     int crusade_bonus = 0;
+    // Copy Artifact can copy artifact creatures (Su-Chi, Triskelion,
+    // an animated Factory): the physical card stays CopyArtifact, the
+    // behavioral face lives here.
+    CardId copy_of = CardId::Forest;
+    bool is_copy = false;
 
     bool operator==(const CreaturePermanent&) const = default;
 };
@@ -304,7 +319,6 @@ enum class PriorityActionKind : std::uint8_t {
     ActivateMishrasFactory,
     ActivateStripMine,
     CastManaDrain,
-    CastFireball,
     CastMindTwist,
     CastRecall,
     CastDemonicTutor,
@@ -314,6 +328,8 @@ enum class PriorityActionKind : std::uint8_t {
     TapLandForMana,
     ActivateChaosOrb,
     ActivateJalumTome,
+    CastDarkRitual,
+    CastShatter,
 };
 
 // One explicit mana float: tap this permanent for the given face
@@ -371,7 +387,6 @@ struct PriorityAction {
     static PriorityAction activate_millstone(PermanentId millstone,
                                              Target mill_target);
     static PriorityAction cast_mana_drain(StackObjectId target_spell);
-    static PriorityAction cast_fireball(int x_value, Target target);
     static PriorityAction cast_mind_twist(int x_value,
                                           std::size_t target_player);
     static PriorityAction cast_recall(int x_value);
@@ -396,6 +411,9 @@ struct PriorityAction {
     static PriorityAction activate_chaos_orb_enchantment(
         PermanentId orb, std::size_t owner, int index);
     static PriorityAction activate_jalum_tome(PermanentId tome);
+    static PriorityAction cast_dark_ritual();
+    static PriorityAction cast_shatter(std::size_t owner,
+                                       PermanentId artifact);
 
     bool operator==(const PriorityAction&) const = default;
 };
@@ -894,9 +912,10 @@ enum class DeckId : std::uint8_t {
     UWR,
     Robots,
     WhiteWeenie,
+    BRMidrange,
 };
 
-inline constexpr std::size_t kDeckCount = 10;
+inline constexpr std::size_t kDeckCount = 11;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

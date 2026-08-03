@@ -533,7 +533,6 @@ const CARD_RULES_TEXT: Record<string, string> = {
   Armageddon: "Destroy all lands.",
   "Demonic Tutor":
     "Search your library for a card and put it into your hand.",
-  Fireball: "Fireball deals X damage to any target.",
   "Mind Twist": "Target opponent discards X cards at random.",
   Recall:
     "Discard X cards, then return X cards from your graveyard to your hand.",
@@ -557,6 +556,15 @@ const CARD_RULES_TEXT: Record<string, string> = {
   "Jalum Tome":
     "{2}, {T}: Draw a card, then discard your least valuable card.",
   Crusade: "White creatures get +1/+1.",
+  "Juzam Djinn":
+    "At the beginning of your upkeep, Juzam Djinn deals 1 damage to you.",
+  "Sedge Troll":
+    "Gets +1/+1 as long as you control a Swamp.",
+  "Hypnotic Specter":
+    "Flying. Whenever it deals combat damage to a player, that player discards a card.",
+  "Dark Ritual": "Add {B}{B}{B}.",
+  Shatter: "Destroy target artifact.",
+  Swamp: "Tap: Add {B}.",
 };
 
 function ManaCostPips({ card }: { card: Card }) {

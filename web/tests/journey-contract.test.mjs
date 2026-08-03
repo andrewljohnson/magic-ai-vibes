@@ -255,7 +255,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
   const metadata = harness.metadata();
   assert.deepEqual(
     metadata.decks.map(({ id }) => id),
-    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie"],
+    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie", "br-midrange"],
   );
   assert.deepEqual(
     metadata.policies.map(({ id }) => id),

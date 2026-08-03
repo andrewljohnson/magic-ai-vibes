@@ -650,7 +650,7 @@ SPZ_TEST(schema_v3_is_lossless_bounded_and_playable) {
             creatures +=
                 card_definition(card).type == CardType::Creature ? 1 : 0;
         }
-        expect(creatures <= 20, "deck creature count fits v3 slots");
+        expect(creatures <= 24, "deck creature count fits v3 slots");
     }
     const std::array<std::vector<CardId>, 2> game_decks = {
         spz_decks()[0], spz_decks()[4]};

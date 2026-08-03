@@ -3033,7 +3033,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 10,
+        .population = 11,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3046,11 +3046,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 10);
-    CHECK(first.best.total.games == 40);
+    CHECK(first.best.by_opponent.size() == 11);
+    CHECK(first.best.total.games == 44);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          40);
+          44);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3063,6 +3063,7 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::ru_aggro_deck(),
              old_school::robots_deck(),
              old_school::white_weenie_deck(),
+             old_school::br_midrange_deck(),
              old_school::lotus_combo_deck(),
              old_school::burn_deck(),
              old_school::uwr_deck(),
@@ -4865,6 +4866,210 @@ TEST(manual_land_tap_floats_mana_and_pays_first) {
     CHECK(player.creatures[0].tapped);
 }
 
+TEST(br_midrange_mechanics_work) {
+    // Dark Ritual banks BBB; Sedge Troll grows with a Swamp; Juzam
+    // pings its own controller each upkeep; Hypnotic forces a discard
+    // on combat damage; Chain Lightning burns; Shatter breaks rocks.
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::DarkRitual,
+                   old_school::CardId::LightningBolt};
+    player.lands = {
+        {.id = 301, .card = old_school::CardId::Swamp,
+         .tapped = false},
+        {.id = 302, .card = old_school::CardId::Badlands,
+         .tapped = false},
+    };
+    player.creatures = {
+        {.id = 303,
+         .card = old_school::CardId::SedgeTroll,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 304,
+         .card = old_school::CardId::JuzamDjinn,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 305,
+         .card = old_school::CardId::HypnoticSpecter,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    enemy.hand = {old_school::CardId::Plains,
+                  old_school::CardId::Moat};
+    enemy.artifacts = {
+        {.id = 306, .card = old_school::CardId::SolRing,
+         .tapped = false},
+    };
+
+    // Ritual: cast off the Swamp, resolves to BBB in the pool.
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::cast_dark_ritual(),
+        false));
+    resolve_top(state, 0);
+    CHECK(player.mana_pool.black == 3);
+
+    // Sedge buff appeared with the refresh (Swamp in play).
+    CHECK(player.creatures[0].crusade_bonus == 1);
+
+    // Bolt off the Badlands: burn the face.
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_lightning_bolt(
+            old_school::Target::player_target(1)),
+        false));
+    resolve_top(state, 0);
+    CHECK(enemy.life == 17);
+
+    // Juzam upkeep: its controller pays a life at turn start.
+    const int before = player.life;
+    old_school::begin_turn(state, 0);
+    CHECK(player.life == before - 1);
+
+    // Hypnotic connects: enemy discards from the front of hand.
+    CHECK(old_school::resolve_combat(state, 0, {305}, {}));
+    CHECK(enemy.hand.size() == 1);
+    CHECK(count_card(enemy.graveyard, old_school::CardId::Plains) ==
+          1);
+
+    // Shatter the Sol Ring.
+    player.hand = {old_school::CardId::Shatter};
+    for (auto& land : player.lands) {
+        land.tapped = false;
+    }
+    player.mana_pool = {};
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::cast_shatter(1, 306),
+        false));
+    resolve_top(state, 0);
+    CHECK(enemy.artifacts.empty());
+    CHECK(count_card(enemy.graveyard, old_school::CardId::SolRing) ==
+          1);
+}
+
+TEST(copy_artifact_copies_artifact_creatures_and_animated_factories) {
+    // Copying Su-Chi yields a summoning-sick 4/4 whose death still
+    // banks {4}; copying Triskelion arrives with three counters.
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::CopyArtifact,
+                   old_school::CardId::CopyArtifact};
+    player.lands = {
+        {.id = 201, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 202, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 203, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 204, .card = old_school::CardId::Island,
+         .tapped = false},
+    };
+    enemy.creatures = {
+        {.id = 205,
+         .card = old_school::CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 206,
+         .card = old_school::CardId::Triskelion,
+         .tapped = false,
+         .summoning_sick = false,
+         .plus_counters = 2},
+    };
+    const auto copy_suchi =
+        old_school::PriorityAction::cast_copy_artifact(1, 205);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     copy_suchi));
+    CHECK(old_school::apply_priority_action(state, 0, copy_suchi,
+                                            true));
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].is_copy);
+    CHECK(player.creatures[0].copy_of == old_school::CardId::SuChi);
+    CHECK(player.creatures[0].summoning_sick);
+
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::cast_copy_artifact(1, 206),
+        true));
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 2);
+    CHECK(player.creatures[1].copy_of ==
+          old_school::CardId::Triskelion);
+    CHECK(player.creatures[1].plus_counters == 3);
+
+    // The Su-Chi copy dies: rebate fires, graveyard gets the
+    // physical Copy Artifact card (conservation).
+    state.active_player = 1;
+    enemy.hand = {old_school::CardId::LightningBolt,
+                  old_school::CardId::LightningBolt};
+    enemy.lands.assign(
+        5, old_school::LandPermanent{
+               .card = old_school::CardId::Mountain,
+               .tapped = false});
+    for (int bolt = 0; bolt < 2; ++bolt) {
+        CHECK(old_school::apply_priority_action(
+            state, 1,
+            old_school::PriorityAction::cast_lightning_bolt(
+                old_school::Target::creature_target(
+                    0, player.creatures[0].id)),
+            false));
+        resolve_top(state, 1);
+    }
+    CHECK(player.mana_pool.generic == 4);
+    CHECK(count_card(player.graveyard,
+                     old_school::CardId::CopyArtifact) == 1);
+}
+
+TEST(copying_an_animated_factory_yields_an_unanimated_factory_land) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::CopyArtifact};
+    player.lands = {
+        {.id = 211, .card = old_school::CardId::Island,
+         .tapped = false},
+        {.id = 212, .card = old_school::CardId::Island,
+         .tapped = false},
+    };
+    enemy.creatures = {
+        {.id = 213,
+         .card = old_school::CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto copy =
+        old_school::PriorityAction::cast_copy_artifact(1, 213);
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
+                     copy));
+    CHECK(old_school::apply_priority_action(state, 0, copy, true));
+    resolve_top(state, 0);
+    // Copies see the printed card: an UN-animated Factory land.
+    CHECK(player.creatures.empty());
+    CHECK(player.lands.size() == 3);
+    const auto& factory_copy = player.lands.back();
+    CHECK(factory_copy.is_copy);
+    CHECK(factory_copy.copy_of == old_school::CardId::MishrasFactory);
+    CHECK(factory_copy.card == old_school::CardId::CopyArtifact);
+
+    // The copy animates like a real Factory and reverts at cleanup
+    // still a copy.
+    player.lands[0].tapped = false;
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::animate_factory(factory_copy.id),
+        false));
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].is_copy);
+    old_school::cleanup_turn(state, 0, {});
+    CHECK(player.creatures.empty());
+    CHECK(player.lands.size() == 3);
+    CHECK(player.lands.back().is_copy);
+}
+
 TEST(crusade_pumps_white_creatures_and_fades_when_destroyed) {
     old_school::GameState state;
     state.active_player = 0;
@@ -5127,6 +5332,29 @@ TEST(payment_variants_fire_only_on_ability_lands_or_dual_choices) {
     }
 }
 
+TEST(rocks_pay_generic_by_hand_demand_keeping_bolt_colors_up) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::LightningBolt,
+                   old_school::CardId::SolRing};
+    player.artifacts = {
+        {.id = 221, .card = old_school::CardId::MoxRuby,
+         .tapped = false},
+        {.id = 222, .card = old_school::CardId::MoxPearl,
+         .tapped = false},
+    };
+    // Sol Ring costs {1}: the Pearl (no white cards in hand) must pay,
+    // the Ruby stays up for the held Bolt.
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_artifact(
+            old_school::CardId::SolRing),
+        true));
+    CHECK(!player.artifacts[0].tapped);
+    CHECK(player.artifacts[1].tapped);
+}
+
 TEST(generic_costs_prefer_moxen_over_city_of_brass) {
     old_school::GameState state;
     state.active_player = 0;
@@ -5165,20 +5393,20 @@ TEST(su_chi_banks_four_mana_when_it_dies) {
          .tapped = false,
          .summoning_sick = false},
     };
-    caster.hand = {old_school::CardId::Fireball};
+    caster.hand = {old_school::CardId::LightningBolt,
+                   old_school::CardId::LightningBolt};
     caster.lands = {
         {.card = old_school::CardId::Mountain, .tapped = false},
         {.card = old_school::CardId::Mountain, .tapped = false},
-        {.card = old_school::CardId::Mountain, .tapped = false},
-        {.card = old_school::CardId::Mountain, .tapped = false},
-        {.card = old_school::CardId::Mountain, .tapped = false},
     };
-    const auto burn = old_school::PriorityAction::cast_fireball(
-        4, old_school::Target::creature_target(0, 71));
-    CHECK(has_action(old_school::legal_priority_actions(state, 1, true),
-                     burn));
-    CHECK(old_school::apply_priority_action(state, 1, burn, true));
-    resolve_top(state, 1);
+    for (int bolt = 0; bolt < 2; ++bolt) {
+        CHECK(old_school::apply_priority_action(
+            state, 1,
+            old_school::PriorityAction::cast_lightning_bolt(
+                old_school::Target::creature_target(0, 71)),
+            false));
+        resolve_top(state, 1);
+    }
     CHECK(player.creatures.empty());
     CHECK(count_card(player.graveyard, old_school::CardId::SuChi) ==
           1);
@@ -5324,11 +5552,11 @@ TEST(copy_artifact_copies_a_sol_ring_and_taps_like_one) {
     CHECK(player.artifacts[0].tapped);
 }
 
-TEST(fireball_mind_twist_and_recall_move_the_right_cards) {
+TEST(x_burn_mind_twist_and_recall_move_the_right_cards) {
     old_school::GameState state;
     auto& player = state.players[0];
     auto& enemy = state.players[1];
-    player.hand = {old_school::CardId::Fireball,
+    player.hand = {old_school::CardId::Disintegrate,
                    old_school::CardId::MindTwist,
                    old_school::CardId::Recall,
                    old_school::CardId::Island};
@@ -5347,15 +5575,15 @@ TEST(fireball_mind_twist_and_recall_move_the_right_cards) {
                   old_school::CardId::Moat,
                   old_school::CardId::Millstone};
 
-    const auto fireball = old_school::PriorityAction::cast_fireball(
+    const auto burn = old_school::PriorityAction::cast_disintegrate(
         4, old_school::Target::player_target(1));
     CHECK(has_action(old_school::legal_priority_actions(state, 0, true),
-                     fireball));
-    CHECK(old_school::apply_priority_action(state, 0, fireball, true));
+                     burn));
+    CHECK(old_school::apply_priority_action(state, 0, burn, true));
     resolve_top(state, 0);
     CHECK(enemy.life == 16);
-    CHECK(count_card(player.graveyard, old_school::CardId::Fireball) ==
-          1);
+    CHECK(count_card(player.graveyard,
+                     old_school::CardId::Disintegrate) == 1);
 
     for (auto& land : player.lands) {
         land.tapped = false;

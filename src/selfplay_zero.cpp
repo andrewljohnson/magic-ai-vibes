@@ -126,7 +126,8 @@ void append_player_scalars(std::vector<float>& features,
     std::size_t untapped_creatures = 0;
     std::size_t ready_creatures = 0;
     for (const auto& creature : player.creatures) {
-        const auto& definition = card_definition(creature.card);
+        const auto& definition = card_definition(
+            creature.is_copy ? creature.copy_of : creature.card);
         const int creature_power = definition.power +
                                    creature.temporary_power_bonus +
                                    creature.plus_counters +
@@ -179,7 +180,7 @@ constexpr std::size_t kCardBlockCount = 11;
 }  // namespace
 
 std::size_t spz_feature_count_colors() {
-    // v1 plus, per player: untapped basic lands by color (4), the
+    // v1 plus, per player: untapped basic lands by color (5), the
     // floating mana pool by color (5), Mana Drain's pending generic
     // mana, and how much of the board is
     // temporary (expiring creature forms and pump totals) — so the net
@@ -187,7 +188,7 @@ std::size_t spz_feature_count_colors() {
     // observer-relative race block (12): precomputed clock arithmetic
     // (ratios, turns-to-lethal, lethal flags, evasive clocks) that a
     // single tanh layer cannot reliably derive from raw scalars.
-    return spz_feature_count() + 2 * 12 + 12;
+    return spz_feature_count() + 2 * 13 + 12;
 }
 
 std::vector<float> spz_features_colors(
@@ -200,16 +201,17 @@ std::vector<float> spz_features_colors(
     const std::size_t me = observation.observer;
     for (const std::size_t player : {me, 1 - me}) {
         const auto& state = observation.players[player];
-        std::array<int, 4> untapped{};
+        std::array<int, 5> untapped{};
         for (const auto& land : state.lands) {
             if (land.tapped) {
                 continue;
             }
-            switch (land.card) {
+            switch (land.is_copy ? land.copy_of : land.card) {
                 case CardId::Forest: untapped[0] += 1; break;
                 case CardId::Mountain: untapped[1] += 1; break;
                 case CardId::Island: untapped[2] += 1; break;
                 case CardId::Plains: untapped[3] += 1; break;
+                case CardId::Swamp: untapped[4] += 1; break;
                 default: break;
             }
         }
@@ -251,8 +253,9 @@ std::vector<float> spz_features_colors(
                 int untapped_flyers = 0;
             } tally;
             for (const auto& creature : side.creatures) {
-                const auto& definition =
-                    card_definition(creature.card);
+                const auto& definition = card_definition(
+                    creature.is_copy ? creature.copy_of
+                                     : creature.card);
                 const int power =
                     definition.power +
                     creature.temporary_power_bonus +
@@ -318,7 +321,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
         ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
-        robots_deck(), white_weenie_deck(),
+        robots_deck(), white_weenie_deck(), br_midrange_deck(),
     };
     return decks;
 }
@@ -327,7 +330,7 @@ std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
         "Green Growth", "Creatures & Bolts", "Counter Flyer",
         "Moat Mill", "RU Aggro", "Lotus Combo", "Burn",
-        "Lion-dib-bolt", "Robots", "White Weenie",
+        "Lion-dib-bolt", "Robots", "White Weenie", "BR Midrange",
     };
     return names.at(deck_index);
 }
@@ -444,13 +447,17 @@ constexpr std::size_t kCastabilityFeatures = kCardCount + 2;
 constexpr std::size_t kRaceFeatures = 10;
 
 int creature_current_power(const CreaturePermanent& creature) {
-    return card_definition(creature.card).power +
+    const CardId face =
+        creature.is_copy ? creature.copy_of : creature.card;
+    return card_definition(face).power +
            creature.temporary_power_bonus + creature.plus_counters +
            creature.crusade_bonus;
 }
 
 int creature_current_toughness(const CreaturePermanent& creature) {
-    return card_definition(creature.card).toughness +
+    const CardId face =
+        creature.is_copy ? creature.copy_of : creature.card;
+    return card_definition(face).toughness +
            creature.temporary_toughness_bonus + creature.plus_counters +
            creature.crusade_bonus;
 }
@@ -543,11 +550,14 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
         if (land.tapped) {
             continue;
         }
-        switch (land.card) {
+        switch (land.is_copy ? land.copy_of : land.card) {
             case CardId::Forest: mana.green += 1; break;
             case CardId::Mountain: mana.red += 1; break;
             case CardId::Island: mana.blue += 1; break;
             case CardId::Plains: mana.white += 1; break;
+            case CardId::Swamp:
+                mana.black += 1;
+                break;
             case CardId::Plateau:
             case CardId::Tundra:
             case CardId::VolcanicIsland:
@@ -769,7 +779,7 @@ std::vector<float> spz_features_v2(
 
 namespace {
 
-constexpr std::size_t kCreatureSlotsV3 = 20;
+constexpr std::size_t kCreatureSlotsV3 = 24;
 constexpr std::size_t kStackSlotsV3 = 6;
 
 void append_stack_slot(std::vector<float>& features,
@@ -1481,7 +1491,7 @@ std::size_t spz_action_feature_count() {
     // player, own/enemy creature) + target creature card + countered spell
     // card + chosen card (tutor/copy choice) + x scale +
     // source-permanent flag.
-    return 31 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
+    return 32 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
            1 + 1;
 }
 
@@ -1491,7 +1501,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 31;
+    offset += 32;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {
@@ -2216,7 +2226,9 @@ struct SpzAgent {
     static bool mana_leq(const ManaCost& left, const ManaCost& right) {
         return left.generic <= right.generic &&
                left.green <= right.green && left.red <= right.red &&
-               left.blue <= right.blue && left.white <= right.white;
+               left.blue <= right.blue &&
+               left.white <= right.white &&
+               left.black <= right.black;
     }
 
     // (card -> total, tapped) census over lands or artifacts.
@@ -2281,6 +2293,8 @@ struct SpzAgent {
                 other->damage != creature.damage ||
                 other->plus_counters != creature.plus_counters ||
                 other->crusade_bonus != creature.crusade_bonus ||
+                other->copy_of != creature.copy_of ||
+                other->is_copy != creature.is_copy ||
                 other->exile_on_death_this_turn !=
                     creature.exile_on_death_this_turn) {
                 return false;

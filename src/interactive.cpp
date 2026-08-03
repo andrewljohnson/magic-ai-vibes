@@ -216,9 +216,6 @@ std::string action_name(const PlayerObservation& observation,
         return "Pass priority";
     case PriorityActionKind::CastManaDrain:
         return "Cast Mana Drain targeting a stack spell";
-    case PriorityActionKind::CastFireball:
-        return "Cast " + card + " (X=" +
-               std::to_string(action.x_value) + ")";
     case PriorityActionKind::CastMindTwist:
         return "Cast Mind Twist (X=" +
                std::to_string(action.x_value) + ")";
@@ -270,6 +267,15 @@ std::string action_name(const PlayerObservation& observation,
                     : "enchantment");
     case PriorityActionKind::ActivateJalumTome:
         return "Activate Jalum Tome";
+    case PriorityActionKind::CastDarkRitual:
+        return "Cast Dark Ritual";
+    case PriorityActionKind::CastShatter:
+        return "Cast Shatter -> artifact #" +
+               std::to_string(action.target.has_value() &&
+                                      action.target->creature
+                                          .has_value()
+                                  ? *action.target->creature
+                                  : 0);
     case PriorityActionKind::TapLandForMana: {
         static constexpr std::array<const char*, 6> kFaceNames = {
             "{1}", "{G}", "{R}", "{U}", "{W}", "{B}",
@@ -1481,6 +1487,8 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return robots_deck();
     case DeckId::WhiteWeenie:
         return white_weenie_deck();
+    case DeckId::BRMidrange:
+        return br_midrange_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

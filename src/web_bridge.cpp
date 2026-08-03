@@ -49,6 +49,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return robots_deck();
     case DeckId::WhiteWeenie:
         return white_weenie_deck();
+    case DeckId::BRMidrange:
+        return br_midrange_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -103,6 +105,8 @@ std::string_view deck_id_token(DeckId deck) {
         return "robots";
     case DeckId::WhiteWeenie:
         return "white-weenie";
+    case DeckId::BRMidrange:
+        return "br-midrange";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -215,8 +219,6 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "cast_force_spike";
     case PriorityActionKind::CastManaDrain:
         return "cast_mana_drain";
-    case PriorityActionKind::CastFireball:
-        return "cast_fireball";
     case PriorityActionKind::CastMindTwist:
         return "cast_mind_twist";
     case PriorityActionKind::CastRecall:
@@ -233,6 +235,10 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "activate_chaos_orb";
     case PriorityActionKind::ActivateJalumTome:
         return "activate_jalum_tome";
+    case PriorityActionKind::CastDarkRitual:
+        return "cast_dark_ritual";
+    case PriorityActionKind::CastShatter:
+        return "cast_shatter";
     case PriorityActionKind::ActivateTriskelion:
         return "activate_triskelion";
     case PriorityActionKind::ActivateMillstone:
@@ -565,13 +571,18 @@ void write_land(std::ostream& output,
                << "\",\"card\":";
     }
     write_card(output, land.card);
+    if (land.is_copy) {
+        output << ",\"copyOf\":";
+        write_card(output, land.copy_of);
+    }
     output << ",\"tapped\":"
            << (land.tapped ? "true" : "false") << '}';
 }
 
 void write_creature(std::ostream& output,
                     const CreaturePermanent& creature) {
-    const auto& definition = card_definition(creature.card);
+    const auto& definition = card_definition(
+        creature.is_copy ? creature.copy_of : creature.card);
     output << "{\"permanentId\":" << creature.id
            << ",\"card\":";
     write_card(output, creature.card);
@@ -587,8 +598,12 @@ void write_creature(std::ostream& output,
            << definition.toughness +
                   creature.temporary_toughness_bonus +
                   creature.plus_counters
-           << ",\"plusCounters\":" << creature.plus_counters
-           << '}';
+           << ",\"plusCounters\":" << creature.plus_counters;
+    if (creature.is_copy) {
+        output << ",\"copyOf\":";
+        write_card(output, creature.copy_of);
+    }
+    output << '}';
 }
 
 void write_artifact(std::ostream& output,
@@ -1424,6 +1439,9 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "white-weenie" || value == "ww") {
         return DeckId::WhiteWeenie;
+    }
+    if (value == "br-midrange" || value == "br") {
+        return DeckId::BRMidrange;
     }
     if (value == "lotus-combo" || value == "lotus") {
         return DeckId::LotusCombo;

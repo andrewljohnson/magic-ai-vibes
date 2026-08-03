@@ -2200,7 +2200,16 @@ textarea:focus-visible,
   height: 100%;
   max-height: none;
   overflow: auto;
-  padding: 13px;
+  padding: 8px 13px;
+  /* Center short content (the attack/block button rows) so a tight
+     dock row never clips the buttons at the bottom edge. */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.decision-body > * {
+  flex: none;
 }
 
 .decision-dock.is-priority {
@@ -2337,6 +2346,14 @@ textarea:focus-visible,
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+  min-height: 44px;
+}
+
+.combat-control .button-primary,
+.blocker-control .button-primary,
+.combat-control .button-secondary,
+.blocker-control .button-secondary {
+  min-height: 36px;
 }
 
 .cleanup-progress {
