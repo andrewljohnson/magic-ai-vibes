@@ -75,6 +75,10 @@ import {
   type PriorityOption,
   type StackInteraction,
   type StackEntry,
+  type XSpellGroup,
+  clampXValue,
+  tutorChoicesFromOptions,
+  xSpellGroupFromOptions,
 } from "./types";
 
 const PHASES = ["Beginning", "Main I", "Combat", "Main II", "Ending"];
@@ -1840,6 +1844,116 @@ function priorityOptionDetail(option: PriorityOption): string {
   return target ? `Target → ${target}` : option.kind.replaceAll("_", " ");
 }
 
+function TutorCardPicker({
+  choices,
+  busy,
+  onChooseExact,
+}: {
+  choices: PriorityOption[];
+  busy: boolean;
+  onChooseExact: (option: PriorityOption) => void;
+}) {
+  return (
+    <div className="tutor-picker">
+      <span className="eyebrow">SEARCH YOUR LIBRARY</span>
+      <strong>{choices[0].card?.name ?? "Search"}</strong>
+      <small>
+        Choose a card to put into your hand — {choices.length} distinct{" "}
+        cards, sorted by type and cost.
+      </small>
+      <div className="tutor-picker-grid">
+        {choices.map((option) =>
+          option.chosenCard ? (
+            <CardFace
+              key={option.index}
+              card={option.chosenCard}
+              compact
+              actionable
+              onClick={busy ? undefined : () => onChooseExact(option)}
+            />
+          ) : null,
+        )}
+      </div>
+    </div>
+  );
+}
+
+function XSpellChooser({
+  group,
+  busy,
+  onChooseExact,
+}: {
+  group: XSpellGroup;
+  busy: boolean;
+  onChooseExact: (option: PriorityOption) => void;
+}) {
+  // Default to the biggest X the player's mana can pay for - the legal
+  // range arrives pre-bounded by the engine's payment check.
+  const [x, setX] = useState(group.max);
+  const commit = (value: number) => setX(clampXValue(group, value));
+  const chosen = group.byX.get(x);
+  return (
+    <div className="x-spell-chooser">
+      <span className="eyebrow">CHOOSE X</span>
+      <strong>
+        {group.card.name}
+        {group.targetLabel ? ` → ${group.targetLabel}` : ""}
+      </strong>
+      <div className="x-stepper" role="group" aria-label="Choose X">
+        <button
+          type="button"
+          onClick={() => commit(x - 5)}
+          disabled={busy || x <= group.min}
+        >
+          −5
+        </button>
+        <button
+          type="button"
+          onClick={() => commit(x - 1)}
+          disabled={busy || x <= group.min}
+        >
+          −1
+        </button>
+        <input
+          type="number"
+          inputMode="numeric"
+          aria-label="X value"
+          min={group.min}
+          max={group.max}
+          value={x}
+          onChange={(event) => commit(Number(event.target.value))}
+          disabled={busy}
+        />
+        <button
+          type="button"
+          onClick={() => commit(x + 1)}
+          disabled={busy || x >= group.max}
+        >
+          +1
+        </button>
+        <button
+          type="button"
+          onClick={() => commit(x + 5)}
+          disabled={busy || x >= group.max}
+        >
+          +5
+        </button>
+      </div>
+      <small>
+        Your mana allows X from {group.min} to {group.max}.
+      </small>
+      <button
+        type="button"
+        className="button-primary x-spell-cast"
+        onClick={() => chosen && onChooseExact(chosen)}
+        disabled={busy || !chosen}
+      >
+        Cast {group.card.name} (X = {x})
+      </button>
+    </div>
+  );
+}
+
 function PriorityControls({
   decision,
   stackInteraction,
@@ -1855,6 +1969,14 @@ function PriorityControls({
   pendingOptions: PriorityOption[];
   onChooseExact: (option: PriorityOption) => void;
 }) {
+  const tutorChoices =
+    pendingOptions.length > 1
+      ? tutorChoicesFromOptions(pendingOptions)
+      : null;
+  const xGroup =
+    pendingOptions.length > 1 && !tutorChoices
+      ? xSpellGroupFromOptions(pendingOptions)
+      : null;
   return (
     <div
       className={`priority-control arena-priority ${
@@ -1873,7 +1995,24 @@ function PriorityControls({
         </div>
       )}
       <div className="arena-priority-actions">
-        {pendingOptions.length > 1 && (
+        {tutorChoices && (
+          <TutorCardPicker
+            choices={tutorChoices}
+            busy={busy}
+            onChooseExact={onChooseExact}
+          />
+        )}
+        {xGroup && (
+          <XSpellChooser
+            key={`${String(decision.decisionId)}-${String(
+              xGroup.card.id,
+            )}-${xGroup.targetLabel ?? ""}`}
+            group={xGroup}
+            busy={busy}
+            onChooseExact={onChooseExact}
+          />
+        )}
+        {pendingOptions.length > 1 && !tutorChoices && !xGroup && (
           <div className="priority-parameter-chooser">
             <span>CHOOSE EXACT VERSION</span>
             {pendingOptions.map((option) => (

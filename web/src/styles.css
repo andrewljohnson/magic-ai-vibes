@@ -2350,6 +2350,84 @@ textarea:focus-visible,
   font-size: var(--type-floor);
 }
 
+.tutor-picker,
+.x-spell-chooser {
+  min-width: 0;
+  flex: 2 1 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: rgba(200, 167, 102, 0.08);
+}
+
+.tutor-picker > .eyebrow,
+.x-spell-chooser > .eyebrow {
+  color: var(--gold);
+  font-size: var(--type-floor);
+  letter-spacing: 0.1em;
+}
+
+.tutor-picker > strong,
+.x-spell-chooser > strong {
+  font-family: Georgia, serif;
+  font-size: var(--type-label);
+  font-weight: 400;
+}
+
+.tutor-picker > small,
+.x-spell-chooser > small {
+  color: var(--muted);
+  font-size: var(--type-floor);
+}
+
+.tutor-picker-grid {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.x-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.x-stepper button {
+  min-width: 44px;
+  padding: 7px 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: rgba(200, 167, 102, 0.12);
+  font-size: var(--type-label);
+  cursor: pointer;
+}
+
+.x-stepper button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.x-stepper input {
+  width: 64px;
+  padding: 7px 4px;
+  border: 1px solid var(--gold);
+  border-radius: 7px;
+  color: var(--ink);
+  background: rgba(12, 10, 8, 0.6);
+  font-size: var(--type-label);
+  text-align: center;
+}
+
+.x-spell-cast {
+  align-self: flex-start;
+}
+
 .pass-priority-controls {
   flex: 0 0 auto;
   display: flex;

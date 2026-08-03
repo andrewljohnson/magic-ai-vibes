@@ -1048,6 +1048,10 @@ class JsonController {
                 output_ << ",\"xValue\":"
                         << action.x_value;
             }
+            if (action.chosen_card.has_value()) {
+                output_ << ",\"chosenCard\":";
+                write_card(output_, *action.chosen_card);
+            }
             output_ << '}';
         }
         output_ << "]}}\n" << std::flush;

@@ -198,6 +198,7 @@ export interface PriorityOption {
   spellTarget?: string | number;
   sourcePermanent?: string | number;
   xValue?: number;
+  chosenCard?: Card;
 }
 
 export interface PriorityDecision {
@@ -241,6 +242,121 @@ export function priorityOptionsForSourcePermanent(
       option.sourcePermanent !== undefined &&
       String(option.sourcePermanent) === key,
   );
+}
+
+// Kinds whose variants differ only by the chosen X value. The bridge
+// omits xValue when it is zero, so missing means X=0 inside these kinds.
+const X_SPELL_KINDS = new Set([
+  "cast_disintegrate",
+  "cast_braingeyser",
+  "cast_mind_twist",
+  "cast_recall",
+]);
+
+export interface XSpellGroup {
+  card: Card;
+  kind: string;
+  targetLabel: string | null;
+  min: number;
+  max: number;
+  byX: Map<number, PriorityOption>;
+}
+
+// When every pending option is the same X spell at the same target,
+// collapse the option list into a single stepper control. The legal X
+// range already encodes available mana: the engine only enumerates
+// values the player can pay for.
+export function xSpellGroupFromOptions(
+  options: readonly PriorityOption[],
+): XSpellGroup | null {
+  if (options.length < 2) return null;
+  const first = options[0];
+  if (!first.card || !X_SPELL_KINDS.has(first.kind)) return null;
+  const destination = priorityDestinationKey(first);
+  const byX = new Map<number, PriorityOption>();
+  for (const option of options) {
+    if (
+      option.kind !== first.kind ||
+      priorityDestinationKey(option) !== destination
+    ) {
+      return null;
+    }
+    const x = option.xValue ?? 0;
+    if (byX.has(x)) return null;
+    byX.set(x, option);
+  }
+  const values = [...byX.keys()];
+  return {
+    card: first.card,
+    kind: first.kind,
+    targetLabel:
+      formatTargetLabel(first.target) ??
+      (first.spellTarget !== undefined
+        ? `Stack #${first.spellTarget}`
+        : null),
+    min: Math.min(...values),
+    max: Math.max(...values),
+    byX,
+  };
+}
+
+export function clampXValue(group: XSpellGroup, value: number): number {
+  if (!Number.isFinite(value)) return group.max;
+  let clamped = Math.min(group.max, Math.max(group.min, Math.round(value)));
+  // The legal range can in principle be sparse; snap down to the nearest
+  // enumerated value.
+  while (clamped > group.min && !group.byX.has(clamped)) clamped -= 1;
+  return clamped;
+}
+
+const TUTOR_TYPE_ORDER = [
+  "creature",
+  "artifact",
+  "enchantment",
+  "instant",
+  "sorcery",
+  "land",
+];
+
+function tutorTypeRank(type: string | undefined): number {
+  const key = (type ?? "").toLowerCase();
+  const rank = TUTOR_TYPE_ORDER.findIndex((entry) => key.includes(entry));
+  return rank < 0 ? TUTOR_TYPE_ORDER.length : rank;
+}
+
+function cardCostTotal(cost: Card["cost"]): number {
+  if (typeof cost === "number") return cost;
+  if (!cost || typeof cost !== "object") return 0;
+  return Object.values(cost).reduce(
+    (total, pips) => total + (Number.isFinite(pips) ? Number(pips) : 0),
+    0,
+  );
+}
+
+// When every pending option is a library search (Demonic Tutor), show a
+// browsable picker sorted like a deck list: by type, then cost, then name.
+export function tutorChoicesFromOptions(
+  options: readonly PriorityOption[],
+): PriorityOption[] | null {
+  if (options.length < 2) return null;
+  if (
+    !options.every(
+      (option) =>
+        option.chosenCard !== undefined &&
+        option.kind === options[0].kind,
+    )
+  ) {
+    return null;
+  }
+  return [...options].sort((left, right) => {
+    const a = left.chosenCard as Card;
+    const b = right.chosenCard as Card;
+    const byType = tutorTypeRank(a.type) - tutorTypeRank(b.type);
+    if (byType !== 0) return byType;
+    const byCost = cardCostTotal(a.cost) - cardCostTotal(b.cost);
+    if (byCost !== 0) return byCost;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 export type PriorityDestinationKey =
