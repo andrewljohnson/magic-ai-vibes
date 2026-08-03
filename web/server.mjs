@@ -377,8 +377,8 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "General self-taught bot: a value net trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 63.3% in paired benchmarks (first 64-card-era champion).",
-    versionDate: "2026-08-02",
+      "General self-taught bot: a value net (256 hidden units) trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 62.2% on the full 11-deck gauntlet.",
+    versionDate: "2026-08-03",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
   },
@@ -713,6 +713,8 @@ function reportPriorityOption(value) {
   }
   const card = reportCard(value.card);
   if (card !== null) option.card = card;
+  const chosenCard = reportCard(value.chosenCard);
+  if (chosenCard !== null) option.chosenCard = chosenCard;
   const target = reportTarget(value.target);
   if (target !== null) option.target = target;
   return option;
