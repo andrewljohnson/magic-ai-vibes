@@ -5168,11 +5168,27 @@ bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
             ++sources;
         }
     }
-    // Three lands at seven cards, easing one per mulligan so the
-    // Paris ladder converges instead of digging to oblivion.
-    const std::size_t needed = hand.size() >= 7 ? 3
-                               : hand.size() == 6 ? 2
-                                                  : 1;
+    // Land requirement follows the deck's curve: an all-cheap deck
+    // (nothing above two mana - Burn) is happy on two sources; a
+    // normal curve wants three at seven cards. Both ease one per
+    // mulligan so the Paris ladder converges.
+    int deck_top_cost = 0;
+    for (const CardId card : deck) {
+        const auto& definition = card_definition(card);
+        if (definition.type != CardType::Land) {
+            const ManaCost& cost = definition.cost;
+            deck_top_cost = std::max(
+                deck_top_cost, cost.generic + cost.green + cost.red +
+                                   cost.blue + cost.white +
+                                   cost.black);
+        }
+    }
+    const std::size_t baseline = deck_top_cost <= 2 ? 2 : 3;
+    const std::size_t needed =
+        hand.size() >= 7 ? baseline
+        : hand.size() == 6
+            ? std::max<std::size_t>(1, baseline - 1)
+            : 1;
     return sources < needed;
 }
 
@@ -6305,8 +6321,32 @@ double Game::handcrafted_action_score(const PriorityAction& action,
                 target->damage + card_definition(CardId::LightningBolt)
                                      .effect_damage >=
                 creature_toughness(*target);
-            return (lethal ? 2'000.0 : 500.0) +
-                   handcrafted_card_value(target->card);
+            if (!lethal) {
+                // Chip damage on a creature is nearly always waste.
+                return 150.0 +
+                       handcrafted_card_value(target->card) / 4.0;
+            }
+            // Race-aware allocation: burn in hand wants faces, not
+            // every two-drop. Kills stay premium only while the
+            // opponent's board actually threatens to win first, or
+            // when the target itself is a premium card.
+            int their_clock = 0;
+            for (const auto& creature : opponent_state.creatures) {
+                if (!creature.tapped && !creature.summoning_sick) {
+                    their_clock += creature_power(creature);
+                }
+            }
+            const bool under_pressure =
+                their_clock * 2 >= player_state.life;
+            const double value =
+                handcrafted_card_value(target->card);
+            if (under_pressure || value >= 900.0 ||
+                creature_power(*target) >= 3) {
+                return 2'000.0 + value;
+            }
+            // Winning or even race, small target: below the face
+            // line so the burn keeps racing.
+            return 650.0 + value / 2.0;
         }
 
     case PriorityActionKind::CastDisintegrate:
