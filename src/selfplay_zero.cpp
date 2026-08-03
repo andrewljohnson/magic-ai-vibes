@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <istream>
 #include <cstdlib>
 #include <limits>
@@ -2172,11 +2173,14 @@ struct SpzAgent {
 
     // Mana a candidate action spends if taken now: printed cost plus X
     // for casts, the engine's activation costs for abilities. Rules
-    // facts, not card strategy.
+    // facts, not card strategy. A land drop is resource-POSITIVE, so it
+    // ranks ahead of passing on a tie — otherwise frugality re-creates
+    // the historical land-skip regression.
     static int action_mana_spend(const PriorityAction& action) {
         switch (action.kind) {
-        case PriorityActionKind::Pass:
         case PriorityActionKind::PlayLand:
+            return -1;
+        case PriorityActionKind::Pass:
         case PriorityActionKind::ActivateLibrary:
         case PriorityActionKind::ActivateStripMine:
             return 0;
@@ -2187,7 +2191,7 @@ struct SpzAgent {
         default: {
             const ManaCost& cost = card_definition(action.card).cost;
             return cost.generic + cost.green + cost.red + cost.blue +
-                   cost.white + std::max(0, action.x_value);
+                   cost.white + cost.black + std::max(0, action.x_value);
         }
         }
     }
@@ -3855,18 +3859,28 @@ struct SpzAgent {
             }
             totals = std::move(rollout_totals);
         }
-        if (advantage_net != nullptr || 
+        // Feature rows feed the advantage head and the delta recorder;
+        // frugal tie-breaking needs neither, so it must not hide behind
+        // their availability (it spent its first weeks dead behind the
+        // retired head's null check).
+        const bool wants_feature_rows =
+            advantage_net != nullptr ||
             (config.record_advantage && recorder != nullptr &&
-             config.rollout)) {
-            const auto state_row = spz_features_for(
-                net->input_count(),
-                observe_game_state(sampled_worlds.front(), seat), decks,
-                phase);
+             config.rollout);
+        if (wants_feature_rows ||
+            (config.frugal_tie_break && config.rollout)) {
+            std::vector<float> state_row;
             std::vector<std::vector<float>> action_rows;
-            action_rows.reserve(actions.size());
-            for (const PriorityAction& action : actions) {
-                action_rows.push_back(spz_action_features(
-                    action, seat, sampled_worlds.front()));
+            if (wants_feature_rows) {
+                state_row = spz_features_for(
+                    net->input_count(),
+                    observe_game_state(sampled_worlds.front(), seat),
+                    decks, phase);
+                action_rows.reserve(actions.size());
+                for (const PriorityAction& action : actions) {
+                    action_rows.push_back(spz_action_features(
+                        action, seat, sampled_worlds.front()));
+                }
             }
             if (config.record_advantage && recorder != nullptr &&
                 config.rollout) {
@@ -4043,6 +4057,29 @@ struct SpzAgent {
                 }
                 if (best_tied < actions.size()) {
                     totals[best_tied] = top + band;
+                }
+                if (std::getenv("SPZ_DEBUG_TIES") != nullptr) {
+                    std::cerr << "[ties] band=" << band
+                              << " top=" << top << " finalists=[";
+                    for (const std::size_t index : finalists) {
+                        std::cerr << index << ":"
+                                  << totals[index] << "/spend"
+                                  << action_mana_spend(actions[index])
+                                  << " ";
+                    }
+                    std::cerr << "] totals=[";
+                    for (std::size_t index = 0;
+                         index < actions.size(); ++index) {
+                        std::cerr << index << ":kind"
+                                  << static_cast<int>(
+                                         actions[index].kind)
+                                  << "=" << totals[index] << " ";
+                    }
+                    std::cerr << "] best_tied="
+                              << (best_tied < actions.size()
+                                      ? static_cast<long>(best_tied)
+                                      : -1)
+                              << std::endl;
                 }
             }
         }
@@ -5042,6 +5079,54 @@ SpzBehaviorRates run_behavior_probes(
                 ? 1.0
                 : 0.0;
     }
+
+    // 8. No self-Swords: comfortably ahead, removal in hand, own
+    // attacker on the board. Exiling our own creature buys 2 life we do
+    // not need and slows our clock; anything else (holding the Swords,
+    // aiming it at their blocker, passing) counts as emerged. Live
+    // report: seed 1213095305, uwr's Swords ate its own Savannah Lions.
+    {
+        const auto uwr = uwr_deck();
+        const auto robots = robots_deck();
+        BehaviorFixture fixture;
+        fixture.decks = {uwr, robots};
+        fixture.state.turn_number = 10;
+        auto& self = fixture.state.players[0];
+        self.life = 17;
+        self.hand = {CardId::SwordsToPlowshares};
+        self.lands.assign(2, LandPermanent{.card = CardId::Tundra});
+        self.creatures = {CreaturePermanent{
+            .id = 31,
+            .card = CardId::SavannahLions,
+            .tapped = false,
+            .summoning_sick = false,
+            .damage = 0,
+        }};
+        auto& enemy = fixture.state.players[1];
+        enemy.life = 4;
+        enemy.lands.assign(4, LandPermanent{.card = CardId::Tundra,
+                                            .tapped = true});
+        enemy.creatures = {CreaturePermanent{
+            .id = 32,
+            .card = CardId::Triskelion,
+            .tapped = false,
+            .summoning_sick = true,
+            .damage = 0,
+        }};
+        fixture.emerged = [](const PriorityAction& action) {
+            if (action.kind !=
+                PriorityActionKind::CastSwordsToPlowshares) {
+                return true;
+            }
+            return action.target.has_value() &&
+                   action.target->player == 1;
+        };
+        finish_behavior_fixture(fixture);
+        rates.no_self_swords =
+            run_behavior_fixture(fixture, net, mix_seed(seed, 80))
+                ? 1.0
+                : 0.0;
+    }
     return rates;
 }
 
@@ -5886,7 +5971,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << " race-removal "
                         << behavior_rates.race_removal
                         << " counter-respect "
-                        << behavior_rates.counter_respect;
+                        << behavior_rates.counter_respect
+                        << " no-self-swords "
+                        << behavior_rates.no_self_swords;
                     config.log(behavior_line.str());
                 }
             }
@@ -5972,7 +6059,9 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         << ",\"race_removal\":"
                         << behavior_rates.race_removal
                         << ",\"counter_respect\":"
-                        << behavior_rates.counter_respect << '}';
+                        << behavior_rates.counter_respect
+                        << ",\"no_self_swords\":"
+                        << behavior_rates.no_self_swords << '}';
                 }
                 if (have_deck_lift) {
                     telemetry

@@ -375,10 +375,11 @@ int main(int argc, char** argv) {
         std::printf(
             "land-drop %.2f no-self-bolt %.2f growth-save %.2f "
             "spike-good %.2f spike-restraint %.2f race-removal %.2f "
-            "counter-respect %.2f\n",
+            "counter-respect %.2f no-self-swords %.2f\n",
             rates.land_drop, rates.no_self_bolt, rates.growth_save,
             rates.spike_good, rates.spike_restraint,
-            rates.race_removal, rates.counter_respect);
+            rates.race_removal, rates.counter_respect,
+            rates.no_self_swords);
         return 0;
     }
     if (arguments.command == "benchmark") {

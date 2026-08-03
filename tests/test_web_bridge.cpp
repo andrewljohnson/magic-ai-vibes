@@ -487,8 +487,10 @@ void test_legal_millstone_activation_prevents_auto_pass() {
 
     const std::string transcript =
         complete_transcript(config, 1);
+    // Anchor on the activation itself: mana taps also carry
+    // sourcePermanent, so that field no longer identifies Millstone.
     const std::size_t source =
-        transcript.find("\"sourcePermanent\":");
+        transcript.find("\"kind\":\"activate_millstone\"");
     expect(source != std::string::npos,
            "legal Millstone activation was not offered");
     const std::size_t prior_newline =
@@ -515,10 +517,9 @@ void test_legal_millstone_activation_prevents_auto_pass() {
                "\"label\":\"Pass priority\",\"kind\":\"pass\"") !=
                std::string_view::npos,
            "Millstone decision omitted Pass");
-    expect(decision_line.find(
-               "\"kind\":\"activate_millstone\"") !=
+    expect(decision_line.find("\"sourcePermanent\":") !=
                std::string_view::npos,
-           "Millstone decision omitted its activation");
+           "Millstone activation omitted its source permanent");
 }
 
 void test_same_seed_bridge_transcripts_are_byte_identical() {

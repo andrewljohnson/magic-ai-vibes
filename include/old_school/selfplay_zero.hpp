@@ -366,6 +366,8 @@ struct SpzBehaviorRates {
     double race_removal = 0.0;
     // Do not walk the only threat into open counter mana.
     double counter_respect = 0.0;
+    // Do not exile our own creature for a life trickle while ahead.
+    double no_self_swords = 0.0;
 };
 
 SpzBehaviorRates run_behavior_probes(
