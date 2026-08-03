@@ -8061,12 +8061,30 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
 
     std::vector<std::vector<CardId>> population;
     population.reserve(config.population);
+    // Evolved individuals are exactly forty cards; sixty-card
+    // metagame decks seed the population as a deterministic
+    // forty-card sample (shuffle then trim) so every candidate -
+    // including generation-one survivors in the top list - honors
+    // the contract.
+    std::mt19937_64 seeding(seed ^ 0x5345454453414D50ULL);
+    const auto forty = [&](std::vector<CardId> deck) {
+        if (deck.size() > 40) {
+            std::shuffle(deck.begin(), deck.end(), seeding);
+            deck.resize(40);
+        }
+        // Undersized decks (thirty-card Burn) pad by cycling their
+        // own cards so seeds honor the forty-card contract too.
+        for (std::size_t source = 0; deck.size() < 40; ++source) {
+            deck.push_back(deck[source % deck.size()]);
+        }
+        return deck;
+    };
     for (const auto& deck : metagame) {
-        population.push_back(deck);
+        population.push_back(forty(deck));
     }
     while (population.size() < config.population) {
         std::vector<CardId> candidate =
-            metagame[population.size() % metagame.size()];
+            forty(metagame[population.size() % metagame.size()]);
         mutate(candidate, 1 + population.size() % 8);
         population.push_back(std::move(candidate));
     }

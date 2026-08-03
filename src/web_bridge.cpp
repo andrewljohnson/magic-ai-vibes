@@ -1701,7 +1701,15 @@ int run_evolution_json(
             break;
         case EvolutionPilot::SelfPlayZero: {
             // Both seats are driven by the frozen champion with a fast
-            // myopic policy; fitness games stay cheap and deterministic.
+            // myopic policy; fitness games stay cheap and
+            // deterministic. Mid-retrain (no champion on disk) the
+            // evolution degrades to the handcrafted pilot instead of
+            // dying, mirroring the game-mode fallback.
+            if (!std::ifstream(config.spz_artifact_path).good()) {
+                evolution.pilot = {.kind = BotKind::Handcrafted,
+                                   .rollouts_per_action = 1};
+                break;
+            }
             const auto net =
                 std::make_shared<const selfplay_zero::SpzNet>(
                     selfplay_zero::load_spz_net(
