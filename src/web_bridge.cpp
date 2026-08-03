@@ -47,6 +47,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return uwr_deck();
     case DeckId::Robots:
         return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -99,6 +101,8 @@ std::string_view deck_id_token(DeckId deck) {
         return "uwr";
     case DeckId::Robots:
         return "robots";
+    case DeckId::WhiteWeenie:
+        return "white-weenie";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -225,6 +229,10 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "activate_sage";
     case PriorityActionKind::TapLandForMana:
         return "tap_land_for_mana";
+    case PriorityActionKind::ActivateChaosOrb:
+        return "activate_chaos_orb";
+    case PriorityActionKind::ActivateJalumTome:
+        return "activate_jalum_tome";
     case PriorityActionKind::ActivateTriskelion:
         return "activate_triskelion";
     case PriorityActionKind::ActivateMillstone:
@@ -1413,6 +1421,9 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "robots") {
         return DeckId::Robots;
+    }
+    if (value == "white-weenie" || value == "ww") {
+        return DeckId::WhiteWeenie;
     }
     if (value == "lotus-combo" || value == "lotus") {
         return DeckId::LotusCombo;

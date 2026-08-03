@@ -30,7 +30,7 @@ if (args.includes("--evolve-json")) {
   }
 
   const generations = Number(valueAfter("--generations", "3"));
-  const population = Number(valueAfter("--population", "9"));
+  const population = Number(valueAfter("--population", "10"));
   const gamesPerOpponent = Number(valueAfter("--games", "1"));
   const cardIds = Array.from(
     { length: 40 },
@@ -47,6 +47,7 @@ if (args.includes("--evolve-json")) {
     ["burn", "Burn"],
     ["uwr", "Lion-dib-bolt"],
     ["robots", "Robots"],
+    ["white-weenie", "White Weenie"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {

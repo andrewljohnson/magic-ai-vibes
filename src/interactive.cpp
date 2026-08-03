@@ -261,6 +261,15 @@ std::string action_name(const PlayerObservation& observation,
     case PriorityActionKind::CastArtifact:
     case PriorityActionKind::CastEnchantment:
         return "Cast " + card;
+    case PriorityActionKind::ActivateChaosOrb:
+        return "Chaos Orb -> " +
+               (action.target.has_value() &&
+                        action.target->creature.has_value()
+                    ? "permanent #" +
+                          std::to_string(*action.target->creature)
+                    : "enchantment");
+    case PriorityActionKind::ActivateJalumTome:
+        return "Activate Jalum Tome";
     case PriorityActionKind::TapLandForMana: {
         static constexpr std::array<const char*, 6> kFaceNames = {
             "{1}", "{G}", "{R}", "{U}", "{W}", "{B}",
@@ -1470,6 +1479,8 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return uwr_deck();
     case DeckId::Robots:
         return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }
