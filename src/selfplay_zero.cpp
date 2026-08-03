@@ -2318,6 +2318,27 @@ struct SpzAgent {
         return true;
     }
 
+    // A larger floating pool is only an upside if it lets the actor
+    // cast something from their (known) hand that the passed state
+    // could not afford; mana that will die at window's end is not
+    // value (the live Dark-Ritual-into-nothing case). Timing is
+    // ignored deliberately: counting any card errs toward NOT
+    // pruning.
+    static bool pool_unlocks_new_cast(const PlayerState& acted,
+                                      const PlayerState& passed) {
+        for (const CardId card : acted.hand) {
+            const auto& definition = card_definition(card);
+            if (definition.type == CardType::Land) {
+                continue;
+            }
+            if (can_pay(acted, definition.cost) &&
+                !can_pay(passed, definition.cost)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     static bool no_upside_versus_pass(
         std::size_t actor,
         const ResolvedPriorityActionConsequence& action_settled,
@@ -2379,7 +2400,9 @@ struct SpzAgent {
                                counted(passed_self.hand)) &&
                multiset_subset(counted(passed_self.graveyard),
                                counted(acted_self.graveyard)) &&
-               mana_leq(acted_self.mana_pool, passed_self.mana_pool) &&
+               (mana_leq(acted_self.mana_pool,
+                         passed_self.mana_pool) ||
+                !pool_unlocks_new_cast(acted_self, passed_self)) &&
                acted_self.pending_mana <= passed_self.pending_mana &&
                same_permanents_allowing_extra_taps(
                    acted_self.lands, passed_self.lands, true) &&

@@ -1722,6 +1722,7 @@ function StackRail({
       )}
       <div className="stack-list">
         {[...stack].reverse().map((entry, index) => {
+          const stackIndex = stack.length - 1 - index;
           const label = formatStackEntryLabel(entry);
           const targets = formatStackTargets(entry);
           const controller = formatStackController(
@@ -1738,7 +1739,7 @@ function StackRail({
                 priorityTarget ? "is-priority-destination" : ""
               }`}
               key={stackId ?? `${label}-${index}`}
-              data-arrow-stack={index}
+              data-arrow-stack={stackIndex}
               onDragOver={(event) => {
                 if (stackId === undefined) return;
                 onPriorityDragOver?.(`stack:${String(stackId)}`, event);
