@@ -3046,9 +3046,13 @@ bool apply_priority_action(GameState& state, std::size_t player,
             !remove_card(player_state.hand, action.card)) {
             return false;
         }
-        player_state.lands.push_back({.card = action.card,
-                                      .tapped = false,
-                                      .id = state.next_permanent_id++});
+        {
+            LandPermanent played{.card = action.card,
+                                 .tapped = false,
+                                 .id = state.next_permanent_id++};
+            played.entered_this_turn = true;
+            player_state.lands.push_back(played);
+        }
         player_state.land_played_this_turn = true;
         ++state.stats[player].lands_played;
         refresh_crusade_buffs(state);
@@ -3827,7 +3831,11 @@ bool resolve_top_of_stack_inner(
                         .id = controller.lands[index].id,
                         .card = controller.lands[index].card,
                         .tapped = controller.lands[index].tapped,
-                        .summoning_sick = false,
+                        // A land that entered this turn animates
+                        // summoning-sick, like any fresh creature.
+                        .summoning_sick =
+                            controller.lands[index]
+                                .entered_this_turn,
                     };
                     animated.copy_of =
                         controller.lands[index].copy_of;
@@ -4412,6 +4420,7 @@ bool resolve_top_of_stack_inner(
                     .id = state.next_permanent_id++};
                 copy.copy_of = CardId::MishrasFactory;
                 copy.is_copy = true;
+                copy.entered_this_turn = true;
                 controller.lands.push_back(copy);
                 return true;
             }
@@ -5476,6 +5485,7 @@ void begin_turn(GameState& state, std::size_t player) {
     }
     for (auto& land : player_state.lands) {
         land.tapped = false;
+        land.entered_this_turn = false;
     }
     for (auto& creature : player_state.creatures) {
         creature.tapped = false;

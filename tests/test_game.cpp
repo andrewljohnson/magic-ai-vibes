@@ -5182,6 +5182,41 @@ TEST(chaos_orb_destroys_any_permanent_and_jalum_tome_filters) {
                      old_school::CardId::Plains) == 1);
 }
 
+TEST(factory_animated_the_turn_it_entered_is_summoning_sick) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {old_school::CardId::MishrasFactory};
+    player.lands = {
+        {.id = 231, .card = old_school::CardId::Mountain,
+         .tapped = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::play_land(
+            old_school::CardId::MishrasFactory),
+        true));
+    const auto id = player.lands.back().id;
+    CHECK(player.lands.back().entered_this_turn);
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::animate_factory(id),
+        false));
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].summoning_sick);
+    CHECK(old_school::legal_attackers(state, 0).empty());
+
+    // Next turn the same factory animates ready to fight.
+    old_school::cleanup_turn(state, 0, {});
+    old_school::begin_turn(state, 0);
+    CHECK(!player.lands.back().entered_this_turn);
+    CHECK(old_school::apply_priority_action(
+        state, 0, old_school::PriorityAction::animate_factory(id),
+        false));
+    resolve_top(state, 0);
+    CHECK(!player.creatures[0].summoning_sick);
+}
+
 TEST(animated_lands_are_still_lands_for_land_destruction) {
     // Strip Mine can destroy an animated Factory.
     old_school::GameState state;

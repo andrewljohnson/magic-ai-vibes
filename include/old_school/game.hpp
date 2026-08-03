@@ -161,6 +161,10 @@ struct LandPermanent {
     // Factory land: physical card stays CopyArtifact, face lives here.
     CardId copy_of = CardId::Forest;
     bool is_copy = false;
+    // Set when the land arrives, cleared at its controller's next
+    // turn start: an animated Factory is summoning-sick the turn its
+    // land entered, exactly like any other fresh creature.
+    bool entered_this_turn = false;
 
     bool operator==(const LandPermanent&) const = default;
 };

@@ -1770,9 +1770,11 @@ textarea:focus-visible,
   min-width: 0;
   height: var(--player-console-height);
   display: grid;
+  /* The decision row may never clip its buttons: it gets at least its
+     natural height, and the hand row absorbs any squeeze. */
   grid-template-rows:
-    var(--player-hand-height)
-    var(--player-decision-height);
+    minmax(0, var(--player-hand-height))
+    minmax(min-content, var(--player-decision-height));
   border-top: 0;
   background: rgba(6, 10, 9, 0.94);
   position: relative;
@@ -4168,6 +4170,36 @@ select {
 
 /* A permanent whose own ability is on the stack (Factory animating):
    bright breathing glow instead of a self-pointing target arrow. */
+/* Copy Artifact permanents: the copied face with a faint arcane
+   shimmer so copies read as slightly uncanny. */
+.permanent-slot.is-copy-permanent .card-face {
+  filter: hue-rotate(18deg) saturate(1.12);
+  box-shadow: 0 0 0 1px rgba(186, 148, 255, 0.55),
+    0 0 10px rgba(186, 148, 255, 0.28);
+  border-radius: 8px;
+}
+
+.permanent-slot.is-copy-permanent::before {
+  content: "COPY";
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  z-index: 6;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(96, 66, 160, 0.92);
+  color: #e6d9ff;
+  font-size: var(--card-type-floor);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.card-zoom-copy-note {
+  color: #c9b5f2;
+  font-style: italic;
+}
+
 @keyframes ability-glow {
   0%, 100% {
     filter: brightness(1.12)

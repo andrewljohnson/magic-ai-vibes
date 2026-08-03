@@ -238,6 +238,16 @@ function permanentId(permanent: Permanent): string {
   return String(permanent.permanentId);
 }
 
+// A Copy Artifact permanent shows the card it copies (with a copy
+// marker); everything else shows its own card.
+function displayCard(permanent: Permanent): Card {
+  const copyOf = (permanent as { copyOf?: Card }).copyOf;
+  if (copyOf) {
+    return { ...copyOf, copyNote: true } as Card;
+  }
+  return permanent.card as Card;
+}
+
 function priorityOptionElementId(
   decisionId: string | number,
   optionIndex: number,
@@ -627,6 +637,7 @@ function CardZoomOverlay({
   onClose: () => void;
 }) {
   const rules = CARD_RULES_TEXT[card.name];
+  const copyNote = (card as { copyNote?: boolean }).copyNote;
   return (
     <div
       className="card-zoom-backdrop"
@@ -642,13 +653,21 @@ function CardZoomOverlay({
         </div>
         <div className="card-zoom-type">
           {(card.type ?? "").toUpperCase()}
+          {copyNote ? " ENCHANTMENT" : ""}
           {card.flying ? " — FLYING" : ""}
+          {copyNote ? " (COPY ARTIFACT)" : ""}
         </div>
         <div className="card-zoom-text">
           {rules ??
             (card.type === "creature"
               ? "No abilities."
               : "")}
+          {copyNote && (
+            <em className="card-zoom-copy-note">
+              {" "}(This permanent is Copy Artifact, an enchantment
+              copying {card.name}.)
+            </em>
+          )}
         </div>
         {card.type === "creature" && (
           <div className="card-zoom-stats">
@@ -1092,6 +1111,10 @@ function PermanentRow({
               } ${
                 targetedByStackIds?.has(id) ? "is-spell-target" : ""
               } ${abilityActive ? "is-ability-active" : ""} ${
+                (permanent as { copyOf?: Card }).copyOf
+                  ? "is-copy-permanent"
+                  : ""
+              } ${
                 slamState.slamIds.has(id)
                   ? slamState.direction === -1
                     ? "is-slamming-up"
@@ -1112,7 +1135,7 @@ function PermanentRow({
               }
             >
               <CardFace
-                card={permanent.card}
+                card={displayCard(permanent)}
                 permanent={permanent}
                 selected={
                   selectedIds?.has(id) ||
