@@ -81,10 +81,17 @@ enum class CardId : std::uint8_t {
     UndergroundSea,
     Badlands,
     Timetwister,
+    BenalishHero,
+    MesaPegasus,
+    ThunderSpirit,
+    WhiteKnight,
+    ChaosOrb,
+    JalumTome,
+    Crusade,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::Timetwister) + 1;
+    static_cast<std::size_t>(CardId::Crusade) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -129,6 +136,7 @@ std::vector<CardId> blue_deck();
 std::vector<CardId> white_control_deck();
 std::vector<CardId> ru_aggro_deck();
 std::vector<CardId> robots_deck();
+std::vector<CardId> white_weenie_deck();
 // Stress decks outside the five-deck metagame environment.
 std::vector<CardId> lotus_combo_deck();
 std::vector<CardId> burn_deck();
@@ -158,6 +166,9 @@ struct CreaturePermanent {
     bool exile_on_death_this_turn = false;
     // +1/+1 counters (Triskelion); count into power and toughness.
     int plus_counters = 0;
+    // Static +1/+1 from Crusades in play (recomputed after every
+    // resolution; white creatures only).
+    int crusade_bonus = 0;
 
     bool operator==(const CreaturePermanent&) const = default;
 };
@@ -301,6 +312,8 @@ enum class PriorityActionKind : std::uint8_t {
     ActivateSage,
     ActivateTriskelion,
     TapLandForMana,
+    ActivateChaosOrb,
+    ActivateJalumTome,
 };
 
 // One explicit mana float: tap this permanent for the given face
@@ -374,6 +387,15 @@ struct PriorityAction {
     // 5 black. Never offered to bot seats or SPZ search.
     static PriorityAction tap_land_for_mana(PermanentId land,
                                             int color_index);
+    // Chaos Orb (house rules: no flip): tap and sacrifice the orb to
+    // destroy any permanent. Creatures/lands/artifacts target by
+    // permanent id; an enchantment targets its owner with the row
+    // index in x_value.
+    static PriorityAction activate_chaos_orb(PermanentId orb,
+                                             Target target);
+    static PriorityAction activate_chaos_orb_enchantment(
+        PermanentId orb, std::size_t owner, int index);
+    static PriorityAction activate_jalum_tome(PermanentId tome);
 
     bool operator==(const PriorityAction&) const = default;
 };
@@ -871,9 +893,10 @@ enum class DeckId : std::uint8_t {
     Burn,
     UWR,
     Robots,
+    WhiteWeenie,
 };
 
-inline constexpr std::size_t kDeckCount = 9;
+inline constexpr std::size_t kDeckCount = 10;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

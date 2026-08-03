@@ -17,6 +17,23 @@ make test       # every C++ suite plus the web tests
 Use C++20 and keep `-Wall -Wextra -Wpedantic -Werror` clean. Preserve
 deterministic behavior for a fixed seed.
 
+## New-deck protocol
+
+Every new deck addition ends with two verification passes, not just
+compiling tests:
+
+1. **Watch it play.** Generate replays of the new deck under Random,
+   Handcrafted, and SPZ pilots against several opponents (the replay
+   tool + scout digests). Read the game logs for weird behavior:
+   uncastable cards, never-activated abilities, misfiring triggers,
+   nonsense sequencing. A deck is not "added" until someone has
+   actually observed it being played sensibly.
+2. **Make Handcrafted competent with it.** The rules bot is the
+   benchmark opponent and the only sanctioned home for card strategy:
+   give its valuations and action scores whatever the new cards need
+   (mulligan source lists, cast priorities, ability usage) and check
+   its win rate with the deck against the field is not embarrassing.
+
 ## No card-specific behavior patches
 
 Do not hard-code narrowly targeted play rules into the learned bot

@@ -129,11 +129,13 @@ void append_player_scalars(std::vector<float>& features,
         const auto& definition = card_definition(creature.card);
         const int creature_power = definition.power +
                                    creature.temporary_power_bonus +
-                                   creature.plus_counters;
+                                   creature.plus_counters +
+                                   creature.crusade_bonus;
         power += creature_power;
         toughness += definition.toughness +
                      creature.temporary_toughness_bonus +
-                     creature.plus_counters;
+                     creature.plus_counters +
+                     creature.crusade_bonus;
         damage += creature.damage;
         bonus_power += creature.temporary_power_bonus;
         if (!creature.tapped) {
@@ -254,7 +256,7 @@ std::vector<float> spz_features_colors(
                 const int power =
                     definition.power +
                     creature.temporary_power_bonus +
-                    creature.plus_counters;
+                    creature.plus_counters + creature.crusade_bonus;
                 if (!creature.tapped) {
                     tally.untapped += power;
                     if (definition.flying) {
@@ -316,7 +318,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
         ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
-        robots_deck(),
+        robots_deck(), white_weenie_deck(),
     };
     return decks;
 }
@@ -325,7 +327,7 @@ std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
         "Green Growth", "Creatures & Bolts", "Counter Flyer",
         "Moat Mill", "RU Aggro", "Lotus Combo", "Burn",
-        "Lion-dib-bolt", "Robots",
+        "Lion-dib-bolt", "Robots", "White Weenie",
     };
     return names.at(deck_index);
 }
@@ -443,12 +445,14 @@ constexpr std::size_t kRaceFeatures = 10;
 
 int creature_current_power(const CreaturePermanent& creature) {
     return card_definition(creature.card).power +
-           creature.temporary_power_bonus + creature.plus_counters;
+           creature.temporary_power_bonus + creature.plus_counters +
+           creature.crusade_bonus;
 }
 
 int creature_current_toughness(const CreaturePermanent& creature) {
     return card_definition(creature.card).toughness +
-           creature.temporary_toughness_bonus + creature.plus_counters;
+           creature.temporary_toughness_bonus + creature.plus_counters +
+           creature.crusade_bonus;
 }
 
 void append_creature_slots_range(std::vector<float>& features,
@@ -1477,7 +1481,7 @@ std::size_t spz_action_feature_count() {
     // player, own/enemy creature) + target creature card + countered spell
     // card + chosen card (tutor/copy choice) + x scale +
     // source-permanent flag.
-    return 29 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
+    return 31 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
            1 + 1;
 }
 
@@ -1487,7 +1491,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 29;
+    offset += 31;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {
@@ -2276,6 +2280,7 @@ struct SpzAgent {
                 other->summoning_sick != creature.summoning_sick ||
                 other->damage != creature.damage ||
                 other->plus_counters != creature.plus_counters ||
+                other->crusade_bonus != creature.crusade_bonus ||
                 other->exile_on_death_this_turn !=
                     creature.exile_on_death_this_turn) {
                 return false;

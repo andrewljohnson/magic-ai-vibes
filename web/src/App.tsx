@@ -548,6 +548,15 @@ const CARD_RULES_TEXT: Record<string, string> = {
   Badlands: "Tap: Add {B} or {R}.",
   Timetwister:
     "Each player shuffles their hand and graveyard into their library, then draws seven cards.",
+  "Benalish Hero": "A stalwart 1/1 soldier.",
+  "Mesa Pegasus": "Flying.",
+  "Thunder Spirit": "Flying.",
+  "White Knight": "A disciplined 2/2 knight.",
+  "Chaos Orb":
+    "{T}, Sacrifice Chaos Orb: Destroy any permanent (house rule: no flip).",
+  "Jalum Tome":
+    "{2}, {T}: Draw a card, then discard your least valuable card.",
+  Crusade: "White creatures get +1/+1.",
 };
 
 function ManaCostPips({ card }: { card: Card }) {

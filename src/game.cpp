@@ -498,9 +498,65 @@ constexpr std::array<CardDefinition, kCardCount> kCardDefinitions = {{
      0,
      0,
      false},
+    {CardId::BenalishHero,
+     "Benalish Hero",
+     CardType::Creature,
+     {.white = 1},
+     1,
+     1,
+     0,
+     false},
+    {CardId::MesaPegasus,
+     "Mesa Pegasus",
+     CardType::Creature,
+     {.generic = 1, .white = 1},
+     1,
+     1,
+     0,
+     true},
+    {CardId::ThunderSpirit,
+     "Thunder Spirit",
+     CardType::Creature,
+     {.generic = 1, .white = 2},
+     2,
+     2,
+     0,
+     true},
+    {CardId::WhiteKnight,
+     "White Knight",
+     CardType::Creature,
+     {.white = 2},
+     2,
+     2,
+     0,
+     false},
+    {CardId::ChaosOrb,
+     "Chaos Orb",
+     CardType::Artifact,
+     {.generic = 2},
+     0,
+     0,
+     0,
+     false},
+    {CardId::JalumTome,
+     "Jalum Tome",
+     CardType::Artifact,
+     {.generic = 3},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Crusade,
+     "Crusade",
+     CardType::Enchantment,
+     {.white = 2},
+     0,
+     0,
+     0,
+     false},
 }};
 
-constexpr std::array<CardId, 18> kCreatureCards = {
+constexpr std::array<CardId, 22> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -519,6 +575,10 @@ constexpr std::array<CardId, 18> kCreatureCards = {
     CardId::SuChi,
     CardId::SageOfLatNam,
     CardId::Triskelion,
+    CardId::BenalishHero,
+    CardId::MesaPegasus,
+    CardId::ThunderSpirit,
+    CardId::WhiteKnight,
 };
 
 constexpr std::array<CardId, 6> kSorceryCards = {
@@ -530,7 +590,7 @@ constexpr std::array<CardId, 6> kSorceryCards = {
     CardId::Timetwister,
 };
 
-constexpr std::array<CardId, 10> kArtifactCards = {
+constexpr std::array<CardId, 12> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
@@ -541,10 +601,13 @@ constexpr std::array<CardId, 10> kArtifactCards = {
     CardId::FellwarStone,
     CardId::MoxEmerald,
     CardId::MoxJet,
+    CardId::ChaosOrb,
+    CardId::JalumTome,
 };
 
-constexpr std::array<CardId, 1> kEnchantmentCards = {
+constexpr std::array<CardId, 2> kEnchantmentCards = {
     CardId::Moat,
+    CardId::Crusade,
 };
 
 constexpr ManaCost kMillstoneActivationCost = {.generic = 2};
@@ -1477,13 +1540,35 @@ const CreaturePermanent* find_creature(
 
 int creature_power(const CreaturePermanent& creature) {
     return card_definition(creature.card).power +
-           creature.temporary_power_bonus + creature.plus_counters;
+           creature.temporary_power_bonus + creature.plus_counters +
+           creature.crusade_bonus;
 }
 
 int creature_toughness(const CreaturePermanent& creature) {
     return card_definition(creature.card).toughness +
            creature.temporary_toughness_bonus +
-           creature.plus_counters;
+           creature.plus_counters + creature.crusade_bonus;
+}
+
+// Crusade is the pool's only global static pump: every white creature
+// (printed cost includes white) gets +1/+1 per Crusade in play, either
+// player's. Recomputed after every resolution so enter/leave events
+// need no individual triggers.
+void refresh_crusade_buffs(GameState& state) {
+    int crusades = 0;
+    for (const auto& player : state.players) {
+        for (const CardId enchantment : player.enchantments) {
+            crusades += enchantment == CardId::Crusade ? 1 : 0;
+        }
+    }
+    for (auto& player : state.players) {
+        for (auto& creature : player.creatures) {
+            creature.crusade_bonus =
+                card_definition(creature.card).cost.white > 0
+                    ? crusades
+                    : 0;
+        }
+    }
 }
 
 ArtifactPermanent* find_artifact(PlayerState& player, PermanentId id) {
@@ -1635,6 +1720,20 @@ double handcrafted_card_value(CardId card) {
         return 150.0;
     case CardId::Timetwister:
         return 1200.0;
+    case CardId::BenalishHero:
+        return 300.0;
+    case CardId::MesaPegasus:
+        return 450.0;
+    case CardId::ThunderSpirit:
+        return 900.0;
+    case CardId::WhiteKnight:
+        return 700.0;
+    case CardId::ChaosOrb:
+        return 1400.0;
+    case CardId::JalumTome:
+        return 600.0;
+    case CardId::Crusade:
+        return 900.0;
     case CardId::Forest:
     case CardId::Mountain:
     case CardId::Island:
@@ -1828,6 +1927,28 @@ std::vector<CardId> ru_aggro_deck() {
     deck.insert(deck.end(), 8, CardId::HillGiant);
     deck.insert(deck.end(), 3, CardId::LightningBolt);
     deck.insert(deck.end(), 2, CardId::Disintegrate);
+    return deck;
+}
+
+std::vector<CardId> white_weenie_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::BenalishHero);
+    deck.insert(deck.end(), 3, CardId::MesaPegasus);
+    deck.insert(deck.end(), 4, CardId::ThunderSpirit);
+    deck.insert(deck.end(), 4, CardId::SavannahLions);
+    deck.insert(deck.end(), 3, CardId::SerraAngel);
+    deck.insert(deck.end(), 4, CardId::WhiteKnight);
+    deck.push_back(CardId::ChaosOrb);
+    deck.push_back(CardId::JalumTome);
+    deck.push_back(CardId::MoxPearl);
+    deck.insert(deck.end(), 4, CardId::Disenchant);
+    deck.insert(deck.end(), 4, CardId::SwordsToPlowshares);
+    deck.insert(deck.end(), 3, CardId::Armageddon);
+    deck.insert(deck.end(), 4, CardId::Crusade);
+    deck.insert(deck.end(), 14, CardId::Plains);
+    deck.push_back(CardId::LibraryOfAlexandria);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.push_back(CardId::StripMine);
     return deck;
 }
 
@@ -2202,6 +2323,35 @@ PriorityAction PriorityAction::activate_triskelion(
         .card = CardId::Triskelion,
         .target = target};
     action.source_permanent = triskelion;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_chaos_orb(PermanentId orb,
+                                                  Target target) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateChaosOrb,
+        .card = CardId::ChaosOrb,
+        .target = target};
+    action.source_permanent = orb;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_chaos_orb_enchantment(
+    PermanentId orb, std::size_t owner, int index) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateChaosOrb,
+        .card = CardId::ChaosOrb,
+        .target = Target::player_target(owner)};
+    action.source_permanent = orb;
+    action.x_value = index;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_jalum_tome(PermanentId tome) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateJalumTome,
+        .card = CardId::JalumTome};
+    action.source_permanent = tome;
     return action;
 }
 
@@ -2622,6 +2772,47 @@ legal_priority_actions(const GameState& state, std::size_t player,
                     PriorityAction::activate_triskelion(
                         trike.id, Target::creature_target(
                                       owner, creature.id)));
+            }
+        }
+    }
+    for (const auto& orb : player_state.artifacts) {
+        if (artifact_face(orb) != CardId::ChaosOrb || orb.tapped) {
+            continue;
+        }
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            const auto& side = state.players[owner];
+            for (const auto& creature : side.creatures) {
+                actions.push_back(PriorityAction::activate_chaos_orb(
+                    orb.id,
+                    Target::creature_target(owner, creature.id)));
+            }
+            for (const auto& land : side.lands) {
+                actions.push_back(PriorityAction::activate_chaos_orb(
+                    orb.id, Target::creature_target(owner, land.id)));
+            }
+            for (const auto& artifact : side.artifacts) {
+                if (artifact.id == orb.id) {
+                    continue;  // it is already being sacrificed
+                }
+                actions.push_back(PriorityAction::activate_chaos_orb(
+                    orb.id,
+                    Target::creature_target(owner, artifact.id)));
+            }
+            for (std::size_t index = 0;
+                 index < side.enchantments.size(); ++index) {
+                actions.push_back(
+                    PriorityAction::activate_chaos_orb_enchantment(
+                        orb.id, owner, static_cast<int>(index)));
+            }
+        }
+    }
+    if (can_pay_memo(ManaCost{.generic = 2})) {
+        for (const auto& tome : player_state.artifacts) {
+            if (artifact_face(tome) == CardId::JalumTome &&
+                !tome.tapped && !player_state.hand.empty()) {
+                actions.push_back(
+                    PriorityAction::activate_jalum_tome(tome.id));
             }
         }
     }
@@ -3225,6 +3416,66 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::ActivateChaosOrb: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value()) {
+            return false;
+        }
+        const auto orb = std::find_if(
+            player_state.artifacts.begin(),
+            player_state.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == *action.source_permanent;
+            });
+        if (orb == player_state.artifacts.end() || orb->tapped ||
+            artifact_face(*orb) != CardId::ChaosOrb) {
+            return false;
+        }
+        // Tap and sacrifice as the cost; the physical card (a copy
+        // stays Copy Artifact) goes to the graveyard now.
+        player_state.graveyard.push_back(orb->card);
+        player_state.artifacts.erase(orb);
+        StackObject ability{
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::ChaosOrb,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+        };
+        ability.x_value = action.x_value;
+        state.stack.push_back(ability);
+        return true;
+    }
+
+    case PriorityActionKind::ActivateJalumTome: {
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        const auto tome = std::find_if(
+            player_state.artifacts.begin(),
+            player_state.artifacts.end(),
+            [&](const ArtifactPermanent& candidate) {
+                return candidate.id == *action.source_permanent;
+            });
+        if (tome == player_state.artifacts.end() || tome->tapped ||
+            artifact_face(*tome) != CardId::JalumTome ||
+            player_state.hand.empty() ||
+            !pay_mana(player_state, ManaCost{.generic = 2})) {
+            return false;
+        }
+        tome->tapped = true;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::JalumTome,
+            .controller = player,
+            .target = std::nullopt,
+            .spell_target = std::nullopt,
+        });
+        return true;
+    }
+
     case PriorityActionKind::TapLandForMana: {
         if (!action.source_permanent.has_value()) {
             return false;
@@ -3315,7 +3566,25 @@ bool apply_priority_action(GameState& state, std::size_t player,
     return false;
 }
 
+namespace {
+bool resolve_top_of_stack_inner(
+    GameState& state, ForceSpikePaymentChoice force_spike_payment);
+}  // namespace
+
 bool resolve_top_of_stack(
+    GameState& state,
+    ForceSpikePaymentChoice force_spike_payment) {
+    const bool resolved =
+        resolve_top_of_stack_inner(state, force_spike_payment);
+    // Static board effects (Crusade) recompute after every
+    // resolution: enters, leaves, and every creature arrival funnel
+    // through here.
+    refresh_crusade_buffs(state);
+    return resolved;
+}
+
+namespace {
+bool resolve_top_of_stack_inner(
     GameState& state,
     ForceSpikePaymentChoice force_spike_payment) {
     if (state.stack.empty()) {
@@ -3408,6 +3677,91 @@ bool resolve_top_of_stack(
             }
             creature->damage += 1;
             remove_dead_creatures(owner);
+            return true;
+        }
+        if (spell.card == CardId::ChaosOrb) {
+            if (!spell.target.has_value()) {
+                return false;
+            }
+            auto& owner = state.players[spell.target->player];
+            if (!spell.target->creature.has_value()) {
+                // Enchantment by row index (rides in x_value).
+                const auto index =
+                    static_cast<std::size_t>(spell.x_value);
+                if (index < owner.enchantments.size()) {
+                    owner.graveyard.push_back(
+                        owner.enchantments[index]);
+                    owner.enchantments.erase(
+                        owner.enchantments.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                }
+                return true;
+            }
+            const PermanentId target_id = *spell.target->creature;
+            for (std::size_t index = 0; index < owner.lands.size();
+                 ++index) {
+                if (owner.lands[index].id == target_id) {
+                    owner.graveyard.push_back(
+                        owner.lands[index].card);
+                    owner.lands.erase(
+                        owner.lands.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
+            for (std::size_t index = 0;
+                 index < owner.creatures.size(); ++index) {
+                const auto& creature = owner.creatures[index];
+                if (creature.id != target_id) {
+                    continue;
+                }
+                // Destruction is a death: Su-Chi's rebate applies.
+                if (creature.card == CardId::SuChi) {
+                    owner.mana_pool.generic += 4;
+                }
+                owner.graveyard.push_back(creature.card);
+                owner.creatures.erase(
+                    owner.creatures.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+                return true;
+            }
+            for (std::size_t index = 0;
+                 index < owner.artifacts.size(); ++index) {
+                if (owner.artifacts[index].id == target_id) {
+                    owner.graveyard.push_back(
+                        owner.artifacts[index].card);
+                    owner.artifacts.erase(
+                        owner.artifacts.begin() +
+                        static_cast<std::ptrdiff_t>(index));
+                    return true;
+                }
+            }
+            return true;  // target already gone: fizzles
+        }
+        if (spell.card == CardId::JalumTome) {
+            auto& owner = state.players[spell.controller];
+            if (!owner.library.empty()) {
+                owner.hand.push_back(owner.library.back());
+                owner.library.pop_back();
+            } else {
+                state.failed_draw[spell.controller] = true;
+            }
+            if (!owner.hand.empty()) {
+                // House determinism: the worst card (by the shared
+                // handcrafted valuation) is discarded.
+                std::size_t worst = 0;
+                for (std::size_t index = 1;
+                     index < owner.hand.size(); ++index) {
+                    if (handcrafted_card_value(owner.hand[index]) <
+                        handcrafted_card_value(owner.hand[worst])) {
+                        worst = index;
+                    }
+                }
+                owner.graveyard.push_back(owner.hand[worst]);
+                owner.hand.erase(
+                    owner.hand.begin() +
+                    static_cast<std::ptrdiff_t>(worst));
+            }
             return true;
         }
         if (spell.card == CardId::StripMine) {
@@ -3937,6 +4291,7 @@ bool resolve_top_of_stack(
 
     return false;
 }
+}  // namespace
 
 PriorityPassResult pass_priority(GameState& state,
                                  PriorityState& priority) {
@@ -5646,6 +6001,50 @@ double Game::handcrafted_action_score(const PriorityAction& action,
     case PriorityActionKind::TapLandForMana:
         // Human-only manual float; bots never receive it.
         return -10'000.0;
+    case PriorityActionKind::ActivateChaosOrb: {
+        // One shot: spend it on the opponent's best permanent.
+        if (!action.target.has_value() ||
+            action.target->player != opponent) {
+            return -400.0;
+        }
+        double best = 250.0;
+        if (action.target->creature.has_value()) {
+            const PermanentId id = *action.target->creature;
+            for (const auto& creature : opponent_state.creatures) {
+                if (creature.id == id) {
+                    best = 400.0 +
+                           handcrafted_card_value(creature.card) /
+                               2.0;
+                }
+            }
+            for (const auto& land : opponent_state.lands) {
+                if (land.id == id) {
+                    best = 150.0 +
+                           handcrafted_card_value(land.card) / 2.0;
+                }
+            }
+            for (const auto& artifact : opponent_state.artifacts) {
+                if (artifact.id == id) {
+                    best = 300.0 +
+                           handcrafted_card_value(artifact.card) /
+                               2.0;
+                }
+            }
+        } else {
+            const auto index =
+                static_cast<std::size_t>(action.x_value);
+            if (index < opponent_state.enchantments.size()) {
+                best = 300.0 +
+                       handcrafted_card_value(
+                           opponent_state.enchantments[index]) /
+                           2.0;
+            }
+        }
+        return best;
+    }
+    case PriorityActionKind::ActivateJalumTome:
+        // Card filtering: fine when mana is spare.
+        return 350.0;
     case PriorityActionKind::CastManaDrain:
         return 2'700.0;
     case PriorityActionKind::CastFireball: {
@@ -6994,6 +7393,8 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return uwr_deck();
     case DeckId::Robots:
         return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -7026,6 +7427,8 @@ std::string_view deck_name(DeckId deck) {
         return "Lion-dib-bolt";
     case DeckId::Robots:
         return "Robots";
+    case DeckId::WhiteWeenie:
+        return "White Weenie";
     }
     return "Unknown";
 }
@@ -7075,6 +7478,13 @@ std::string_view deck_list(DeckId deck) {
                "4 Mishra's Factory / 4 Tundra / 3 City of Brass / "
                "3 Volcanic Island / 2 Underground Sea / Badlands / "
                "Library of Alexandria / Strip Mine";
+    case DeckId::WhiteWeenie:
+        return "4 Benalish Hero / 3 Mesa Pegasus / 4 Thunder Spirit / "
+               "4 Savannah Lions / 3 Serra Angel / 4 White Knight / "
+               "Chaos Orb / Jalum Tome / Mox Pearl / 4 Disenchant / "
+               "4 Swords to Plowshares / 3 Armageddon / 4 Crusade / "
+               "14 Plains / Library of Alexandria / "
+               "4 Mishra's Factory / Strip Mine";
     }
     return "Unknown";
 }
@@ -7296,6 +7706,7 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::Burn),
         deck_cards(DeckId::UWR),
         deck_cards(DeckId::Robots),
+        deck_cards(DeckId::WhiteWeenie),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

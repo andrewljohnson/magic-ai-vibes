@@ -85,6 +85,13 @@ const CARD_NAMES = Object.freeze([
   "Underground Sea",
   "Badlands",
   "Timetwister",
+  "Benalish Hero",
+  "Mesa Pegasus",
+  "Thunder Spirit",
+  "White Knight",
+  "Chaos Orb",
+  "Jalum Tome",
+  "Crusade",
 ]);
 
 export const DECKS = Object.freeze([
@@ -269,6 +276,33 @@ export const DECKS = Object.freeze([
       { name: "Strip Mine", count: 1 },
     ],
   },
+  {
+    id: "white-weenie",
+    label: "White Weenie",
+    name: "White Weenie",
+    colors: ["white"],
+    deckList:
+      "4 Benalish Hero / 3 Mesa Pegasus / 4 Thunder Spirit / 4 Savannah Lions / 3 Serra Angel / 4 White Knight / Chaos Orb / Jalum Tome / Mox Pearl / 4 Disenchant / 4 Swords to Plowshares / 3 Armageddon / 4 Crusade / 14 Plains / Library of Alexandria / 4 Mishra's Factory / Strip Mine",
+    cards: [
+      { name: "Benalish Hero", count: 4 },
+      { name: "Mesa Pegasus", count: 3 },
+      { name: "Thunder Spirit", count: 4 },
+      { name: "Savannah Lions", count: 4 },
+      { name: "Serra Angel", count: 3 },
+      { name: "White Knight", count: 4 },
+      { name: "Chaos Orb", count: 1 },
+      { name: "Jalum Tome", count: 1 },
+      { name: "Mox Pearl", count: 1 },
+      { name: "Disenchant", count: 4 },
+      { name: "Swords to Plowshares", count: 4 },
+      { name: "Armageddon", count: 3 },
+      { name: "Crusade", count: 4 },
+      { name: "Plains", count: 14 },
+      { name: "Library of Alexandria", count: 1 },
+      { name: "Mishra's Factory", count: 4 },
+      { name: "Strip Mine", count: 1 },
+    ],
+  },
 ]);
 
 export const POLICIES = Object.freeze([
@@ -362,7 +396,7 @@ export const EVOLUTION_PILOTS = Object.freeze([
 
 export const EVOLUTION_DEFAULTS = Object.freeze({
   generations: 3,
-  population: 9,
+  population: 10,
   games: 1,
   pilot: "handcrafted",
   seed: "424242",
@@ -371,7 +405,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 export const EVOLUTION_LIMITS = Object.freeze({
   seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
   generations: { min: 1, max: 200 },
-  population: { min: 9, max: 32 },
+  population: { min: 10, max: 32 },
   games: { min: 1, max: 16 },
   retainedResults: MAX_EVOLUTION_RESULTS,
   savedDecks: MAX_SAVED_DECKS,

@@ -580,6 +580,16 @@ TEST(starting_decks_have_the_requested_cards) {
     CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 3);
     CHECK(count_card(ru_deck, old_school::CardId::Disintegrate) == 2);
 
+    const auto weenie = old_school::white_weenie_deck();
+    CHECK(weenie.size() == 60);
+    CHECK(count_card(weenie, old_school::CardId::BenalishHero) == 4);
+    CHECK(count_card(weenie, old_school::CardId::ThunderSpirit) == 4);
+    CHECK(count_card(weenie, old_school::CardId::WhiteKnight) == 4);
+    CHECK(count_card(weenie, old_school::CardId::Crusade) == 4);
+    CHECK(count_card(weenie, old_school::CardId::Armageddon) == 3);
+    CHECK(count_card(weenie, old_school::CardId::Plains) == 14);
+    CHECK(count_card(weenie, old_school::CardId::ChaosOrb) == 1);
+
     const auto robots = old_school::robots_deck();
     CHECK(robots.size() == 60);
     CHECK(count_card(robots, old_school::CardId::SuChi) == 4);
@@ -3023,7 +3033,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 9,
+        .population = 10,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3036,11 +3046,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 9);
-    CHECK(first.best.total.games == 36);
+    CHECK(first.best.by_opponent.size() == 10);
+    CHECK(first.best.total.games == 40);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          36);
+          40);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3052,6 +3062,7 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::white_control_deck(),
              old_school::ru_aggro_deck(),
              old_school::robots_deck(),
+             old_school::white_weenie_deck(),
              old_school::lotus_combo_deck(),
              old_school::burn_deck(),
              old_school::uwr_deck(),
@@ -4852,6 +4863,118 @@ TEST(manual_land_tap_floats_mana_and_pays_first) {
         old_school::PriorityAction::tap_land_for_mana(95, 1), false));
     CHECK(player.mana_pool.green == 1);
     CHECK(player.creatures[0].tapped);
+}
+
+TEST(crusade_pumps_white_creatures_and_fades_when_destroyed) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::Crusade};
+    player.lands = {
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+    };
+    player.creatures = {
+        {.id = 151,
+         .card = old_school::CardId::WhiteKnight,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    enemy.creatures = {
+        {.id = 152,
+         .card = old_school::CardId::GrizzlyBears,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 153,
+         .card = old_school::CardId::SavannahLions,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::cast_enchantment(
+            old_school::CardId::Crusade),
+        true));
+    resolve_top(state, 0);
+    // All white creatures pump - both sides; the green bear does not.
+    CHECK(player.creatures[0].crusade_bonus == 1);
+    CHECK(enemy.creatures[0].crusade_bonus == 0);
+    CHECK(enemy.creatures[1].crusade_bonus == 1);
+
+    // Disenchanting the Crusade removes the pump on resolution.
+    enemy.hand = {old_school::CardId::Disenchant};
+    enemy.lands = {
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+    };
+    CHECK(old_school::apply_priority_action(
+        state, 1,
+        old_school::PriorityAction::cast_disenchant_enchantment(0, 0),
+        false));
+    resolve_top(state, 1);
+    CHECK(player.enchantments.empty());
+    CHECK(player.creatures[0].crusade_bonus == 0);
+    CHECK(enemy.creatures[1].crusade_bonus == 0);
+}
+
+TEST(chaos_orb_destroys_any_permanent_and_jalum_tome_filters) {
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.artifacts = {
+        {.id = 161, .card = old_school::CardId::ChaosOrb,
+         .tapped = false},
+    };
+    enemy.creatures = {
+        {.id = 162,
+         .card = old_school::CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto orb = old_school::PriorityAction::activate_chaos_orb(
+        161, old_school::Target::creature_target(1, 162));
+    CHECK(has_action(old_school::legal_priority_actions(state, 0, false),
+                     orb));
+    CHECK(old_school::apply_priority_action(state, 0, orb, false));
+    // Cost paid immediately: the orb is sacrificed.
+    CHECK(player.artifacts.empty());
+    CHECK(count_card(player.graveyard,
+                     old_school::CardId::ChaosOrb) == 1);
+    resolve_top(state, 0);
+    CHECK(enemy.creatures.empty());
+    CHECK(count_card(enemy.graveyard, old_school::CardId::SuChi) == 1);
+    // Destruction is a death: Su-Chi banks its {4}.
+    CHECK(enemy.mana_pool.generic == 4);
+
+    // Jalum Tome: pay {2}, tap, draw one, auto-discard the worst card.
+    old_school::GameState tome_state;
+    tome_state.active_player = 0;
+    auto& reader = tome_state.players[0];
+    reader.hand = {old_school::CardId::Plains};
+    reader.library = {old_school::CardId::SerraAngel};
+    reader.artifacts = {
+        {.id = 171, .card = old_school::CardId::JalumTome,
+         .tapped = false},
+    };
+    reader.lands = {
+        {.card = old_school::CardId::Plains, .tapped = false},
+        {.card = old_school::CardId::Plains, .tapped = false},
+    };
+    const auto read = old_school::PriorityAction::activate_jalum_tome(
+        171);
+    CHECK(has_action(
+        old_school::legal_priority_actions(tome_state, 0, false),
+        read));
+    CHECK(old_school::apply_priority_action(tome_state, 0, read,
+                                            false));
+    resolve_top(tome_state, 0);
+    // Drew the Angel, discarded the Plains (lowest value).
+    CHECK(reader.hand.size() == 1);
+    CHECK(reader.hand[0] == old_school::CardId::SerraAngel);
+    CHECK(count_card(reader.graveyard,
+                     old_school::CardId::Plains) == 1);
 }
 
 TEST(animated_lands_are_still_lands_for_land_destruction) {
