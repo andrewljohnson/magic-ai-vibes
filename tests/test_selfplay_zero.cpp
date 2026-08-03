@@ -560,6 +560,71 @@ SPZ_TEST(channel_combo_kill_survives_prunes_and_rollout_finds_it) {
            "rollout policy opens the Channel kill line");
 }
 
+SPZ_TEST(dead_mana_ritual_with_no_follow_up_is_pruned) {
+    // Reported from live play: SPZ (BR) cast Dark Ritual at the end
+    // of the human's turn with nothing to spend BBB on; the pool died
+    // at window's end and the card was wasted. Floating mana that
+    // unlocks no cast from the known hand is not upside, so the
+    // no-upside prune must block the ritual for every net.
+    const auto br = br_midrange_deck();
+    const auto uwr = uwr_deck();
+    GameState state;
+    state.turn_number = 4;
+    state.active_player = 0;  // the OPPONENT's turn
+    state.starting_player = 0;
+    state.next_permanent_id = 9;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "ritual fixture card is in deck");
+        pool.erase(found);
+    };
+    auto uwr_pool = uwr;
+    remove_one(uwr_pool, CardId::Plateau);
+    state.players[0].lands.push_back({CardId::Plateau, false});
+    state.players[0].hand.assign(3, CardId::LightningBolt);
+    for (int held = 0; held < 3; ++held) {
+        remove_one(uwr_pool, CardId::LightningBolt);
+    }
+    state.players[0].library = uwr_pool;
+
+    auto br_pool = br;
+    remove_one(br_pool, CardId::Swamp);
+    state.players[1].lands.push_back({CardId::Swamp, false});
+    remove_one(br_pool, CardId::DarkRitual);
+    state.players[1].hand.push_back(CardId::DarkRitual);
+    // Second hand card is a Juzam the ritual CANNOT enable (needs
+    // {2}{B}{B}; ritual gives exactly BBB and the Swamp is spent
+    // casting it, leaving BBB for a 4-cost - still short).
+    remove_one(br_pool, CardId::JuzamDjinn);
+    state.players[1].hand.push_back(CardId::JuzamDjinn);
+    state.players[1].library = br_pool;
+
+    const auto observation = observe_game_state(state, 1);
+    const auto actions = legal_priority_actions(state, 1, false);
+    bool ritual_available = false;
+    for (const auto& action : actions) {
+        ritual_available |=
+            action.kind == PriorityActionKind::CastDarkRitual;
+    }
+    expect(ritual_available, "fixture offers the Dark Ritual");
+    const std::array<std::vector<CardId>, 2> game_decks = {uwr, br};
+    for (std::uint64_t net_seed = 1; net_seed <= 30; ++net_seed) {
+        const auto net = std::make_shared<const SpzNet>(
+            spz_feature_count(), 8, net_seed);
+        SpzPolicyConfig policy;
+        policy.worlds = 1;
+        policy.block_prediction_worlds = 1;
+        policy.seed = net_seed;
+        const auto controller =
+            make_spz_controller(net, game_decks, 1, policy);
+        const std::size_t chosen = controller.choose_priority_action(
+            observation, TurnPhase::FirstMain, actions);
+        expect(actions[chosen].kind !=
+                   PriorityActionKind::CastDarkRitual,
+               "pruned policy never rituals into dead mana");
+    }
+}
+
 SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
     // Reported from live play: SPZ (green, active player) with no creatures
     // of its own cast Giant Growth on the opponent's summoning-sick Orcs.
