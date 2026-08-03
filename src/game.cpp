@@ -6285,8 +6285,23 @@ PriorityAction Game::choose_priority_action(
         }
     }
     const auto* controller = human_controller(player);
-    if (actions.size() == 1 &&
+    const bool only_pass_or_mana = std::all_of(
+        actions.begin(), actions.end(),
+        [](const PriorityAction& action) {
+            return action.kind == PriorityActionKind::Pass ||
+                   action.kind == PriorityActionKind::TapLandForMana;
+        });
+    // Forced pass: nothing to decide. Mana taps alone never justify a
+    // stop - floating with nothing to spend it on is dead mana - so a
+    // window offering only Pass plus taps auto-passes too (bluff mode
+    // still pauses everything).
+    if (only_pass_or_mana &&
         (controller == nullptr || !controller->bluff_mode)) {
+        for (const auto& action : actions) {
+            if (action.kind == PriorityActionKind::Pass) {
+                return action;
+            }
+        }
         return actions.front();
     }
 
