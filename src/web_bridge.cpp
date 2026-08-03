@@ -593,11 +593,11 @@ void write_creature(std::ostream& output,
            << ",\"damage\":" << creature.damage
            << ",\"power\":"
            << definition.power + creature.temporary_power_bonus +
-                  creature.plus_counters
+                  creature.plus_counters + creature.crusade_bonus
            << ",\"toughness\":"
            << definition.toughness +
                   creature.temporary_toughness_bonus +
-                  creature.plus_counters
+                  creature.plus_counters + creature.crusade_bonus
            << ",\"plusCounters\":" << creature.plus_counters;
     if (creature.is_copy) {
         output << ",\"copyOf\":";

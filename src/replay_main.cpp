@@ -76,15 +76,20 @@ void write_board(std::ostream& out, const PlayerObservation& obs) {
         out << "],\"creatures\":[";
         for (std::size_t i = 0; i < player.creatures.size(); ++i) {
             const auto& creature = player.creatures[i];
-            const auto& definition = card_definition(creature.card);
+            const auto& definition = card_definition(
+            creature.is_copy ? creature.copy_of : creature.card);
             if (i != 0) out << ',';
             out << "{\"id\":" << creature.id << ",\"name\":";
-            write_string(out, card_name(creature.card));
+            write_string(out, card_name(creature.is_copy
+                                            ? creature.copy_of
+                                            : creature.card));
             out << ",\"power\":"
-                << definition.power + creature.temporary_power_bonus
+                << definition.power + creature.temporary_power_bonus +
+                       creature.plus_counters + creature.crusade_bonus
                 << ",\"toughness\":"
                 << definition.toughness +
-                       creature.temporary_toughness_bonus
+                       creature.temporary_toughness_bonus +
+                       creature.plus_counters + creature.crusade_bonus
                 << ",\"damage\":" << creature.damage << ",\"tapped\":"
                 << (creature.tapped ? "true" : "false") << ",\"sick\":"
                 << (creature.summoning_sick ? "true" : "false") << '}';
