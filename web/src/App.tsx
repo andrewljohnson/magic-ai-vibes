@@ -351,12 +351,16 @@ function CardFace({
 }: CardFaceProps) {
   const power = permanent?.power ?? card.power;
   const toughness = permanent?.toughness ?? card.toughness;
-  // Stats above the printed values (Crusade, Sedge's Swamp, +1/+1
-  // counters) show buffed-green, Arena-style.
-  const buffed =
+  // Arena-style stat coloring: each number colors independently -
+  // green when above its printed value (Crusade, Sedge's Swamp,
+  // +1/+1 counters), and toughness turns red while damage is marked.
+  const powerBuffed =
+    permanent !== undefined && (power ?? 0) > (card.power ?? 0);
+  const damaged =
+    permanent !== undefined && (permanent.damage ?? 0) > 0;
+  const toughnessBuffed =
     permanent !== undefined &&
-    ((power ?? 0) > (card.power ?? 0) ||
-      (toughness ?? 0) > (card.toughness ?? 0));
+    (toughness ?? 0) > (card.toughness ?? 0);
   const hasStats = hasPublicCombatStats(card.type, power, toughness);
   const instanceId = permanent ? permanentId(permanent) : null;
   const cost = formatCost(card.cost, card.costLabel);
@@ -466,12 +470,22 @@ function CardFace({
       <span className="card-footer">
         <span className="card-type">{card.type ?? "Card"}</span>
         {hasStats && (
-          <span
-            className={`combat-stats ${
-              buffed ? "is-buffed" : ""
-            }`}
-          >
-            {power ?? "–"}/{toughness ?? "–"}
+          <span className="combat-stats">
+            <span className={powerBuffed ? "is-buffed" : ""}>
+              {power ?? "–"}
+            </span>
+            /
+            <span
+              className={
+                damaged
+                  ? "is-damaged"
+                  : toughnessBuffed
+                    ? "is-buffed"
+                    : ""
+              }
+            >
+              {toughness ?? "–"}
+            </span>
           </span>
         )}
       </span>
