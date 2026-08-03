@@ -259,7 +259,7 @@ SPZ_TEST(two_layer_net_learns_xor_and_roundtrips) {
            "depth survives serialization");
 }
 
-TEST(net_save_load_roundtrip_preserves_values) {
+SPZ_TEST(net_save_load_roundtrip_preserves_values) {
     SpzNet net(spz_feature_count(), 16, 424242);
     std::stringstream buffer;
     net.save(buffer);
