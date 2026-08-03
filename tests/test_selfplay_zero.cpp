@@ -220,7 +220,46 @@ SPZ_TEST(net_learns_a_simple_separation) {
     expect(net.value(negative) < 0.1, "negative example learned");
 }
 
-SPZ_TEST(net_save_load_roundtrip_preserves_values) {
+SPZ_TEST(two_layer_net_learns_xor_and_roundtrips) {
+    // Depth sanity: a 16x16 two-layer net must learn XOR (impossible
+    // for one tanh layer to fit cleanly) and survive save/load.
+    SpzNet net(10, 16, 7, 16);
+    std::vector<std::vector<float>> rows;
+    std::vector<float> labels;
+    for (int i = 0; i < 400; ++i) {
+        std::vector<float> row(10, 0.0f);
+        const float a = (i * 37 % 100) / 100.0f;
+        const float b = (i * 61 % 100) / 100.0f;
+        row[0] = a;
+        row[1] = b;
+        rows.push_back(row);
+        labels.push_back(((a > 0.5f) != (b > 0.5f)) ? 1.0f : 0.0f);
+    }
+    double loss = 1.0;
+    for (int epoch = 0; epoch < 4000; ++epoch) {
+        std::vector<const std::vector<float>*> batch;
+        std::vector<float> targets;
+        for (int j = 0; j < 40; ++j) {
+            const int k = (epoch * 40 + j) % 400;
+            batch.push_back(&rows[k]);
+            targets.push_back(labels[k]);
+        }
+        loss = net.train_batch(batch, targets, 0.05);
+    }
+    expect(loss < 0.30, "two-layer net learns XOR");
+    const double single = net.value(rows[3]);
+    expect(std::fabs(single - net.value_batch({rows[3]})[0]) < 1e-9,
+           "two-layer value and value_batch agree");
+    std::stringstream buffer;
+    net.save(buffer);
+    SpzNet loaded = SpzNet::load(buffer);
+    expect(std::fabs(single - loaded.value(rows[3])) < 1e-6,
+           "two-layer artifact roundtrips");
+    expect(loaded.hidden2_count() == 16,
+           "depth survives serialization");
+}
+
+TEST(net_save_load_roundtrip_preserves_values) {
     SpzNet net(spz_feature_count(), 16, 424242);
     std::stringstream buffer;
     net.save(buffer);
