@@ -947,6 +947,49 @@ SPZ_TEST(benchmark_counts_are_consistent) {
            "wilson bound is a probability");
 }
 
+SPZ_TEST(value_batch_is_bitwise_stable_across_batch_sizes) {
+    // The shared cross-thread batcher merges whatever requests are
+    // queued into one GEMM, so a row's value must not depend on batch
+    // composition — otherwise game outcomes would vary with thread
+    // timing and paired benchmarks would stop reproducing. Exact
+    // equality is required, not tolerance: bit-identity is the
+    // contract.
+    for (const std::size_t hidden2 : {std::size_t{0}, std::size_t{16}}) {
+        SpzNet net(40, 24, 913, hidden2);
+        std::vector<std::vector<float>> rows;
+        for (int row = 0; row < 200; ++row) {
+            std::vector<float> features(40);
+            for (int column = 0; column < 40; ++column) {
+                features[static_cast<std::size_t>(column)] =
+                    static_cast<float>(
+                        ((row * 31 + column * 17) % 97) - 48) /
+                    48.0f;
+            }
+            rows.push_back(std::move(features));
+        }
+        const std::vector<double> full = net.value_batch(rows);
+        for (const std::size_t count :
+             {std::size_t{1}, std::size_t{2}, std::size_t{7},
+              std::size_t{40}}) {
+            const std::vector<std::vector<float>> slice(
+                rows.begin(), rows.begin() +
+                                  static_cast<std::ptrdiff_t>(count));
+            const std::vector<double> partial = net.value_batch(slice);
+            for (std::size_t row = 0; row < count; ++row) {
+                expect(partial[row] == full[row],
+                       "row value must not depend on batch size");
+            }
+        }
+        // value() (dgemv) is a different BLAS path and may differ from a
+        // dgemm row in the last ULP — that is exactly why decision code
+        // routes everything through value_batch. Only sanity-check it.
+        for (std::size_t row = 0; row < rows.size(); ++row) {
+            expect(std::fabs(net.value(rows[row]) - full[row]) < 1e-9,
+                   "single evaluation agrees with the batched row");
+        }
+    }
+}
+
 }  // namespace
 
 int main() {

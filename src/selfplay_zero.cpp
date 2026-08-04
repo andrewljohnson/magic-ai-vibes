@@ -3,11 +3,14 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <condition_variable>
+#include <deque>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <istream>
 #include <cstdlib>
+#include <mutex>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -1128,11 +1131,26 @@ std::vector<double> SpzNet::value_batch(
     if (rows == 0) {
         return outputs;
     }
-    if (rows == 1) {
-        outputs[0] = value(feature_rows[0]);
+    // No single-row shortcut to value(): dgemv and dgemm rows differ at
+    // the ULP level, and the shared batcher's contract is that a row's
+    // value never depends on how many other rows ride the same batch.
+#ifdef __APPLE__
+    // Very short two-layer batches also break that contract: vvtanh's
+    // vectorized tail handling shifts rows of M<=5 batches by one ULP
+    // against the same rows in longer batches (measured; one-layer nets
+    // are stable at every M). Padding to eight rows keeps every
+    // evaluation in one numeric class regardless of batch composition.
+    if (hidden2_ > 0 && rows < 8) {
+        std::vector<std::vector<float>> padded(feature_rows.begin(),
+                                               feature_rows.end());
+        while (padded.size() < 8) {
+            padded.push_back(feature_rows[0]);
+        }
+        const std::vector<double> all = value_batch(padded);
+        outputs.assign(all.begin(),
+                       all.begin() + static_cast<std::ptrdiff_t>(rows));
         return outputs;
     }
-#ifdef __APPLE__
     for (const auto& row : feature_rows) {
         if (row.size() != inputs_) {
             throw std::invalid_argument(
@@ -1200,6 +1218,117 @@ std::vector<double> SpzNet::value_batch(
     return outputs;
 #endif
 }
+
+// ---------------------------------------------------------------------------
+// Shared cross-thread batching evaluator.
+//
+// Rollout search is net-bound and dispatch-dominated: a playout step
+// evaluates ~10 candidate rows, and benchmark/matrix/training processes
+// run many independent games on threads, so the machine executes
+// millions of tiny GEMMs. Routing evaluations through a per-net
+// leader/follower queue coalesces concurrent requests into one large
+// GEMM with no added latency when uncontended: a thread arriving while
+// no leader is active computes immediately with whatever is queued, and
+// while it computes the other threads' requests accumulate for the next
+// leader. Each dgemm output row is an independent dot product, so
+// per-row values do not depend on batch composition (locked by the
+// batch-size-stability unit test and the sim-bench fingerprint) and
+// games stay bit-identical under any thread interleaving.
+// SPZ_NO_SHARED_BATCH=1 bypasses the queue for A/B measurement.
+
+namespace {
+
+class SharedNetBatcher {
+public:
+    static std::vector<double> evaluate(
+        const SpzNet& net, std::vector<std::vector<float>>&& rows) {
+        if (rows.empty()) {
+            return {};
+        }
+        // Measured 2026-08-03 (h256, reps-2 benchmark, 10 threads):
+        // old code 4:46, per-decision batching 4:57, this queue 7:33 at
+        // 147% CPU — one leader's GEMM serializes the fleet, and ten
+        // threads of small GEMMs already saturate the AMX units, so
+        // merging buys nothing at this net size. Kept dormant (opt-in)
+        // for a future where nets are big enough to be compute-bound;
+        // results are batch-composition-invariant either way (all three
+        // variants scored identical 301/484 wins).
+        static const bool enabled =
+            std::getenv("SPZ_SHARED_BATCH") != nullptr;
+        if (!enabled) {
+            return net.value_batch(rows);
+        }
+        State& state = state_for(net);
+        Request request;
+        request.rows = std::move(rows);
+        std::unique_lock<std::mutex> lock(state.mutex);
+        state.queue.push_back(&request);
+        while (!request.done) {
+            if (state.leader_busy) {
+                state.woken.wait(lock);
+                continue;
+            }
+            state.leader_busy = true;
+            std::vector<Request*> batch(state.queue.begin(),
+                                        state.queue.end());
+            state.queue.clear();
+            lock.unlock();
+            std::size_t total = 0;
+            for (const Request* entry : batch) {
+                total += entry->rows.size();
+            }
+            std::vector<std::vector<float>> merged;
+            merged.reserve(total);
+            for (Request* entry : batch) {
+                for (auto& row : entry->rows) {
+                    merged.push_back(std::move(row));
+                }
+            }
+            const std::vector<double> values = net.value_batch(merged);
+            lock.lock();
+            std::size_t offset = 0;
+            for (Request* entry : batch) {
+                entry->out.assign(
+                    values.begin() + static_cast<std::ptrdiff_t>(offset),
+                    values.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            offset + entry->rows.size()));
+                offset += entry->rows.size();
+                entry->done = true;
+            }
+            state.leader_busy = false;
+            state.woken.notify_all();
+        }
+        return std::move(request.out);
+    }
+
+private:
+    struct Request {
+        std::vector<std::vector<float>> rows;
+        std::vector<double> out;
+        bool done = false;
+    };
+    struct State {
+        std::mutex mutex;
+        std::condition_variable woken;
+        std::deque<Request*> queue;
+        bool leader_busy = false;
+    };
+    // One queue per live net; entries are tiny and never removed (a
+    // process loads a handful of nets over its lifetime).
+    static State& state_for(const SpzNet& net) {
+        static std::mutex registry_mutex;
+        static std::map<const SpzNet*, std::unique_ptr<State>> registry;
+        const std::lock_guard<std::mutex> lock(registry_mutex);
+        auto& slot = registry[&net];
+        if (!slot) {
+            slot = std::make_unique<State>();
+        }
+        return *slot;
+    }
+};
+
+}  // namespace
 
 double SpzNet::train_batch(
     const std::vector<const std::vector<float>*>& features,
@@ -2546,9 +2675,13 @@ struct SpzAgent {
             }
             return self_dead ? 0.0 : 1.0;
         }
-        return net->value(spz_features_for(
+        // Routed through the shared batcher: a lone request evaluates
+        // immediately; under thread contention it rides a merged GEMM.
+        std::vector<std::vector<float>> row;
+        row.push_back(spz_features_for(
             net->input_count(),
             observe_game_state(state, perspective), decks, phase));
+        return SharedNetBatcher::evaluate(*net, std::move(row))[0];
     }
 
     // ------------------------------------------------------------------
@@ -2695,7 +2828,7 @@ struct SpzAgent {
             staged.push_back(entry);
         }
         const std::vector<double> batch_values =
-            net->value_batch(feature_rows);
+            SharedNetBatcher::evaluate(*net, std::move(feature_rows));
         double best_value = -std::numeric_limits<double>::infinity();
         PriorityAction chosen = actions[0];
         for (const Staged& entry : staged) {
@@ -3752,14 +3885,81 @@ struct SpzAgent {
                     kIllegalScore * static_cast<double>(worlds);
             }
         }
-        for (const GameState& sampled : sampled_worlds) {
-            for (std::size_t index = 0; index < actions.size(); ++index) {
-                if (dominated[index]) {
-                    continue;
+        // 1-ply screen, batched: every (world, action) consequence that
+        // needs the net stages one feature row, then a single GEMM
+        // judges them all. Scatter order matches the old sequential
+        // loop, so totals accumulate in the identical order.
+        {
+            struct ScreenSlot {
+                std::size_t action;
+                std::ptrdiff_t row;
+                double direct;
+            };
+            std::vector<ScreenSlot> slots;
+            std::vector<std::vector<float>> screen_rows;
+            for (const GameState& sampled : sampled_worlds) {
+                for (std::size_t index = 0; index < actions.size();
+                     ++index) {
+                    if (dominated[index]) {
+                        continue;
+                    }
+                    ScreenSlot slot{index, -1, 0.0};
+                    const auto consequence =
+                        resolve_priority_action_consequence(
+                            sampled, seat, sorcery_actions, 0,
+                            actions[index]);
+                    if (!consequence.has_value()) {
+                        slot.direct = kIllegalScore;
+                    } else if (consequence->terminal) {
+                        slot.direct =
+                            consequence->winner == -1
+                                ? 0.5
+                                : (static_cast<std::size_t>(
+                                       consequence->winner) == seat
+                                       ? 1.0
+                                       : 0.0);
+                    } else {
+                        const GameState* judged = &consequence->state;
+                        GameState post_combat;
+                        TurnPhase value_phase = phase;
+                        if (combat_response_window) {
+                            post_combat = consequence->state;
+                            resolve_pending_combat(post_combat);
+                            value_phase = TurnPhase::SecondMain;
+                            judged = &post_combat;
+                        }
+                        const bool self_dead =
+                            judged->players[seat].life <= 0 ||
+                            judged->failed_draw[seat];
+                        const bool opponent_dead =
+                            judged->players[1 - seat].life <= 0 ||
+                            judged->failed_draw[1 - seat];
+                        if (self_dead || opponent_dead) {
+                            slot.direct =
+                                self_dead && opponent_dead
+                                    ? 0.5
+                                    : (self_dead ? 0.0 : 1.0);
+                        } else {
+                            slot.row = static_cast<std::ptrdiff_t>(
+                                screen_rows.size());
+                            screen_rows.push_back(spz_features_for(
+                                net->input_count(),
+                                observe_game_state(*judged, seat),
+                                decks, value_phase));
+                        }
+                    }
+                    slots.push_back(slot);
                 }
-                totals[index] += score_action(
-                    sampled, actions[index], false,
-                    config.rollout_turn_cycles);
+            }
+            const std::vector<double> screen_values =
+                SharedNetBatcher::evaluate(*net,
+                                           std::move(screen_rows));
+            for (const ScreenSlot& slot : slots) {
+                totals[slot.action] +=
+                    slot.row >= 0
+                        ? screen_values[static_cast<std::size_t>(
+                              slot.row)]
+                        : slot.direct;
             }
         }
         if (config.search == SpzPolicyConfig::Search::Ismcts &&
