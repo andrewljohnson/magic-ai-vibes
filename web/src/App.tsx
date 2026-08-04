@@ -3890,6 +3890,7 @@ function OpponentActionToast({
   if (last.player !== opponentSeat) return null;
   if (last.actionKind === "pass") return null;
   if (!last.message) return null;
+  const message = last.message.replace(/^Opponent:\s*/, "");
   const kind = String(last.kind ?? "game");
   const symbol = kind.includes("attack") ||
     kind.includes("block") ||
@@ -3912,7 +3913,7 @@ function OpponentActionToast({
       </span>
       <div>
         <small>Opponent</small>
-        <strong>{last.message}</strong>
+        <strong>{message}</strong>
       </div>
     </div>
   );
