@@ -1848,31 +1848,55 @@ function TutorCardPicker({
   choices,
   busy,
   onChooseExact,
+  onDismiss,
 }: {
   choices: PriorityOption[];
   busy: boolean;
   onChooseExact: (option: PriorityOption) => void;
+  onDismiss: () => void;
 }) {
   return (
-    <div className="tutor-picker">
-      <span className="eyebrow">SEARCH YOUR LIBRARY</span>
-      <strong>{choices[0].card?.name ?? "Search"}</strong>
-      <small>
-        Choose a card to put into your hand — {choices.length} distinct{" "}
-        cards, sorted by type and cost.
-      </small>
-      <div className="tutor-picker-grid">
-        {choices.map((option) =>
-          option.chosenCard ? (
-            <CardFace
-              key={option.index}
-              card={option.chosenCard}
-              compact
-              actionable
-              onClick={busy ? undefined : () => onChooseExact(option)}
-            />
-          ) : null,
-        )}
+    <div
+      className="tutor-picker-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search your library"
+      onClick={onDismiss}
+    >
+      <div
+        className="tutor-picker"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div className="tutor-picker-title">
+            <span className="eyebrow">SEARCH YOUR LIBRARY</span>
+            <strong>{choices[0].card?.name ?? "Search"}</strong>
+          </div>
+          <button
+            type="button"
+            className="tutor-picker-cancel"
+            onClick={onDismiss}
+            disabled={busy}
+          >
+            Cancel
+          </button>
+        </header>
+        <small>
+          Choose a card to put into your hand — {choices.length} distinct{" "}
+          cards, sorted by type and cost.
+        </small>
+        <div className="tutor-picker-grid">
+          {choices.map((option) =>
+            option.chosenCard ? (
+              <CardFace
+                key={option.index}
+                card={option.chosenCard}
+                actionable
+                onClick={busy ? undefined : () => onChooseExact(option)}
+              />
+            ) : null,
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1961,6 +1985,7 @@ function PriorityControls({
   busy,
   pendingOptions,
   onChooseExact,
+  onDismissPending,
 }: {
   decision: PriorityDecision;
   stackInteraction: StackInteraction | null;
@@ -1968,6 +1993,7 @@ function PriorityControls({
   busy: boolean;
   pendingOptions: PriorityOption[];
   onChooseExact: (option: PriorityOption) => void;
+  onDismissPending: () => void;
 }) {
   const tutorChoices =
     pendingOptions.length > 1
@@ -2000,6 +2026,7 @@ function PriorityControls({
             choices={tutorChoices}
             busy={busy}
             onChooseExact={onChooseExact}
+            onDismiss={onDismissPending}
           />
         )}
         {xGroup && (
@@ -2364,6 +2391,7 @@ function DecisionDock({
   onSubmit,
   pendingPriorityOptions,
   onChoosePriorityExact,
+  onDismissPendingPriority,
   selectedDiscardIndices,
   setSelectedDiscardIndices,
   blockAssignments,
@@ -2378,6 +2406,7 @@ function DecisionDock({
   onSubmit: (action: ActionRequest) => void;
   pendingPriorityOptions: PriorityOption[];
   onChoosePriorityExact: (option: PriorityOption) => void;
+  onDismissPendingPriority: () => void;
   selectedDiscardIndices: Set<number>;
   setSelectedDiscardIndices: (next: Set<number>) => void;
   blockAssignments: Record<string, string>;
@@ -2485,6 +2514,7 @@ function DecisionDock({
             busy={busy}
             pendingOptions={pendingPriorityOptions}
             onChooseExact={onChoosePriorityExact}
+            onDismissPending={onDismissPendingPriority}
           />
         )}
         {decision.kind === "attackers" && (
@@ -4929,6 +4959,9 @@ export default function App() {
                     onSubmit={act}
                     pendingPriorityOptions={pendingPriorityOptions}
                     onChoosePriorityExact={submitPriorityOption}
+                    onDismissPendingPriority={() =>
+                      setPendingPriorityOptions([])
+                    }
                     selectedDiscardIndices={selectedDiscardIndices}
                     setSelectedDiscardIndices={setSelectedDiscardIndices}
                     blockAssignments={blockAssignments}
