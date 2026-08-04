@@ -3992,9 +3992,19 @@ struct SpzAgent {
                                 config.rollout_turn_cycles);
                         }
                     }
+                    // Noise-consistent band: the tie band is calibrated
+                    // to rollout noise at `worlds` samples, and noise in
+                    // a total grows with sqrt(n), not n. Scaling the
+                    // refined band linearly (the old code) left it 2-4x
+                    // wider than the refined noise, so frugality kept
+                    // overriding genuinely better plays — measured cost
+                    // 1.3 points on the h256 gate. True ties (the
+                    // self-Swords class) sit well inside the sqrt band.
                     const double refined_band =
                         config.advantage_tie_band *
-                        static_cast<double>(config.tie_break_worlds);
+                        std::sqrt(static_cast<double>(worlds) *
+                                  static_cast<double>(
+                                      config.tie_break_worlds));
                     double refined_top =
                         -std::numeric_limits<double>::infinity();
                     for (const std::size_t index : finalists) {
