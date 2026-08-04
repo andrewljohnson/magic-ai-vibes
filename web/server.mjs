@@ -377,8 +377,8 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "General self-taught bot: a value net (256 hidden units) trained purely from mirror self-play, played with greedy rollout lookahead. Beats Handcoded Policy 62.2% on the full 11-deck gauntlet.",
-    versionDate: "2026-08-03",
+      "Old-school specialist: a value net (256 hidden units) trained purely from mirror self-play on the four real decks, played with greedy rollout lookahead. Beats Handcoded Policy 68.8% on that field (the 11-deck generalist champion scores 67.1) and respects counterspells and racing math the generalist never learned.",
+    versionDate: "2026-08-04",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
   },
@@ -1897,6 +1897,20 @@ function bridgeArguments(config, deckCatalog) {
   }
   if (config.bluffMode) {
     args.push("--bluff-mode");
+  }
+  if (config.players[1].policyId === "spz") {
+    // Arena opponent = the old-school specialist: it out-plays the
+    // 11-deck champion on the four real decks humans actually face
+    // (68.8 vs 67.1 on the paired 4-deck gate) and carries the
+    // counter-respect / race-read behaviors the generalist lacks. The
+    // 11-deck champion remains the formal gauntlet titleholder.
+    // Absolute path: the bridge resolves relative artifact paths
+    // against its own cwd, and a miss silently falls back to the
+    // Handcrafted opponent (all-zero fingerprint).
+    args.push(
+      "--spz-artifact",
+      path.resolve(SERVER_DIRECTORY, "../data/spz-oldschool.txt"),
+    );
   }
   return args;
 }
