@@ -488,6 +488,11 @@ function CardFace({
           <span className="card-instance-cue">#{instanceId}</span>
         )}
       </span>
+      {!compact && CARD_RULES_TEXT[card.name] && (
+        <span className="card-rules" aria-hidden="true">
+          {CARD_RULES_TEXT[card.name]}
+        </span>
+      )}
       <span className="card-footer">
         <span className="card-type">{card.type ?? "Card"}</span>
         {hasStats && (
@@ -1206,10 +1211,63 @@ function PermanentRow({
 }) {
   const slamState = useContext(SlamContext);
   if (permanents.length === 0) return null;
+  // Visually different game states must remain in separate piles;
+  // identical cards in the same state collapse penta-style while every
+  // card keeps its own button, id, and handlers.
+  const pileStateKey = (permanent: Permanent) => {
+    const id = permanentId(permanent);
+    return [
+      displayCard(permanent).name,
+      permanent.tapped ? "tapped" : "ready",
+      permanent.summoningSick ? "sick" : "",
+      permanent.damage ?? 0,
+      eligibleIds?.has(id) ? "eligible" : "",
+      selectedIds?.has(id) ? "chosen" : "",
+      targetedIds?.has(id) ? "targeted" : "",
+      priorityDestinationIds?.has(id) ? "destination" : "",
+      priorityOriginIds?.has(id) ? "origin" : "",
+      selectedPriorityOriginId === id ? "origin-selected" : "",
+      blockerOriginIds?.has(id) ? "blocker" : "",
+      selectedBlockerId === id ? "blocker-selected" : "",
+      blockAssignments?.[id] ?? "",
+      targetedByStackIds?.has(id) ? "stack-target" : "",
+      abilityGlowIds?.has(id) ? "ability" : "",
+      (permanent as { copyOf?: Card }).copyOf ? "copy" : "",
+      slamState.slamIds.has(id) ? "slam" : "",
+      slamState.hitIds.has(id) ? "hit" : "",
+    ].join("|");
+  };
+  const piles: Array<{ key: string; items: Permanent[] }> = [];
+  const pilesByState = new Map<string, { key: string; items: Permanent[] }>();
+  for (const permanent of permanents) {
+    const stateKey = pileStateKey(permanent);
+    const pile = pilesByState.get(stateKey);
+    if (pile) {
+      pile.items.push(permanent);
+    } else {
+      const next = {
+        key: `${stateKey}#${permanentId(permanent)}`,
+        items: [permanent],
+      };
+      pilesByState.set(stateKey, next);
+      piles.push(next);
+    }
+  }
   return (
     <div className="permanent-row" aria-label={title}>
       <div className="permanent-list">
-        {permanents.map((permanent) => {
+        {piles.map((pile) => (
+          <div
+            className={`card-pile ${pile.items.length > 1 ? "is-stacked" : ""}`}
+            key={pile.key}
+            style={
+              {
+                "--pile-extra": Math.min(pile.items.length - 1, 3),
+                "--pile-count": pile.items.length - 1,
+              } as CSSProperties
+            }
+          >
+            {pile.items.map((permanent, pileIndex) => {
           const id = permanentId(permanent);
           const eligible = eligibleIds?.has(id) ?? false;
           const priorityDestination =
@@ -1253,6 +1311,7 @@ function PermanentRow({
                   : id
               }
               data-arrow-pid={id}
+              style={{ "--pile-index": pileIndex } as CSSProperties}
               onDragOver={(event) =>
                 onPriorityDragOver?.(`permanent:${id}`, event)
               }
@@ -1328,7 +1387,14 @@ function PermanentRow({
               )}
             </div>
           );
-        })}
+            })}
+            {pile.items.length > 1 && (
+              <span className="card-pile-count" aria-hidden="true">
+                {pile.items.length}
+              </span>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1567,38 +1633,8 @@ function BattlefieldSide({
       }`}
       aria-label={`${playerLabel(snapshot, seat)} battlefield`}
       data-arrow-player={seat}
+      data-priority-play-target={priorityPlayTarget || undefined}
     >
-      {opponent && (
-        <div className="opponent-hand-space">
-          {(player.revealedHand ?? player.hand)?.length ? (
-            <FaceUpHand
-              cards={(player.revealedHand ?? player.hand) as Card[]}
-              label="Opponent hand"
-              debug
-            />
-          ) : (
-            <HiddenHand count={player.handSize} />
-          )}
-          <PlayerHud
-            player={player}
-            seat={seat}
-            label={playerLabel(snapshot, seat)}
-            deck={deckLabel(snapshot, meta, seat)}
-            policy={policyLabel(snapshot, meta, seat)}
-            active={active}
-            opponent={opponent}
-            priorityTarget={priorityPlayerTargets?.has(seat)}
-            draggingPriority={draggingPriority}
-            onChoosePriorityTarget={() => onChoosePriorityPlayer?.(seat)}
-            onDropPriorityTarget={() => {
-              (onConsumePriorityDrop ?? onEndPriorityDrag)?.();
-              onChoosePriorityPlayer?.(seat);
-            }}
-            onPriorityDragOver={onPriorityDragOver}
-            onPriorityDrop={onPriorityDrop}
-          />
-        </div>
-      )}
       <div className={`permanent-zone ${opponent ? "is-opponent-zone" : ""}`}>
         <PermanentRow
           title="Permanents"
@@ -1669,11 +1705,15 @@ function PhaseRibbon({
   turn,
   activeLabel,
   hasPriority,
+  respondToOwnSpells,
+  onToggleRespondToOwnSpells,
 }: {
   phase: string;
   turn: number;
   activeLabel: string;
   hasPriority: boolean;
+  respondToOwnSpells?: boolean;
+  onToggleRespondToOwnSpells?: () => void;
 }) {
   const activePhase = phaseIndex(phase);
   return (
@@ -1693,12 +1733,26 @@ function PhaseRibbon({
         <span>{hasPriority ? "YOUR PRIORITY" : `${activeLabel}'S TURN`}</span>
         <strong>{formatPhase(phase)}</strong>
       </div>
+      {onToggleRespondToOwnSpells && (
+        <button
+          type="button"
+          className={`stack-respond-toggle ${
+            respondToOwnSpells ? "is-on" : ""
+          }`}
+          aria-pressed={Boolean(respondToOwnSpells)}
+          title="Hold priority to respond to your own spells and abilities"
+          onClick={onToggleRespondToOwnSpells}
+        >
+          <span>Hold priority</span>
+          <i>{respondToOwnSpells ? "On" : "Off"}</i>
+        </button>
+      )}
     </div>
   );
 }
 
 function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
-  const endRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLLIElement>(null);
   const [showPriorityPasses, setShowPriorityPasses] = useState(false);
   const visibleEntries = useMemo(
     () => chronicleEntries(entries, showPriorityPasses),
@@ -1709,15 +1763,16 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
   }, [visibleEntries.length, showPriorityPasses]);
   return (
     <aside className="match-log">
-      <div className="panel-heading">
-        <span className="eyebrow">MATCH</span>
-        <h2>Chronicle</h2>
-        <span
-          className="event-count"
-          aria-label={`${visibleEntries.length} visible events`}
-        >
-          {visibleEntries.length}
-        </span>
+      <details className="game-log" open>
+        <summary>
+          <span className="game-log-title">Game log</span>
+          <span
+            className="event-count"
+            aria-label={`${visibleEntries.length} visible events`}
+          >
+            {visibleEntries.length}
+          </span>
+        </summary>
         <label className="chronicle-pass-toggle">
           <input
             type="checkbox"
@@ -1728,38 +1783,38 @@ function MatchLog({ entries }: { entries: Array<string | LogEntry> }) {
           />
           <span>Show priority passes</span>
         </label>
-      </div>
-      <div className="event-list" role="log" aria-live="polite">
-        {visibleEntries.length === 0 && (
-          <div className="log-empty">
-            <span className="log-sigil">◌</span>
-            {entries.length === 0
-              ? "The first draw is moments away."
-              : "Only priority passes so far."}
-          </div>
-        )}
-        {visibleEntries.map(({ entry, sourceIndex, startsTurn }, index) => {
-          return (
-            <div
-              className={`event event-${entry.kind ?? "game"} ${
-                entry.player === 0 ? "event-you" : ""
-              }`}
-              key={`${entry.turn ?? "x"}-${sourceIndex}-${entry.message}`}
-            >
-              <span className="event-index">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div>
-                {startsTurn && (
-                  <span className="event-turn">Turn {entry.turn}</span>
-                )}
-                <p>{entry.message}</p>
-              </div>
-            </div>
-          );
-        })}
-        <div ref={endRef} />
-      </div>
+        <ol className="event-list" role="log" aria-live="polite">
+          {visibleEntries.length === 0 && (
+            <li className="log-empty">
+              <span className="log-sigil">◌</span>
+              {entries.length === 0
+                ? "The first draw is moments away."
+                : "Only priority passes so far."}
+            </li>
+          )}
+          {visibleEntries.map(({ entry, sourceIndex, startsTurn }, index) => {
+            return (
+              <li
+                className={`event event-${entry.kind ?? "game"} ${
+                  entry.player === 0 ? "event-you" : ""
+                }`}
+                key={`${entry.turn ?? "x"}-${sourceIndex}-${entry.message}`}
+              >
+                <span className="event-index">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  {startsTurn && (
+                    <span className="event-turn">Turn {entry.turn}</span>
+                  )}
+                  <p>{entry.message}</p>
+                </div>
+              </li>
+            );
+          })}
+          <li className="event-list-end" ref={endRef} aria-hidden="true" />
+        </ol>
+      </details>
     </aside>
   );
 }
@@ -1773,10 +1828,6 @@ function StackRail({
   onEndPriorityDrag,
   onPriorityDragOver,
   onPriorityDrop,
-  onPass,
-  passBusy,
-  respondToOwnSpells,
-  onToggleRespondToOwnSpells,
 }: {
   stack: StackEntry[];
   observerSeat: PlayerIndex;
@@ -1792,10 +1843,6 @@ function StackRail({
     destination: PriorityDestinationKey,
     event: ReactDragEvent<HTMLElement>,
   ) => void;
-  onPass?: () => void;
-  passBusy?: boolean;
-  respondToOwnSpells?: boolean;
-  onToggleRespondToOwnSpells?: () => void;
 }) {
   return (
     <aside
@@ -1803,11 +1850,7 @@ function StackRail({
       aria-label="The stack"
       aria-live="polite"
     >
-      <div className="panel-heading">
-        <span className="eyebrow">THE</span>
-        <h2>Stack</h2>
-        <span className="event-count">{stack.length}</span>
-      </div>
+      <span className="stack-zone-label">STACK</span>
       {stack.length === 0 && (
         <p className="stack-empty-note">Empty — spells resolve here</p>
       )}
@@ -1856,15 +1899,7 @@ function StackRail({
                   → {formatTargetLabel(entry.target)}
                 </span>
               )}
-              {entry.card ? (
-                <CardFace card={entry.card} compact />
-              ) : (
-                <div className="ability-card">
-                  <span>ABILITY</span>
-                  <strong>{label}</strong>
-                </div>
-              )}
-              {entry.card && <strong>{label}</strong>}
+              <strong>{label}</strong>
               {targets.length ? (
                 <span className="stack-target">
                   {targets.length === 1 ? "Target" : "Targets"} →{" "}
@@ -1898,26 +1933,6 @@ function StackRail({
           );
         })}
       </div>
-      {onPass && (
-        <button
-          type="button"
-          className="stack-pass-button"
-          onClick={onPass}
-          disabled={passBusy}
-        >
-          Pass priority
-        </button>
-      )}
-      {onToggleRespondToOwnSpells && (
-        <label className="stack-respond-toggle">
-          <input
-            type="checkbox"
-            checked={Boolean(respondToOwnSpells)}
-            onChange={onToggleRespondToOwnSpells}
-          />
-          Respond to own spells/abilities
-        </label>
-      )}
     </aside>
   );
 }
@@ -2578,21 +2593,21 @@ function DecisionDock({
           {helper}
         </span>
       </div>
-      {decision.kind !== "priority" &&
-        !(
-          decision.kind === "attackers" &&
-          decision.eligible.length > 0
-        ) && (
-        <div className="decision-heading">
-          <span className="decision-pulse" />
-          <div>
-            <span className="eyebrow">YOUR DECISION</span>
-            <h2>{heading}</h2>
-            <p>{helper}</p>
-          </div>
-        </div>
-      )}
       <div className="decision-body">
+        {decision.kind !== "priority" &&
+          !(
+            decision.kind === "attackers" &&
+            decision.eligible.length > 0
+          ) && (
+          <div className="decision-heading">
+            <span className="decision-pulse" />
+            <div>
+              <span className="eyebrow">YOUR DECISION</span>
+              <h2>{heading}</h2>
+              <p>{helper}</p>
+            </div>
+          </div>
+        )}
         {decision.kind === "priority" && (
           <PriorityControls
             decision={decision}
@@ -3848,7 +3863,7 @@ function TargetArrows({ snapshot }: { snapshot: GameSnapshot }) {
           refY="4.5"
           orient="auto"
         >
-          <path d="M0,0 L9,4.5 L0,9 z" fill="var(--arrow, #eda100)" />
+          <path d="M0,0 L9,4.5 L0,9 z" fill="var(--arrow, #ffd56a)" />
         </marker>
       </defs>
       {paths.map((path) => (
@@ -3860,6 +3875,46 @@ function TargetArrows({ snapshot }: { snapshot: GameSnapshot }) {
         />
       ))}
     </svg>
+  );
+}
+
+function OpponentActionToast({
+  entries,
+  opponentSeat,
+}: {
+  entries: Array<string | LogEntry>;
+  opponentSeat: PlayerIndex;
+}) {
+  const last = entries[entries.length - 1];
+  if (!last || typeof last === "string") return null;
+  if (last.player !== opponentSeat) return null;
+  if (last.actionKind === "pass") return null;
+  if (!last.message) return null;
+  const kind = String(last.kind ?? "game");
+  const symbol = kind.includes("attack") ||
+    kind.includes("block") ||
+    kind.includes("combat")
+    ? "⚔"
+    : kind === "stack_resolved"
+      ? "◇"
+      : String(last.actionKind ?? "").includes("land")
+        ? "▲"
+        : "✦";
+  return (
+    <div
+      className={`opponent-action opponent-action-${kind}`}
+      key={`${entries.length}-${last.message}`}
+      role="status"
+      aria-live="polite"
+    >
+      <span className="opponent-action-icon" aria-hidden="true">
+        {symbol}
+      </span>
+      <div>
+        <small>Opponent</small>
+        <strong>{last.message}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -4878,7 +4933,6 @@ export default function App() {
       {state ? (
         <>
           <div className="game-layout">
-            <MatchLog entries={snapshot.log ?? []} />
             <main
       className={`table-stage ${slam ? "is-rumbling" : ""}`}
       style={
@@ -4888,6 +4942,47 @@ export default function App() {
       }
     >
               <TargetArrows snapshot={snapshot} />
+              <OpponentActionToast
+                entries={snapshot.log ?? []}
+                opponentSeat={farSeat}
+              />
+              <PlayerHud
+                player={state.players[farSeat]}
+                seat={farSeat}
+                label={playerLabel(snapshot, farSeat)}
+                deck={deckLabel(snapshot, meta, farSeat)}
+                policy={policyLabel(snapshot, meta, farSeat)}
+                active={state.activePlayer === farSeat}
+                opponent
+                priorityTarget={priorityPlayerTargets?.has(farSeat)}
+                draggingPriority={Boolean(draggedPriorityOrigin)}
+                onChoosePriorityTarget={() =>
+                  choosePriorityDestination(`player:${farSeat}`)
+                }
+                onDropPriorityTarget={() => {
+                  consumePriorityDrop();
+                  choosePriorityDestination(`player:${farSeat}`);
+                }}
+                onPriorityDragOver={dragOverPriorityDestination}
+                onPriorityDrop={dropPriorityDestination}
+              />
+              <div className="opponent-hand-space">
+                {(
+                  state.players[farSeat].revealedHand ??
+                    state.players[farSeat].hand
+                )?.length ? (
+                  <FaceUpHand
+                    cards={
+                      (state.players[farSeat].revealedHand ??
+                        state.players[farSeat].hand) as Card[]
+                    }
+                    label="Opponent hand"
+                    debug
+                  />
+                ) : (
+                  <HiddenHand count={state.players[farSeat].handSize} />
+                )}
+              </div>
               <div
                 className={`battlefield ${
                   priorityPlayOptions.length > 0 ? "is-play-destination" : ""
@@ -4950,9 +5045,29 @@ export default function App() {
                   onBlockDragOver={dragOverBlockTarget}
                   onBlockDrop={dropBlockTarget}
                 />
-                <div className="midline">
-                  <strong>{formatPhase(state.phase)}</strong>
-                </div>
+                <PhaseRibbon
+                  phase={state.phase}
+                  turn={state.turnNumber}
+                  activeLabel={playerLabel(
+                    snapshot,
+                    state.activePlayer as PlayerIndex,
+                  )}
+                  hasPriority={Boolean(snapshot.decision && hasVisibleDecision)}
+                  respondToOwnSpells={respondToOwnSpells}
+                  onToggleRespondToOwnSpells={toggleRespondToOwnSpells}
+                />
+                <StackRail
+                  stack={stack}
+                  observerSeat={nearSeat}
+                  priorityStackTargetIds={priorityStackTargetIds}
+                  draggingPriority={Boolean(draggedPriorityOrigin)}
+                  onChoosePriorityStack={(id) =>
+                    choosePriorityDestination(`stack:${id}`)
+                  }
+                  onEndPriorityDrag={finishPriorityDrag}
+                  onPriorityDragOver={dragOverPriorityDestination}
+                  onPriorityDrop={dropPriorityDestination}
+                />
                 <BattlefieldSide
                   player={state.players[nearSeat]}
                   seat={nearSeat}
@@ -5001,32 +5116,26 @@ export default function App() {
                   onEndBlockerDrag={finishBlockerDrag}
                 />
               </div>
-              <div
-                className={`player-console ${
-                  snapshot.decision && hasVisibleDecision
-                    ? "has-decision"
-                    : ""
-                }`}
-              >
-                <PlayerHud
-                  player={state.players[nearSeat]}
-                  seat={nearSeat}
-                  label={playerLabel(snapshot, nearSeat)}
-                  deck={deckLabel(snapshot, meta, nearSeat)}
-                  policy={policyLabel(snapshot, meta, nearSeat)}
-                  active={state.activePlayer === nearSeat}
-                  priorityTarget={priorityPlayerTargets?.has(nearSeat)}
-                  draggingPriority={Boolean(draggedPriorityOrigin)}
-                  onChoosePriorityTarget={() =>
-                    choosePriorityDestination(`player:${nearSeat}`)
-                  }
-                  onDropPriorityTarget={() => {
-                    consumePriorityDrop();
-                    choosePriorityDestination(`player:${nearSeat}`);
-                  }}
-                  onPriorityDragOver={dragOverPriorityDestination}
-                  onPriorityDrop={dropPriorityDestination}
-                />
+              <PlayerHud
+                player={state.players[nearSeat]}
+                seat={nearSeat}
+                label={playerLabel(snapshot, nearSeat)}
+                deck={deckLabel(snapshot, meta, nearSeat)}
+                policy={policyLabel(snapshot, meta, nearSeat)}
+                active={state.activePlayer === nearSeat}
+                priorityTarget={priorityPlayerTargets?.has(nearSeat)}
+                draggingPriority={Boolean(draggedPriorityOrigin)}
+                onChoosePriorityTarget={() =>
+                  choosePriorityDestination(`player:${nearSeat}`)
+                }
+                onDropPriorityTarget={() => {
+                  consumePriorityDrop();
+                  choosePriorityDestination(`player:${nearSeat}`);
+                }}
+                onPriorityDragOver={dragOverPriorityDestination}
+                onPriorityDrop={dropPriorityDestination}
+              />
+              <div className={`player-console`}>
                 <FaceUpHand
                   cards={state.players[nearSeat].hand ?? []}
                   label={`${playerLabel(snapshot, nearSeat)} · hand`}
@@ -5050,68 +5159,68 @@ export default function App() {
                   discardRequiredCount={cleanupDiscardDecision?.count}
                   onDiscardToggle={toggleDiscardIndex}
                 />
-                {snapshot.decision && hasVisibleDecision && (
-                  <DecisionDock
-                    decision={snapshot.decision}
-                    state={state}
-                    busy={acting}
-                    selectedAttackers={selectedAttackers}
-                    setSelectedAttackers={setSelectedAttackers}
-                    onSubmit={act}
-                    pendingPriorityOptions={pendingPriorityOptions}
-                    onChoosePriorityExact={submitPriorityOption}
-                    onDismissPendingPriority={() =>
-                      setPendingPriorityOptions([])
-                    }
-                    selectedDiscardIndices={selectedDiscardIndices}
-                    setSelectedDiscardIndices={setSelectedDiscardIndices}
-                    blockAssignments={blockAssignments}
-                    setBlockAssignments={setBlockAssignments}
-                    bluffMode={Boolean(currentConfig?.bluffMode)}
-                  />
-                )}
               </div>
-                          <PhaseRibbon
-                phase={state.phase}
-                turn={state.turnNumber}
-                activeLabel={playerLabel(
-                  snapshot,
-                  state.activePlayer as PlayerIndex,
-                )}
-                hasPriority={Boolean(snapshot.decision && hasVisibleDecision)}
-              />
-</main>
-            <StackRail
-              stack={stack}
-              observerSeat={nearSeat}
-              priorityStackTargetIds={priorityStackTargetIds}
-              draggingPriority={Boolean(draggedPriorityOrigin)}
-              onChoosePriorityStack={(id) =>
-                choosePriorityDestination(`stack:${id}`)
-              }
-              onEndPriorityDrag={finishPriorityDrag}
-              onPriorityDragOver={dragOverPriorityDestination}
-              onPriorityDrop={dropPriorityDestination}
-              onPass={
-                priorityDecision
-                  ? (() => {
-                      const pass = priorityDecision.options.find(
-                        (option) => option.kind === "pass",
-                      );
-                      return pass
-                        ? () =>
-                            act({
-                              decisionId: priorityDecision.decisionId,
-                              index: pass.index,
-                            })
-                        : undefined;
-                    })()
-                  : undefined
-              }
-              passBusy={acting}
-              respondToOwnSpells={respondToOwnSpells}
-              onToggleRespondToOwnSpells={toggleRespondToOwnSpells}
-            />
+            </main>
+            <aside className="side-panel" aria-label="Decisions and game log">
+              <div className="side-panel-heading">
+                <span className="eyebrow">
+                  {snapshot.decision && hasVisibleDecision
+                    ? "YOUR DECISION"
+                    : "TABLE IN MOTION"}
+                </span>
+              </div>
+              {snapshot.decision && hasVisibleDecision && (
+                <DecisionDock
+                  decision={snapshot.decision}
+                  state={state}
+                  busy={acting}
+                  selectedAttackers={selectedAttackers}
+                  setSelectedAttackers={setSelectedAttackers}
+                  onSubmit={act}
+                  pendingPriorityOptions={pendingPriorityOptions}
+                  onChoosePriorityExact={submitPriorityOption}
+                  onDismissPendingPriority={() =>
+                    setPendingPriorityOptions([])
+                  }
+                  selectedDiscardIndices={selectedDiscardIndices}
+                  setSelectedDiscardIndices={setSelectedDiscardIndices}
+                  blockAssignments={blockAssignments}
+                  setBlockAssignments={setBlockAssignments}
+                  bluffMode={Boolean(currentConfig?.bluffMode)}
+                />
+              )}
+              {priorityDecision &&
+                (() => {
+                  const pass = priorityDecision.options.find(
+                    (option) => option.kind === "pass",
+                  );
+                  return pass ? (
+                    <button
+                      type="button"
+                      className="stack-pass-button"
+                      onClick={() =>
+                        act({
+                          decisionId: priorityDecision.decisionId,
+                          index: pass.index,
+                        })
+                      }
+                      disabled={acting}
+                    >
+                      Pass priority
+                    </button>
+                  ) : null;
+                })()}
+              <details className="game-menu">
+                <summary>Game menu</summary>
+                <button type="button" onClick={openMatchSetup}>
+                  New match…
+                </button>
+                <button type="button" onClick={openEvolution}>
+                  Evolve a deck…
+                </button>
+              </details>
+              <MatchLog entries={snapshot.log ?? []} />
+            </aside>
           </div>
           {acting && snapshot.status === "playing" ? (
             <div
@@ -5388,6 +5497,16 @@ function TopBar({
         </span>
       </div>
       <div className="top-context">
+        {inGame && snapshot && (
+          <div className="match-summary" aria-label="Current match">
+            <span>You · {deckLabel(snapshot ?? null, meta ?? null, 0)}</span>
+            <i>versus</i>
+            <span>
+              {policyLabel(snapshot ?? null, meta ?? null, 1)} ·{" "}
+              {deckLabel(snapshot ?? null, meta ?? null, 1)}
+            </span>
+          </div>
+        )}
         {inGame && config && snapshot && (
           <ReproductionSummary
             config={config}
@@ -5402,6 +5521,9 @@ function TopBar({
         )}
       </div>
       <div className="top-actions">
+        {seed !== undefined && (
+          <span className="current-seed">Seed {String(seed)}</span>
+        )}
         <button
           className="evolve-deck-button"
           type="button"

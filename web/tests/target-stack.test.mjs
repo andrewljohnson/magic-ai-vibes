@@ -330,7 +330,8 @@ test("priority origins route to exact Arena surfaces without a legal-action wall
   );
   assert.match(app, /onCardDoubleClick=\{doubleClickHandCard\}/);
   assert.match(app, /choiceTarget=\{priorityDestination\}/);
-  assert.match(app, /priorityTarget=\{priorityPlayerTargets\?\.has\(seat\)\}/);
+  assert.match(app, /priorityTarget=\{priorityPlayerTargets\?\.has\(farSeat\)\}/);
+  assert.match(app, /priorityTarget=\{priorityPlayerTargets\?\.has\(nearSeat\)\}/);
   assert.match(
     app,
     /priorityStackTargetIds\?\.has\(String\(stackId\)\)/,
