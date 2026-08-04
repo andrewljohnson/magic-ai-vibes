@@ -995,9 +995,15 @@ textarea:focus-visible,
   background: rgba(104, 183, 167, 0.10);
 }
 
-.player-hud.is-player-target:hover {
+.player-hud.is-player-target:hover,
+.player-hud.is-drag-hover {
   background: rgba(104, 183, 167, 0.2);
   outline-style: solid;
+}
+
+.player-hud.is-drag-hover {
+  outline-color: var(--gold-bright);
+  box-shadow: 0 0 0 5px rgba(241, 211, 138, 0.18);
 }
 
 .player-surface-action {
@@ -1843,6 +1849,16 @@ textarea:focus-visible,
   left: 50%;
   transform: translateX(-50%);
   z-index: 1;
+}
+
+/* While the placard is a legal player target it must sit ABOVE the
+   hand fan: the fan (z-index 2, overflow visible) hangs over the
+   placard's top, and any drag released over those covered pixels hit
+   handler-less hand elements — the browser refused the drop. Targeting
+   mode is transient, so the placard briefly covering fan card bottoms
+   is fine. */
+.player-console > .player-hud.is-player-target {
+  z-index: 3;
 }
 
 .hand-label {

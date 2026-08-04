@@ -931,20 +931,40 @@ function PlayerHud({
     event: ReactDragEvent<HTMLElement>,
   ) => void;
 }) {
+  const [dragHover, setDragHover] = useState(false);
   return (
     <div
       className={`player-hud ${active ? "is-active" : ""} ${
         opponent ? "is-opponent" : ""
-      } ${priorityTarget ? "is-player-target" : ""}`}
+      } ${priorityTarget ? "is-player-target" : ""} ${
+        dragHover && draggingPriority ? "is-drag-hover" : ""
+      }`}
       onClick={() => {
         if (priorityTarget) {
           onChoosePriorityTarget?.();
         }
       }}
+      onDragEnter={(event) => {
+        onPriorityDragOver?.(`player:${seat}`, event);
+        if (priorityTarget && draggingPriority) {
+          setDragHover(true);
+        }
+      }}
+      onDragLeave={(event) => {
+        // Ignore transitions between the placard's own children.
+        if (
+          event.relatedTarget instanceof Node &&
+          event.currentTarget.contains(event.relatedTarget)
+        ) {
+          return;
+        }
+        setDragHover(false);
+      }}
       onDragOver={(event) =>
         onPriorityDragOver?.(`player:${seat}`, event)
       }
       onDrop={(event) => {
+        setDragHover(false);
         if (priorityTarget && draggingPriority) {
           event.preventDefault();
           event.stopPropagation();
