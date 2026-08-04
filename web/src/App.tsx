@@ -1377,6 +1377,7 @@ function BattlefieldSide({
   onSelectPriorityOrigin,
   onStartPriorityOriginDrag,
   onEndPriorityDrag,
+  onConsumePriorityDrop,
   onPriorityDragOver,
   onPriorityDrop,
   combatAttackerIds,
@@ -1420,6 +1421,7 @@ function BattlefieldSide({
     event: ReactDragEvent<HTMLButtonElement>,
   ) => void;
   onEndPriorityDrag?: () => void;
+  onConsumePriorityDrop?: () => void;
   onPriorityDragOver?: (
     destination: PriorityDestinationKey,
     event: ReactDragEvent<HTMLElement>,
@@ -1524,7 +1526,7 @@ function BattlefieldSide({
             draggingPriority={draggingPriority}
             onChoosePriorityTarget={() => onChoosePriorityPlayer?.(seat)}
             onDropPriorityTarget={() => {
-              onEndPriorityDrag?.();
+              (onConsumePriorityDrop ?? onEndPriorityDrag)?.();
               onChoosePriorityPlayer?.(seat);
             }}
             onPriorityDragOver={onPriorityDragOver}
@@ -4530,6 +4532,15 @@ export default function App() {
     draggedPriorityOriginRef.current = null;
     setDraggedPriorityOrigin(null);
   };
+  const consumePriorityDrop = () => {
+    // Drop handlers call this INSTEAD of finishPriorityDrag: the flag
+    // must survive until the trailing dragend, or its cleanup wipes the
+    // pending-options dialog the drop just opened (seen as a flash of
+    // the tutor picker before the card snapped back to hand).
+    priorityDropConsumedRef.current = true;
+    draggedPriorityOriginRef.current = null;
+    setDraggedPriorityOrigin(null);
+  };
   const matchingPriorityDropOptions = (
     origin: PriorityOriginSelection,
     destination: PriorityDestinationKey,
@@ -4556,10 +4567,9 @@ export default function App() {
     if (!origin) return;
     const options = matchingPriorityDropOptions(origin, destination);
     if (options.length === 0) return;
-    priorityDropConsumedRef.current = true;
     event.preventDefault();
     event.stopPropagation();
-    finishPriorityDrag();
+    consumePriorityDrop();
     setSelectedPriorityOrigin(origin);
     if (options.length === 1) {
       submitPriorityOption(options[0]);
@@ -4857,6 +4867,7 @@ export default function App() {
                   onSelectPriorityOrigin={selectPriorityPermanentOrigin}
                   onStartPriorityOriginDrag={startPriorityPermanentDrag}
                   onEndPriorityDrag={finishPriorityDrag}
+                  onConsumePriorityDrop={consumePriorityDrop}
                   onPriorityDragOver={dragOverPriorityDestination}
                   onPriorityDrop={dropPriorityDestination}
                   combatAttackerIds={combatAttackerIds}
@@ -4907,6 +4918,7 @@ export default function App() {
                   onSelectPriorityOrigin={selectPriorityPermanentOrigin}
                   onStartPriorityOriginDrag={startPriorityPermanentDrag}
                   onEndPriorityDrag={finishPriorityDrag}
+                  onConsumePriorityDrop={consumePriorityDrop}
                   onPriorityDragOver={dragOverPriorityDestination}
                   onPriorityDrop={dropPriorityDestination}
                   blockerOriginIds={blockerOriginIds}
@@ -4940,7 +4952,7 @@ export default function App() {
                     choosePriorityDestination(`player:${nearSeat}`)
                   }
                   onDropPriorityTarget={() => {
-                    finishPriorityDrag();
+                    consumePriorityDrop();
                     choosePriorityDestination(`player:${nearSeat}`);
                   }}
                   onPriorityDragOver={dragOverPriorityDestination}
