@@ -5534,10 +5534,27 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             [&](std::size_t game_index) {
                 std::mt19937_64 game_rng(mix_seed(
                     mix_seed(config.seed, iteration + 1), game_index));
-                const SpzTrainingCoordinate coordinate =
+                SpzTrainingCoordinate coordinate =
                     spz_training_coordinate(
                         iteration, config.games_per_iteration,
                         game_index);
+                if (!config.training_decks.empty()) {
+                    // Restricted metagame: exact balance over the
+                    // smaller pairing square, same play/draw cadence.
+                    const auto& metagame = config.training_decks;
+                    const std::size_t roster_size = metagame.size();
+                    const std::size_t global_game =
+                        iteration * config.games_per_iteration +
+                        game_index;
+                    const std::size_t pairing =
+                        global_game % (roster_size * roster_size);
+                    const std::size_t repetition =
+                        global_game / (roster_size * roster_size);
+                    coordinate.deck_zero = metagame[pairing / roster_size];
+                    coordinate.deck_one = metagame[pairing % roster_size];
+                    coordinate.pairing_repetition = repetition;
+                    coordinate.starting_player = repetition % 2;
+                }
                 std::size_t deck_zero = coordinate.deck_zero;
                 std::size_t deck_one = coordinate.deck_one;
                 {
@@ -6016,6 +6033,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 const std::size_t probe_threads =
                     std::max<std::size_t>(2, config.threads / 2);
                 const auto log = config.log;
+                const auto probe_decks = config.training_decks;
                 if (config.log) {
                     config.log("probe launched at iteration " +
                                std::to_string(launched_iteration));
@@ -6023,7 +6041,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                 probe_future = std::async(
                     std::launch::async,
                     [probe_net, launched_iteration, base_seed,
-                     probe_reps, probe_threads, log]() {
+                     probe_reps, probe_threads, log, probe_decks]() {
                         const auto probe_start =
                             std::chrono::steady_clock::now();
                         const auto elapsed = [&probe_start]() {
@@ -6040,6 +6058,7 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                         probe_policy.worlds = 4;
                         probe_policy.block_prediction_worlds = 4;
                         probe_policy.rollout = true;
+                        probe_policy.benchmark_decks = probe_decks;
                         try {
                             const auto random_probe =
                                 run_spz_benchmark(
@@ -6362,10 +6381,20 @@ SpzBenchmarkResult run_spz_benchmark(
         std::size_t opponent_deck = 0;
         std::size_t repetition = 0;
     };
+    std::vector<std::size_t> roster = policy.benchmark_decks;
+    if (roster.empty()) {
+        roster.resize(kSpzDeckCount);
+        std::iota(roster.begin(), roster.end(), std::size_t{0});
+    }
+    for (const std::size_t deck : roster) {
+        if (deck >= kSpzDeckCount) {
+            throw std::out_of_range(
+                "benchmark deck index is outside spz_decks()");
+        }
+    }
     std::vector<Job> jobs;
-    for (std::size_t spz_deck = 0; spz_deck < kSpzDeckCount; ++spz_deck) {
-        for (std::size_t opponent_deck = 0;
-             opponent_deck < kSpzDeckCount; ++opponent_deck) {
+    for (const std::size_t spz_deck : roster) {
+        for (const std::size_t opponent_deck : roster) {
             for (std::size_t repetition = 0;
                  repetition < repetitions_per_pairing; ++repetition) {
                 jobs.push_back({spz_deck, opponent_deck, repetition});

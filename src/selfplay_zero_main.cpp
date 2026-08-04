@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -76,7 +77,43 @@ struct Arguments {
     double learning_rate = 0.01;
     double epsilon_start = 0.25;
     double epsilon_final = 0.03;
+    // Metagame restriction for train/benchmark: spz_decks() indices.
+    std::vector<std::size_t> decks;
 };
+
+std::vector<std::size_t> parse_deck_list(const std::string& value) {
+    static constexpr std::array<std::string_view, kSpzDeckCount> kIds = {
+        "green",  "red",    "blue",         "white",
+        "ru-aggro", "lotus-combo", "burn", "uwr",
+        "robots", "white-weenie", "br-midrange",
+    };
+    std::vector<std::size_t> result;
+    std::stringstream stream(value);
+    std::string token;
+    while (std::getline(stream, token, ',')) {
+        if (token.empty()) {
+            continue;
+        }
+        std::size_t index = kSpzDeckCount;
+        for (std::size_t deck = 0; deck < kSpzDeckCount; ++deck) {
+            if (token == kIds[deck]) {
+                index = deck;
+                break;
+            }
+        }
+        if (index == kSpzDeckCount) {
+            index = std::stoull(token);
+        }
+        if (index >= kSpzDeckCount) {
+            throw std::invalid_argument("unknown deck: " + token);
+        }
+        result.push_back(index);
+    }
+    if (result.empty()) {
+        throw std::invalid_argument("--decks parsed to an empty list");
+    }
+    return result;
+}
 
 Arguments parse_arguments(int argc, char** argv) {
     if (argc < 2) {
@@ -155,6 +192,8 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.hidden = std::stoull(next());
         } else if (flag == "--hidden2") {
             arguments.hidden2 = std::stoull(next());
+        } else if (flag == "--decks") {
+            arguments.decks = parse_deck_list(next());
         } else if (flag == "--seed") {
             arguments.seed = std::stoull(next());
         } else if (flag == "--threads") {
@@ -230,6 +269,7 @@ int run_train(const Arguments& raw_arguments) {
     config.rollout = arguments.rollout;
     config.ismcts = arguments.ismcts;
     config.ismcts_iterations = arguments.sims;
+    config.training_decks = arguments.decks;
     if (!arguments.advantage_out.empty()) {
         config.train_advantage = true;
         if (!arguments.advantage_init.empty()) {
@@ -307,6 +347,7 @@ int run_benchmark(const Arguments& arguments) {
     policy.rollout_turn_cycles = arguments.cycles;
     policy.rollout_top_k = arguments.top_k;
     policy.gamma_per_turn = arguments.gamma;
+    policy.benchmark_decks = arguments.decks;
     if (arguments.tie_band > 0.0) {
         policy.advantage_tie_band = arguments.tie_band;
     }

@@ -260,6 +260,11 @@ struct SpzPolicyConfig {
     // alternative payment plans (pre-taps); rollout search judges which
     // sources to spend. Off = the deterministic mana planner pays.
     bool payment_branching = false;
+    // Benchmark/probe field restriction: when non-empty, only these
+    // spz_decks() indices appear on either seat. Carried on the policy
+    // config because it already reaches every benchmark call site;
+    // decision-making itself never reads it.
+    std::vector<std::size_t> benchmark_decks;
     // Worlds averaged when predicting opponent blocks during attack search.
     std::size_t block_prediction_worlds = 2;
     // Epsilon-greedy exploration over priority actions and combat choices.
@@ -445,6 +450,12 @@ struct SpzTrainConfig {
     // the uniform metagame to carry training signal.
     double focus_probability = 0.0;
     std::size_t focus_deck = 0;
+    // Metagame restriction: when non-empty, the mirror rotation cycles
+    // over only these spz_decks() indices (exact balance over the
+    // smaller pairing square). Schemas keep their full kSpzDeckCount
+    // width, so restricted artifacts stay tool-compatible. Probes
+    // launched by training inherit the same field.
+    std::vector<std::size_t> training_decks;
     std::shared_ptr<const SpzNet> spar_net;
     // Live telemetry: every iteration appends a JSONL line (losses, games,
     // turns) to `telemetry_path`; every `probe_interval` iterations the
