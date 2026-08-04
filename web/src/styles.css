@@ -1,17 +1,20 @@
 :root {
   color-scheme: dark;
-  --ink: #e9e5d7;
-  --muted: #9faaa2;
-  --faint: #829089;
-  --black: #080c0b;
-  --panel: #101716;
-  --panel-2: #151e1b;
-  --line: rgba(218, 226, 205, 0.13);
-  --line-strong: rgba(218, 226, 205, 0.25);
+  /* Penta-inspired palette, shifted blue: night-blue ink, slate-blue
+     felt, warm gold accents against cool surfaces. */
+  --ink: #e7eaef;
+  --muted: #98a6b3;
+  --faint: #7e8d9c;
+  --black: #070b10;
+  --panel: #0f1620;
+  --panel-2: #141d29;
+  --line: rgba(205, 218, 232, 0.13);
+  --line-strong: rgba(205, 218, 232, 0.25);
   --gold: #c8a766;
   --gold-bright: #f1d38a;
   --teal: #68b7a7;
   --danger: #e07767;
+  --felt: #17222e;
   --shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
   --type-floor: 11px;
   --type-label: 12px;
@@ -37,7 +40,7 @@ body,
 
 body {
   min-width: 320px;
-  background: #080c0b;
+  background: var(--black);
   color: var(--ink);
 }
 
@@ -767,10 +770,16 @@ textarea:focus-visible,
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto auto;
   overflow: hidden;
+  /* Blue felt: soft center glow over a fine weave, boxed in shadow
+     like a real table under a lamp. */
   background:
+    radial-gradient(circle at 50% 40%, rgba(96, 138, 184, 0.16), transparent 46%),
     linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-  background-size: 48px 48px;
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 4px),
+    var(--felt);
+  background-size: auto, 48px 48px, 48px 48px, auto, auto;
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.3);
 }
 
 .phase-ribbon {
@@ -4085,6 +4094,73 @@ select {
   -webkit-mask-image: radial-gradient(circle,
     black 0%, black 40%, transparent 68%);
   animation: impact-burst 0.5s ease-out 0.26s both;
+}
+
+/* Penta-style snappy card feel: quick lift on hover in hand, quick
+   settle everywhere. */
+.hand-fan .card-white {
+  transition: transform 130ms ease, box-shadow 130ms ease;
+}
+
+.hand-fan .card-white:hover {
+  transform: translateY(-7px) scale(1.04);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.55);
+  z-index: 6;
+}
+
+/* Hover tooltip: a paper card-reader that fades in beside the card
+   after a beat, penta-style. */
+.card-hover-tip {
+  position: fixed;
+  z-index: 150;
+  width: 260px;
+  padding: 14px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border: 2px solid rgba(74, 82, 96, 0.85);
+  border-radius: 6px;
+  color: #241f18;
+  background: #f2e8cf;
+  box-shadow: 0 9px 28px rgba(0, 0, 0, 0.55);
+  font-size: var(--type-label);
+  line-height: 1.3;
+  pointer-events: none;
+  opacity: 0;
+  animation: card-hover-tip-in 130ms ease 260ms forwards;
+}
+
+@keyframes card-hover-tip-in {
+  to {
+    opacity: 1;
+  }
+}
+
+.card-hover-tip > strong {
+  font-family: Georgia, serif;
+  font-size: 17px;
+  line-height: 1.05;
+}
+
+.card-hover-tip-type {
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(74, 59, 43, 0.3);
+  color: #5c6470;
+  text-transform: capitalize;
+}
+
+.card-hover-tip-rules {
+  color: #30291f;
+  font-family: Georgia, serif;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.card-hover-tip-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  color: #55503f;
 }
 
 @media (prefers-reduced-motion: reduce) {

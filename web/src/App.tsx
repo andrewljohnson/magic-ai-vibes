@@ -390,6 +390,7 @@ function CardFace({
   const title = publicDescription.join(" • ");
   const accessibleLabel = publicDescription.join(", ");
   const zoomCard = useContext(CardZoomContext);
+  const setHoverTip = useContext(CardHoverContext);
   const pressTimerRef = useRef<number | null>(null);
   const pressOriginRef = useRef<{ x: number; y: number } | null>(null);
   const clearPress = () => {
@@ -443,7 +444,23 @@ function CardFace({
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
       draggable={draggable}
-      onDragStart={onDragStart}
+      onMouseEnter={(event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setHoverTip({
+          card,
+          anchor: {
+            top: bounds.top,
+            left: bounds.left,
+            right: bounds.right,
+            height: bounds.height,
+          },
+        });
+      }}
+      onMouseLeave={() => setHoverTip(null)}
+      onDragStart={(event) => {
+        setHoverTip(null);
+        onDragStart?.(event);
+      }}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -649,6 +666,54 @@ function ManaCostPips({ card }: { card: Card }) {
 const CardZoomContext = createContext<(card: Card | null) => void>(
   () => {},
 );
+
+interface CardHoverTipState {
+  card: Card;
+  anchor: { top: number; left: number; right: number; height: number };
+}
+
+const CardHoverContext = createContext<
+  (tip: CardHoverTipState | null) => void
+>(() => {});
+
+function CardHoverTip({ tip }: { tip: CardHoverTipState }) {
+  const { card, anchor } = tip;
+  const rules = CARD_RULES_TEXT[card.name];
+  const width = 260;
+  const left =
+    anchor.right + 12 + width <= window.innerWidth - 8
+      ? anchor.right + 12
+      : Math.max(8, anchor.left - 12 - width);
+  const top = Math.min(
+    Math.max(8, anchor.top + anchor.height / 2 - 90),
+    window.innerHeight - 210,
+  );
+  return (
+    <div
+      className="card-hover-tip"
+      style={{ left, top }}
+      key={`${card.name}-${anchor.left}-${anchor.top}`}
+      aria-hidden="true"
+    >
+      <strong>{card.name}</strong>
+      <span className="card-hover-tip-type">
+        {(card.type ?? "").toUpperCase()}
+        {card.flying ? " — FLYING" : ""}
+      </span>
+      <span className="card-hover-tip-rules">
+        {rules ?? (card.type === "creature" ? "No abilities." : "")}
+      </span>
+      <span className="card-hover-tip-details">
+        {card.costLabel ? <span>Cost {card.costLabel}</span> : null}
+        {card.type === "creature" ? (
+          <span>
+            {card.power}/{card.toughness}
+          </span>
+        ) : null}
+      </span>
+    </div>
+  );
+}
 
 const SlamContext = createContext<{
   slamIds: ReadonlySet<string>;
@@ -3820,6 +3885,9 @@ export default function App() {
     new Set(),
   );
   const [zoomedCard, setZoomedCard] = useState<Card | null>(null);
+  const [hoverTip, setHoverTip] = useState<CardHoverTipState | null>(
+    null,
+  );
   const [slam, setSlam] = useState<{
     ids: Set<string>;
     hits: Set<string>;
@@ -4782,6 +4850,7 @@ export default function App() {
 
   return (
     <CardZoomContext.Provider value={setZoomedCard}>
+    <CardHoverContext.Provider value={setHoverTip}>
     <SlamContext.Provider
       value={{
         slamIds: slam?.ids ?? new Set(),
@@ -5112,8 +5181,10 @@ export default function App() {
           onClose={() => setZoomedCard(null)}
         />
       )}
+      {hoverTip && !zoomedCard && <CardHoverTip tip={hoverTip} />}
     </div>
     </SlamContext.Provider>
+    </CardHoverContext.Provider>
     </CardZoomContext.Provider>
   );
 }
