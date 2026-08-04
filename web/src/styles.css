@@ -2341,6 +2341,11 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--line);
 }
 
+/* The sidebar heading already says YOUR DECISION. */
+.decision-dock .decision-heading .eyebrow {
+  display: none;
+}
+
 .decision-heading h2 {
   font-family: Georgia, serif;
   font-size: 17px;
