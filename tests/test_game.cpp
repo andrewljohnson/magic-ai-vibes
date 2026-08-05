@@ -5731,6 +5731,587 @@ TEST(x_burn_mind_twist_and_recall_move_the_right_cards) {
     CHECK(player.graveyard.size() == graveyard_before + 1);
 }
 
+TEST(trample_assigns_lethal_to_blockers_and_excess_to_the_player) {
+    using namespace old_school;
+    // Single blocker, multi-block, and the exactly-lethal edge.
+    {
+        // 6/6 trampler into a 2/2 blocker: 2 lethal, 4 through.
+        GameState state;
+        state.active_player = 0;
+        auto& attacker_side = state.players[0];
+        auto& defender_side = state.players[1];
+        attacker_side.creatures = {
+            {.id = 601,
+             .card = CardId::ErhnamDjinn,
+             .tapped = false,
+             .summoning_sick = false,
+             .temporary_power_bonus = 2,
+             .temporary_toughness_bonus = 1},
+        };
+        attacker_side.creatures[0].trample = true;
+        defender_side.creatures = {
+            {.id = 602,
+             .card = CardId::GrizzlyBears,
+             .tapped = false,
+             .summoning_sick = false},
+        };
+        CHECK(resolve_combat(state, 0, {601}, {{601, 602}}));
+        CHECK(defender_side.creatures.empty());
+        CHECK(defender_side.life == 20 - 4);
+        CHECK(state.stats[0].damage_to_opponent == 4);
+    }
+    {
+        // Multi-block: 6 power into a 2/2 plus a damaged 3/3 leaves
+        // exactly 2 over (lethal counts toughness minus marked
+        // damage).
+        GameState state;
+        state.active_player = 0;
+        auto& attacker_side = state.players[0];
+        auto& defender_side = state.players[1];
+        attacker_side.creatures = {
+            {.id = 611,
+             .card = CardId::ErhnamDjinn,
+             .tapped = false,
+             .summoning_sick = false,
+             .temporary_power_bonus = 2},
+        };
+        attacker_side.creatures[0].trample = true;
+        defender_side.creatures = {
+            {.id = 612,
+             .card = CardId::GrizzlyBears,
+             .tapped = false,
+             .summoning_sick = false},
+            {.id = 613,
+             .card = CardId::HillGiant,
+             .tapped = false,
+             .summoning_sick = false,
+             .damage = 1},
+        };
+        CHECK(resolve_combat(state, 0, {611},
+                             {{611, 612}, {611, 613}}));
+        // 2 to the Bears, 2 to the damaged Giant (both die), 2 over.
+        CHECK(defender_side.creatures.empty());
+        CHECK(defender_side.life == 20 - 2);
+    }
+    {
+        // Exactly lethal on the blocker: nothing tramples through,
+        // and without the trample flag excess always evaporates.
+        GameState state;
+        state.active_player = 0;
+        auto& attacker_side = state.players[0];
+        auto& defender_side = state.players[1];
+        attacker_side.creatures = {
+            {.id = 621,
+             .card = CardId::GrizzlyBears,
+             .tapped = false,
+             .summoning_sick = false},
+            {.id = 622,
+             .card = CardId::HillGiant,
+             .tapped = false,
+             .summoning_sick = false},
+        };
+        attacker_side.creatures[0].trample = true;
+        defender_side.creatures = {
+            {.id = 623,
+             .card = CardId::GrizzlyBears,
+             .tapped = false,
+             .summoning_sick = false},
+            {.id = 624,
+             .card = CardId::GrizzlyBears,
+             .tapped = false,
+             .summoning_sick = false},
+        };
+        CHECK(resolve_combat(state, 0, {621, 622},
+                             {{621, 623}, {622, 624}}));
+        // The trampler's 2 power exactly covers its 2-toughness
+        // blocker; the non-trampler's excess (1) evaporates.
+        CHECK(defender_side.life == 20);
+    }
+}
+
+TEST(berserk_doubles_power_grants_trample_and_destroys_attackers) {
+    using namespace old_school;
+    // Full lifecycle: pump equals power AT RESOLUTION, the creature
+    // tramples, and cleanup destroys it only if it attacked.
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {CardId::Berserk, CardId::Berserk,
+                   CardId::GiantGrowth};
+    player.lands = {
+        {.card = CardId::Taiga, .tapped = false, .id = 701},
+        {.card = CardId::Forest, .tapped = false, .id = 702},
+        {.card = CardId::Forest, .tapped = false, .id = 703},
+    };
+    player.creatures = {
+        {.id = 704,
+         .card = CardId::ErhnamDjinn,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 705,
+         .card = CardId::GrizzlyBears,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+
+    // Giant Growth first, then Berserk: the pump must double the
+    // seven-power form, not the printed four.
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_giant_growth(
+            Target::creature_target(0, 704)),
+        false));
+    resolve_top(state, 0);
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_berserk(
+            Target::creature_target(0, 704)),
+        false));
+    resolve_top(state, 0);
+    CHECK(player.creatures[0].temporary_power_bonus == 3 + 7);
+    CHECK(player.creatures[0].trample);
+    CHECK(player.creatures[0].berserked_this_turn);
+    // The second Berserk doubles again: +14 on the 14-power form.
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_berserk(
+            Target::creature_target(0, 704)),
+        false));
+    resolve_top(state, 0);
+    CHECK(player.creatures[0].temporary_power_bonus == 3 + 7 + 14);
+
+    // The Djinn attacks (28 trample power, unblocked); the Bears
+    // stay home.
+    CHECK(resolve_combat(state, 0, {704}, {}));
+    CHECK(enemy.life == 20 - 28);
+
+    // Cleanup: the berserked attacker dies; the untouched Bears
+    // survive with every temporary flag cleared.
+    cleanup_turn(state, 0, {});
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].id == 705);
+    CHECK(!player.creatures[0].trample);
+    CHECK(!player.creatures[0].attacked_this_turn);
+    CHECK(!player.creatures[0].berserked_this_turn);
+    CHECK(count_card(player.graveyard, CardId::ErhnamDjinn) == 1);
+
+    // Not-attacked branch: a berserked creature that stays home
+    // survives its own cleanup, flags wiped.
+    auto& bears = player.creatures[0];
+    bears.trample = true;
+    bears.berserked_this_turn = true;
+    bears.temporary_power_bonus = 2;
+    cleanup_turn(state, 0, {});
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].temporary_power_bonus == 0);
+    CHECK(!player.creatures[0].trample);
+    CHECK(!player.creatures[0].berserked_this_turn);
+}
+
+TEST(berserked_su_chi_face_dies_through_the_uniform_death_path) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.creatures = {
+        {.id = 711,
+         .card = CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    player.creatures[0].berserked_this_turn = true;
+    player.creatures[0].attacked_this_turn = true;
+    cleanup_turn(state, 0, {});
+    CHECK(player.creatures.empty());
+    CHECK(count_card(player.graveyard, CardId::SuChi) == 1);
+    // End-of-turn mana empties, so the rebate cannot linger.
+    CHECK(player.mana_pool.generic == 0);
+}
+
+TEST(kird_ape_grows_with_forest_typed_lands_only) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {CardId::Mountain, CardId::Taiga};
+    player.creatures = {
+        {.id = 721,
+         .card = CardId::KirdApe,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    // A Mountain does nothing for the Ape.
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::play_land(CardId::Mountain),
+        true));
+    CHECK(player.creatures[0].static_power_bonus == 0);
+    CHECK(player.creatures[0].static_toughness_bonus == 0);
+    // Taiga carries the Forest type: +1/+2, asymmetric.
+    player.land_played_this_turn = false;
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::play_land(CardId::Taiga), true));
+    CHECK(player.creatures[0].static_power_bonus == 1);
+    CHECK(player.creatures[0].static_toughness_bonus == 2);
+    // The Forest-typed land leaving switches the buff back off at
+    // the next static refresh (any land drop refreshes).
+    player.lands.pop_back();
+    state.players[1].hand = {CardId::Forest};
+    state.active_player = 1;
+    CHECK(apply_priority_action(
+        state, 1, PriorityAction::play_land(CardId::Forest), true));
+    CHECK(player.creatures[0].static_power_bonus == 0);
+    CHECK(player.creatures[0].static_toughness_bonus == 0);
+}
+
+TEST(argothian_pixies_cannot_be_blocked_by_artifact_creatures) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& attacker_side = state.players[0];
+    auto& defender_side = state.players[1];
+    attacker_side.creatures = {
+        {.id = 731,
+         .card = CardId::ArgothianPixies,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    defender_side.creatures = {
+        {.id = 732,
+         .card = CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 733,
+         .card = CardId::Triskelion,
+         .tapped = false,
+         .summoning_sick = false},
+        // An animated Factory (a land card fighting as a creature).
+        {.id = 734,
+         .card = CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+        // A Copy Artifact wearing a Su-Chi face.
+        {.id = 735,
+         .card = CardId::CopyArtifact,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 736,
+         .card = CardId::GrizzlyBears,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    defender_side.creatures[3].copy_of = CardId::SuChi;
+    defender_side.creatures[3].is_copy = true;
+
+    // Combat validation refuses every artifact-creature block...
+    for (const PermanentId blocker :
+         {PermanentId{732}, PermanentId{733}, PermanentId{734},
+          PermanentId{735}}) {
+        GameState trial = state;
+        CHECK(!resolve_combat(trial, 0, {731}, {{731, blocker}}));
+    }
+    // ...but a plain bear may block.
+    {
+        GameState trial = state;
+        CHECK(resolve_combat(trial, 0, {731}, {{731, 736}}));
+        CHECK(trial.players[1].life == 20);
+    }
+}
+
+TEST(atog_eats_artifacts_for_pump_and_multiple_activations) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.creatures = {
+        {.id = 741,
+         .card = CardId::Atog,
+         .tapped = false,
+         // No tap in the cost: sickness does not gate the ability.
+         .summoning_sick = true},
+    };
+    player.artifacts = {
+        {.id = 742, .card = CardId::BlackVise, .tapped = false},
+        {.id = 743, .card = CardId::SolRing, .tapped = true},
+    };
+    const auto actions = legal_priority_actions(state, 0, false);
+    CHECK(has_action(actions,
+                     PriorityAction::activate_atog(741, 742)));
+    CHECK(has_action(actions,
+                     PriorityAction::activate_atog(741, 743)));
+
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::activate_atog(741, 742), false));
+    // The sacrifice is a cost, paid immediately.
+    CHECK(player.artifacts.size() == 1);
+    CHECK(count_card(player.graveyard, CardId::BlackVise) == 1);
+    resolve_top(state, 0);
+    CHECK(player.creatures[0].temporary_power_bonus == 2);
+    CHECK(player.creatures[0].temporary_toughness_bonus == 2);
+
+    // Second activation in the same turn is legal.
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::activate_atog(741, 743), false));
+    resolve_top(state, 0);
+    CHECK(player.creatures[0].temporary_power_bonus == 4);
+    CHECK(player.artifacts.empty());
+    // The pump expires at cleanup.
+    cleanup_turn(state, 0, {});
+    CHECK(player.creatures[0].temporary_power_bonus == 0);
+}
+
+TEST(ankh_of_mishra_fires_per_ankh_on_every_land_entry) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {CardId::Forest};
+    player.artifacts = {
+        {.id = 751, .card = CardId::AnkhOfMishra, .tapped = false},
+    };
+    enemy.artifacts = {
+        {.id = 752, .card = CardId::AnkhOfMishra, .tapped = false},
+    };
+    // Two Ankhs (one per side): a land drop costs its controller 4.
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::play_land(CardId::Forest), true));
+    CHECK(player.life == 16);
+    CHECK(enemy.life == 20);
+
+    // A land COPY entering also triggers: Copy Artifact aimed at an
+    // animated Factory enters as an un-animated Factory land.
+    enemy.hand = {CardId::CopyArtifact};
+    enemy.lands = {
+        {.card = CardId::Island, .tapped = false, .id = 753},
+        {.card = CardId::Island, .tapped = false, .id = 754},
+    };
+    player.creatures = {
+        {.id = 755,
+         .card = CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    state.active_player = 1;
+    CHECK(apply_priority_action(
+        state, 1, PriorityAction::cast_copy_artifact(0, 755),
+        true));
+    resolve_top(state, 1);
+    CHECK(enemy.lands.size() == 3);
+    CHECK(enemy.life == 16);
+    CHECK(player.life == 16);
+}
+
+TEST(regrowth_returns_a_chosen_graveyard_card_and_conserves) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {CardId::Regrowth};
+    player.lands = {
+        {.card = CardId::Taiga, .tapped = false, .id = 761},
+        {.card = CardId::Pendelhaven, .tapped = false, .id = 762},
+    };
+    player.graveyard = {CardId::LightningBolt, CardId::GiantGrowth,
+                        CardId::LightningBolt};
+
+    const auto actions = legal_priority_actions(state, 0, true);
+    // One action per DISTINCT graveyard card.
+    CHECK(has_action(actions, PriorityAction::cast_regrowth(
+                                  CardId::LightningBolt)));
+    CHECK(has_action(actions, PriorityAction::cast_regrowth(
+                                  CardId::GiantGrowth)));
+    std::size_t regrowth_actions = 0;
+    for (const auto& action : actions) {
+        regrowth_actions +=
+            action.kind == PriorityActionKind::CastRegrowth ? 1 : 0;
+    }
+    CHECK(regrowth_actions == 2);
+
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_regrowth(CardId::GiantGrowth), true));
+    resolve_top(state, 0);
+    // Conservation: Growth graveyard->hand, Regrowth hand->graveyard.
+    CHECK(player.hand ==
+          std::vector<CardId>{CardId::GiantGrowth});
+    CHECK(count_card(player.graveyard, CardId::GiantGrowth) == 0);
+    CHECK(count_card(player.graveyard, CardId::Regrowth) == 1);
+    CHECK(count_card(player.graveyard, CardId::LightningBolt) == 2);
+}
+
+TEST(sylvan_library_draws_two_and_returns_two_in_order) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.enchantments = {CardId::SylvanLibrary,
+                           CardId::SylvanLibrary};
+    // Non-stacking: two copies still trigger once per upkeep.
+    CHECK(has_sylvan_library(state, 0));
+    CHECK(!has_sylvan_library(state, 1));
+
+    player.hand = {CardId::Forest};
+    player.library = {CardId::Mountain, CardId::LightningBolt,
+                      CardId::GiantGrowth};  // top = GiantGrowth
+    // Simulate the two extra draws.
+    for (int draw = 0; draw < 2; ++draw) {
+        player.hand.push_back(player.library.back());
+        player.library.pop_back();
+    }
+    CHECK(player.hand ==
+          (std::vector<CardId>{CardId::Forest, CardId::GiantGrowth,
+                               CardId::LightningBolt}));
+    const std::size_t total_before =
+        player.hand.size() + player.library.size();
+    // Return positions {2, 0}: the first selection (Lightning Bolt)
+    // must be drawn next, the Forest directly beneath it.
+    sylvan_return_to_library(state, 0, {2, 0});
+    CHECK(player.hand ==
+          std::vector<CardId>{CardId::GiantGrowth});
+    CHECK(player.library.size() == 3);
+    CHECK(player.library.back() == CardId::LightningBolt);
+    CHECK(player.library[player.library.size() - 2] ==
+          CardId::Forest);
+    CHECK(player.hand.size() + player.library.size() ==
+          total_before);
+}
+
+TEST(sylvan_library_upkeep_runs_in_full_games) {
+    using namespace old_school;
+    // A full HC-vs-HC RG Berserk mirror (both decks carry Sylvan
+    // Library) must complete without desync or illegal hand states.
+    GameConfig config;
+    config.bots[0] = {.kind = BotKind::Handcrafted,
+                      .rollouts_per_action = 1};
+    config.bots[1] = {.kind = BotKind::Handcrafted,
+                      .rollouts_per_action = 1};
+    config.max_turns = 60;
+    config.starting_player = 0;
+    Game game(rg_berserk_deck(), rg_berserk_deck(), 20260805,
+              config);
+    const GameResult result = game.run();
+    CHECK(result.turns >= 1);
+}
+
+TEST(pendelhaven_pumps_only_current_one_one_creatures) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.lands = {
+        {.card = CardId::Pendelhaven, .tapped = false, .id = 771},
+    };
+    player.creatures = {
+        {.id = 772,
+         .card = CardId::ScrybSprites,  // 1/1: legal target
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 773,
+         .card = CardId::GrizzlyBears,  // 2/2: never
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 774,
+         .card = CardId::LlanowarElves,  // 1/1 printed...
+         .tapped = false,
+         .summoning_sick = false,
+         .plus_counters = 1},  // ...but CURRENTLY 2/2
+    };
+    enemy.creatures = {
+        {.id = 775,
+         .card = CardId::FlyingMen,  // opposing 1/1s are targets too
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto actions = legal_priority_actions(state, 0, false);
+    CHECK(has_action(actions,
+                     PriorityAction::activate_pendelhaven(
+                         771, Target::creature_target(0, 772))));
+    CHECK(!has_action(actions,
+                      PriorityAction::activate_pendelhaven(
+                          771, Target::creature_target(0, 773))));
+    CHECK(!has_action(actions,
+                      PriorityAction::activate_pendelhaven(
+                          771, Target::creature_target(0, 774))));
+    CHECK(has_action(actions,
+                     PriorityAction::activate_pendelhaven(
+                         771, Target::creature_target(1, 775))));
+
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::activate_pendelhaven(
+            771, Target::creature_target(0, 772)),
+        false));
+    CHECK(player.lands[0].tapped);
+    resolve_top(state, 0);
+    CHECK(player.creatures[0].temporary_power_bonus == 1);
+    CHECK(player.creatures[0].temporary_toughness_bonus == 2);
+    // Pendelhaven also taps for {G} through the normal payer.
+    GameState mana_state;
+    mana_state.players[0].lands = {
+        {.card = CardId::Pendelhaven, .tapped = false, .id = 776},
+    };
+    CHECK(can_pay(mana_state.players[0], {.green = 1}));
+}
+
+TEST(relic_barrier_taps_any_artifact) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.artifacts = {
+        {.id = 781, .card = CardId::RelicBarrier, .tapped = false},
+        {.id = 782, .card = CardId::SolRing, .tapped = false},
+    };
+    enemy.artifacts = {
+        {.id = 783, .card = CardId::Millstone, .tapped = false},
+    };
+    const auto actions = legal_priority_actions(state, 0, false);
+    // Both sides' artifacts are targets; never itself.
+    CHECK(has_action(actions,
+                     PriorityAction::activate_relic_barrier(
+                         781, 0, 782)));
+    CHECK(has_action(actions,
+                     PriorityAction::activate_relic_barrier(
+                         781, 1, 783)));
+    CHECK(!has_action(actions,
+                      PriorityAction::activate_relic_barrier(
+                          781, 0, 781)));
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::activate_relic_barrier(781, 1, 783),
+        false));
+    CHECK(player.artifacts[0].tapped);
+    resolve_top(state, 0);
+    CHECK(enemy.artifacts[0].tapped);
+}
+
+TEST(taiga_pays_red_or_green_and_new_decks_have_the_right_sizes) {
+    using namespace old_school;
+    GameState state;
+    auto& player = state.players[0];
+    player.lands = {
+        {.card = CardId::Taiga, .tapped = false, .id = 791},
+    };
+    CHECK(can_pay(player, {.green = 1}));
+    CHECK(can_pay(player, {.red = 1}));
+    CHECK(!can_pay(player, {.blue = 1}));
+
+    CHECK(rg_berserk_deck().size() == 60);
+    CHECK(atog_deck().size() == 61);
+    CHECK(kDeckCount == 13);
+    CHECK(deck_name(DeckId::RGBerserk) == "RG Berserk");
+    CHECK(deck_name(DeckId::Atog) == "Atog");
+    // Every card of both decks resolves a definition (no enum gap).
+    for (const auto& deck : {rg_berserk_deck(), atog_deck()}) {
+        for (const CardId card : deck) {
+            CHECK(!card_definition(card).name.empty());
+        }
+    }
+}
+
 int main() {
     std::size_t failures = 0;
     for (const auto& test : tests()) {
