@@ -3878,6 +3878,52 @@ function TargetArrows({ snapshot }: { snapshot: GameSnapshot }) {
   );
 }
 
+/** How long each banner plays; matches the opponent-action-in animation. */
+const OPPONENT_TOAST_DURATION_MS = 3200;
+/** Keep the backlog bounded so the banner never lags minutes behind. */
+const OPPONENT_TOAST_QUEUE_LIMIT = 8;
+
+interface OpponentToastItem {
+  key: number;
+  message: string;
+  kind: string;
+  symbol: string;
+}
+
+function opponentToastSymbol(kind: string, actionKind: string): string {
+  if (
+    kind.includes("attack") ||
+    kind.includes("block") ||
+    kind.includes("combat")
+  ) {
+    return "⚔";
+  }
+  if (kind === "stack_resolved") return "◇";
+  if (actionKind.startsWith("activate")) return "◎";
+  if (actionKind.includes("land")) return "▲";
+  return "✦";
+}
+
+function opponentToastItem(
+  entry: string | LogEntry | undefined,
+  opponentSeat: PlayerIndex,
+  key: number,
+): OpponentToastItem | null {
+  if (!entry || typeof entry === "string") return null;
+  if (entry.player !== opponentSeat) return null;
+  if (!entry.message) return null;
+  const actionKind = String(entry.actionKind ?? "");
+  // Bare priority passes and mana taps are noise, not announcements.
+  if (actionKind === "pass" || actionKind === "tap_land_for_mana") return null;
+  const kind = String(entry.kind ?? "game");
+  return {
+    key,
+    message: entry.message.replace(/^Opponent:\s*/, ""),
+    kind,
+    symbol: opponentToastSymbol(kind, actionKind),
+  };
+}
+
 function OpponentActionToast({
   entries,
   opponentSeat,
@@ -3885,36 +3931,69 @@ function OpponentActionToast({
   entries: Array<string | LogEntry>;
   opponentSeat: PlayerIndex;
 }) {
-  const last = entries[entries.length - 1];
-  if (!last || typeof last === "string") return null;
-  if (last.player !== opponentSeat) return null;
-  if (last.actionKind === "pass") return null;
-  if (!last.message) return null;
-  const message = last.message.replace(/^Opponent:\s*/, "");
-  const kind = String(last.kind ?? "game");
-  const symbol = kind.includes("attack") ||
-    kind.includes("block") ||
-    kind.includes("combat")
-    ? "⚔"
-    : kind === "stack_resolved"
-      ? "◇"
-      : String(last.actionKind ?? "").includes("land")
-        ? "▲"
-        : "✦";
+  // Index into `entries` up to which the log has been turned into toasts.
+  const consumedRef = useRef<number | null>(null);
+  const seqRef = useRef(0);
+  const [queue, setQueue] = useState<OpponentToastItem[]>([]);
+
+  useEffect(() => {
+    let start = consumedRef.current;
+    if (start === null) {
+      // First look at this match's log: only the most recent entry may
+      // toast, so a page load does not replay the whole game.
+      start = Math.max(0, entries.length - 1);
+    } else if (start > entries.length) {
+      // The log shrank (a new game started): drop stale banners.
+      start = Math.max(0, entries.length - 1);
+      setQueue([]);
+    }
+    const fresh: OpponentToastItem[] = [];
+    for (let index = start; index < entries.length; index += 1) {
+      seqRef.current += 1;
+      const item = opponentToastItem(
+        entries[index],
+        opponentSeat,
+        seqRef.current,
+      );
+      if (item) fresh.push(item);
+    }
+    consumedRef.current = entries.length;
+    if (fresh.length > 0) {
+      setQueue((prev) =>
+        [...prev, ...fresh].slice(-OPPONENT_TOAST_QUEUE_LIMIT),
+      );
+    }
+  }, [entries, opponentSeat]);
+
+  const current = queue[0] ?? null;
+  useEffect(() => {
+    if (!current) return;
+    const timer = window.setTimeout(() => {
+      setQueue((prev) => prev.slice(1));
+    }, OPPONENT_TOAST_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [current]);
+
+  if (!current) return null;
   return (
     <div
-      className={`opponent-action opponent-action-${kind}`}
-      key={`${entries.length}-${last.message}`}
+      className={`opponent-action opponent-action-${current.kind}`}
+      key={current.key}
       role="status"
       aria-live="polite"
     >
       <span className="opponent-action-icon" aria-hidden="true">
-        {symbol}
+        {current.symbol}
       </span>
       <div>
         <small>Opponent</small>
-        <strong>{message}</strong>
+        <strong>{current.message}</strong>
       </div>
+      {queue.length > 1 && (
+        <span className="opponent-action-count" aria-hidden="true">
+          +{queue.length - 1}
+        </span>
+      )}
     </div>
   );
 }

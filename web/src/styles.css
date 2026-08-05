@@ -4262,7 +4262,7 @@ select {
   min-height: 56px;
   padding: 8px 10px;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   border: 1px solid var(--gold);
@@ -4303,6 +4303,13 @@ select {
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* "+N" badge for queued announcements still waiting their turn. */
+.opponent-action-count {
+  color: #746753;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 @keyframes opponent-action-in {
