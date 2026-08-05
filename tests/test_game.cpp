@@ -4866,6 +4866,50 @@ TEST(manual_land_tap_floats_mana_and_pays_first) {
     CHECK(player.creatures[0].tapped);
 }
 
+TEST(sedge_counts_swamp_typed_duals_and_swords_pays_current_power) {
+    // Live report: Sedge Troll with only a Badlands read 2/2 and
+    // Swords to Plowshares paid its owner 2 life. Badlands and
+    // Underground Sea carry the Swamp type in print, so the Troll is
+    // 3/3 and the exile must pay current power.
+    old_school::GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    auto& enemy = state.players[1];
+    player.hand = {old_school::CardId::Badlands};
+    player.creatures = {
+        {.id = 401,
+         .card = old_school::CardId::SedgeTroll,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    enemy.hand = {old_school::CardId::SwordsToPlowshares};
+    enemy.lands = {
+        {.id = 402, .card = old_school::CardId::Plains,
+         .tapped = false},
+    };
+
+    // The land drop triggers the static-buff refresh: the dual alone
+    // must switch the Troll on.
+    CHECK(old_school::apply_priority_action(
+        state, 0,
+        old_school::PriorityAction::play_land(
+            old_school::CardId::Badlands),
+        true));
+    CHECK(player.creatures[0].crusade_bonus == 1);
+
+    // Swords from the enemy: exile at CURRENT power = 3 life.
+    const int life_before = player.life;
+    CHECK(old_school::apply_priority_action(
+        state, 1,
+        old_school::PriorityAction::cast_swords(
+            old_school::Target::creature_target(0, 401)),
+        false));
+    resolve_top(state, 1);
+    CHECK(player.creatures.empty());
+    CHECK(player.exile.size() == 1);
+    CHECK(player.life == life_before + 3);
+}
+
 TEST(br_midrange_mechanics_work) {
     // Dark Ritual banks BBB; Sedge Troll grows with a Swamp; Juzam
     // pings its own controller each upkeep; Hypnotic forces a discard

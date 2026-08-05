@@ -906,6 +906,14 @@ bool is_artifact_creature(CardId card) {
            card == CardId::MishrasFactory;
 }
 
+// Type-line fact: lands whose printed type line includes Swamp - the
+// basic plus both black duals. Anything keyed on "controls a Swamp"
+// (Sedge Troll) must use this, never CardId::Swamp equality.
+bool land_has_swamp_type(CardId card) {
+    return card == CardId::Swamp || card == CardId::Badlands ||
+           card == CardId::UndergroundSea;
+}
+
 ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                                   const ManaCost& cost) {
     const std::array<int, 6> cost_parts = {
@@ -1787,7 +1795,8 @@ void refresh_crusade_buffs(GameState& state) {
         bool controls_swamp = false;
         for (const auto& land : player.lands) {
             controls_swamp =
-                controls_swamp || land_face(land) == CardId::Swamp;
+                controls_swamp ||
+                land_has_swamp_type(land_face(land));
         }
         for (auto& creature : player.creatures) {
             int bonus =
