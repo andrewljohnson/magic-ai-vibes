@@ -632,6 +632,25 @@ const CARD_RULES_TEXT: Record<string, string> = {
   "Dark Ritual": "Add {B}{B}{B}.",
   Shatter: "Destroy target artifact.",
   Swamp: "Tap: Add {B}.",
+  Taiga: "Tap: Add {R} or {G}.",
+  "Kird Ape":
+    "Gets +1/+2 as long as you control a Forest.",
+  "Scryb Sprites": "Flying.",
+  "Argothian Pixies":
+    "Can't be blocked by artifact creatures.",
+  "Erhnam Djinn": "A hulking 4/5 djinn.",
+  Berserk:
+    "Target creature gains trample and gets +X/+0 until end of turn, where X is its power. At the beginning of the next end step, destroy that creature if it attacked this turn.",
+  Regrowth: "Return a card from your graveyard to your hand.",
+  "Sylvan Library":
+    "At the beginning of your upkeep, draw two extra cards, then put two cards from your hand on top of your library.",
+  Pendelhaven:
+    "Tap: Add {G}. Or Tap: Target 1/1 creature gets +1/+2 until end of turn.",
+  Atog:
+    "Sacrifice an artifact: Atog gets +2/+2 until end of turn.",
+  "Ankh of Mishra":
+    "Whenever a land enters the battlefield, Ankh of Mishra deals 2 damage to that land's controller.",
+  "Relic Barrier": "Tap: Tap target artifact.",
 };
 
 function ManaCostPips({ card }: { card: Card }) {
@@ -2457,6 +2476,7 @@ function CleanupDiscardControls({
   busy: boolean;
 }) {
   const ready = selected.size === decision.count;
+  const sylvan = decision.kind === "sylvan_return";
   return (
     <div className="cleanup-discard-control">
       <span className="cleanup-progress">
@@ -2484,7 +2504,7 @@ function CleanupDiscardControls({
           }
           disabled={busy || !ready}
         >
-          Confirm discard
+          {sylvan ? "Confirm return" : "Confirm discard"}
         </button>
       </div>
     </div>
@@ -2568,6 +2588,11 @@ function DecisionDock({
     helper = `Select exactly ${decision.count} ${
       decision.count === 1 ? "card" : "cards"
     } from your hand.`;
+  } else if (decision.kind === "sylvan_return") {
+    heading = "Sylvan Library";
+    helper = `Return exactly ${decision.count} ${
+      decision.count === 1 ? "card" : "cards"
+    } to the top of your library. The first card you pick is drawn next.`;
   } else if (decision.kind === "mulligan") {
     heading = "Keep or mulligan?";
     helper = `Keep this ${decision.handSize}-card hand, or shuffle it away and draw ${
@@ -2657,7 +2682,8 @@ function DecisionDock({
             busy={busy}
           />
         )}
-        {decision.kind === "cleanup_discard" && (
+        {(decision.kind === "cleanup_discard" ||
+          decision.kind === "sylvan_return") && (
           <CleanupDiscardControls
             decision={decision}
             selected={selectedDiscardIndices}
@@ -4554,7 +4580,8 @@ export default function App() {
       ? snapshot.decision
       : undefined;
   const cleanupDiscardDecision =
-    snapshot.decision?.kind === "cleanup_discard"
+    snapshot.decision?.kind === "cleanup_discard" ||
+    snapshot.decision?.kind === "sylvan_return"
       ? snapshot.decision
       : undefined;
   const blockerDecision =

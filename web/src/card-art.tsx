@@ -1261,6 +1261,181 @@ const ART: Record<string, Art> = {
       <circle cx={60} cy={22} r={3.4} fill={GOLD} />
     </Frame>
   ),
+
+  /* --------------------------- the 88 wave --------------------------- */
+  Taiga: (
+    <Frame bg={G.sky}>
+      <Sun c={R.pale} x={22} y={8} />
+      <Peak x={44} w={24} h={20} c={R.mid} cap={R.pale} />
+      <Peak x={72} w={20} h={15} c={R.dark} />
+      <Ground c={G.mid} y={32} />
+      <Pine x={90} y={33} s={4} c={G.dark} />
+      <Pine x={102} y={34} s={3} c={G.dark} />
+      <Pine x={26} y={35} s={3.4} c={G.dark} />
+    </Frame>
+  ),
+  "Kird Ape": (
+    <Frame bg={G.sky}>
+      <Ground c={G.mid} y={31} />
+      <Pine x={20} y={32} s={3.6} c={G.dark} />
+      <Pine x={100} y={33} s={4.2} c={G.dark} />
+      <g fill="#7a4b32">
+        <path d="M46 40 Q46 26 56 22 Q52 16 58 12 Q66 8 70 14 Q74 20 68 24 Q78 28 78 40 Z" />
+        <path d="M46 32 Q38 34 36 40 L44 40 Z" />
+        <path d="M78 32 Q86 34 88 40 L80 40 Z" />
+      </g>
+      <circle cx={61} cy={16} r={1.4} fill={G.pale} />
+      <circle cx={66} cy={16} r={1.4} fill={G.pale} />
+    </Frame>
+  ),
+  "Scryb Sprites": (
+    <Frame bg={G.sky}>
+      <Ground c={G.mid} y={34} />
+      <g>
+        <ellipse cx={40} cy={16} rx={5} ry={2.4} fill={G.pale} transform="rotate(-24 40 16)" />
+        <ellipse cx={48} cy={16} rx={5} ry={2.4} fill={G.pale} transform="rotate(24 48 16)" />
+        <circle cx={44} cy={18} r={2.6} fill={G.dark} />
+        <path d="M44 20 L44 26" stroke={G.dark} strokeWidth={1.6} />
+      </g>
+      <g>
+        <ellipse cx={72} cy={24} rx={4.4} ry={2} fill={G.pale} transform="rotate(-24 72 24)" />
+        <ellipse cx={79} cy={24} rx={4.4} ry={2} fill={G.pale} transform="rotate(24 79 24)" />
+        <circle cx={75.5} cy={26} r={2.2} fill={G.dark} />
+        <path d="M75.5 28 L75.5 33" stroke={G.dark} strokeWidth={1.4} />
+      </g>
+      <circle cx={58} cy={9} r={1.2} fill={G.pale} />
+      <circle cx={88} cy={13} r={1} fill={G.pale} />
+    </Frame>
+  ),
+  "Argothian Pixies": (
+    <Frame bg={G.mid}>
+      <Ground c={G.dark} y={33} />
+      <Pine x={16} y={34} s={3.4} c={G.dark} />
+      <Pine x={104} y={35} s={3.8} c={G.dark} />
+      <g fill={G.pale}>
+        <circle cx={52} cy={14} r={2.6} />
+        <path d="M52 16 L49 26 M52 16 L56 25" stroke={G.pale} strokeWidth={1.6} fill="none" />
+        <circle cx={68} cy={20} r={2.2} />
+        <path d="M68 22 L65 30 M68 22 L71 30" stroke={G.pale} strokeWidth={1.4} fill="none" />
+      </g>
+      <g fill={GOLD}>
+        <circle cx={40} cy={10} r={1} />
+        <circle cx={60} cy={6} r={1.2} />
+        <circle cx={80} cy={11} r={1} />
+        <circle cx={90} cy={22} r={0.9} />
+      </g>
+    </Frame>
+  ),
+  "Erhnam Djinn": (
+    <Frame bg={G.sky}>
+      <Ground c={G.mid} y={34} />
+      <g fill={G.dark}>
+        <path d="M34 42 Q36 20 60 20 Q84 20 86 42 Z" />
+        <circle cx={60} cy={13} r={8} />
+        <path d="M53 9 Q45 8 43 1 Q52 1 55 6 Z" />
+        <path d="M67 9 Q75 8 77 1 Q68 1 65 6 Z" />
+      </g>
+      <circle cx={56.5} cy={13} r={1.6} fill={GOLD} />
+      <circle cx={63.5} cy={13} r={1.6} fill={GOLD} />
+      <path d="M42 32 L50 32" stroke={GOLD} strokeWidth={2.2} />
+      <path d="M70 32 L78 32" stroke={GOLD} strokeWidth={2.2} />
+    </Frame>
+  ),
+  Berserk: (
+    <Frame bg={G.dark}>
+      <path d="M30 36 L58 12" stroke="#7a4b32" strokeWidth={3.2} />
+      <path d="M52 6 Q64 2 68 12 Q60 18 52 16 Z" fill={A.pale} />
+      <g stroke={R.mid} strokeWidth={2.6} fill="none">
+        <path d="M74 10 L94 30" />
+        <path d="M82 8 L100 24" />
+        <path d="M72 20 L88 36" />
+      </g>
+      <circle cx={40} cy={10} r={1.4} fill={R.mid} />
+      <circle cx={30} cy={18} r={1.1} fill={R.mid} />
+      <Ground c="#2c4023" y={38} />
+    </Frame>
+  ),
+  Regrowth: (
+    <Frame bg={G.sky}>
+      <Ground c="#6b4a2e" y={31} />
+      <g stroke={G.dark} strokeWidth={2.4} fill="none">
+        <path d="M60 34 L60 18" />
+        <path d="M60 24 Q52 22 50 14" />
+        <path d="M60 20 Q68 18 70 10" />
+      </g>
+      <path d="M50 14 Q45 10 48 5 Q53 8 50 14 Z" fill={G.mid} />
+      <path d="M70 10 Q75 6 72 1 Q67 4 70 10 Z" fill={G.mid} />
+      <path d="M28 12 Q36 4 46 8" stroke={G.pale} strokeWidth={1.8} fill="none" />
+      <polygon points="45,5 49,9 43,11" fill={G.pale} />
+    </Frame>
+  ),
+  "Sylvan Library": (
+    <Frame bg={G.sky}>
+      <Ground c={G.mid} y={33} />
+      <path d="M52 38 L52 16 Q60 10 68 16 L68 38 Z" fill="#7a4b32" />
+      <path d="M40 18 Q60 -4 80 18 Q60 12 40 18 Z" fill={G.dark} />
+      <g fill={G.pale} stroke={G.dark} strokeWidth={0.8}>
+        <rect x={55} y={20} width={10} height={3.2} />
+        <rect x={55} y={25} width={10} height={3.2} />
+        <rect x={55} y={30} width={10} height={3.2} />
+      </g>
+    </Frame>
+  ),
+  Pendelhaven: (
+    <Frame bg={G.pale}>
+      <Sun c={GOLD} x={98} y={8} r={4.4} />
+      <path d="M0 30 Q22 10 44 32 L0 44 Z" fill={G.mid} />
+      <path d="M120 30 Q98 8 74 32 L120 44 Z" fill={G.mid} />
+      <Ground c={G.dark} y={36} />
+      <Pine x={58} y={36} s={4.6} c={G.dark} />
+      <Pine x={50} y={38} s={2.6} c={G.mid} />
+      <Pine x={67} y={38} s={2.8} c={G.mid} />
+    </Frame>
+  ),
+  Atog: (
+    <Frame bg={R.sky}>
+      <Ground c={R.mid} y={34} />
+      <g fill={K.mid}>
+        <path d="M40 40 Q34 22 52 14 Q74 6 84 20 Q90 28 82 34 L78 40 Z" />
+      </g>
+      <path d="M50 22 Q66 14 82 24 Q68 30 52 30 Z" fill={R.dark} />
+      <g fill={A.pale}>
+        <polygon points="54,22 57,27 51,27" />
+        <polygon points="63,19 66,25 60,25" />
+        <polygon points="72,19 75,25 69,25" />
+      </g>
+      <circle cx={52} cy={16} r={1.8} fill={GOLD} />
+      <circle cx={70} cy={26} r={3.2} fill={A.mid} />
+      <circle cx={70} cy={26} r={1.4} fill={A.dark} />
+    </Frame>
+  ),
+  "Ankh of Mishra": (
+    <Frame bg={A.sky}>
+      <Ground c={A.mid} y={35} />
+      <g stroke={GOLD} strokeWidth={3.4} fill="none">
+        <path d="M60 20 L60 38" />
+        <path d="M50 24 L70 24" />
+        <ellipse cx={60} cy={12} rx={6} ry={7.5} />
+      </g>
+      <circle cx={30} cy={30} r={1.4} fill={R.mid} />
+      <circle cx={92} cy={28} r={1.4} fill={R.mid} />
+    </Frame>
+  ),
+  "Relic Barrier": (
+    <Frame bg={A.sky}>
+      <Ground c={A.mid} y={34} />
+      <circle cx={84} cy={20} r={8} fill={A.dark} />
+      <circle cx={84} cy={20} r={3.2} fill={A.pale} />
+      <g fill={A.dark}>
+        <rect x={30} y={14} width={5} height={26} rx={1.5} />
+        <rect x={42} y={12} width={5} height={28} rx={1.5} />
+        <rect x={54} y={14} width={5} height={26} rx={1.5} />
+        <rect x={24} y={20} width={42} height={4} />
+        <rect x={24} y={30} width={42} height={4} />
+      </g>
+      <path d="M66 20 L74 20" stroke={GOLD} strokeWidth={2.4} />
+    </Frame>
+  ),
 };
 
 export function cardArt(name: string): JSX.Element | null {

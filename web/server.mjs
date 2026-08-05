@@ -97,6 +97,18 @@ const CARD_NAMES = Object.freeze([
   "Dark Ritual",
   "Shatter",
   "Swamp",
+  "Taiga",
+  "Kird Ape",
+  "Scryb Sprites",
+  "Argothian Pixies",
+  "Erhnam Djinn",
+  "Berserk",
+  "Regrowth",
+  "Sylvan Library",
+  "Pendelhaven",
+  "Atog",
+  "Ankh of Mishra",
+  "Relic Barrier",
 ]);
 
 export const DECKS = Object.freeze([
@@ -345,6 +357,80 @@ export const DECKS = Object.freeze([
       { name: "Underground Sea", count: 1 },
     ],
   },
+  {
+    id: "rg-berserk",
+    label: "RG Berserk",
+    name: "RG Berserk",
+    colors: ["red", "green"],
+    deckList:
+      "4 Argothian Pixies / 4 Erhnam Djinn / 4 Kird Ape / 3 Llanowar Elves / 3 Scryb Sprites / Chaos Orb / Mox Emerald / Mox Ruby / Sol Ring / 2 Berserk / 4 Giant Growth / 6 Lightning Bolt / 2 Shatter / Disintegrate / Regrowth / Wheel of Fortune / 2 Sylvan Library / 4 Forest / 4 Mountain / 2 Pendelhaven / 4 Mishra's Factory / Strip Mine / 4 Taiga",
+    cards: [
+      { name: "Argothian Pixies", count: 4 },
+      { name: "Erhnam Djinn", count: 4 },
+      { name: "Kird Ape", count: 4 },
+      { name: "Llanowar Elves", count: 3 },
+      { name: "Scryb Sprites", count: 3 },
+      { name: "Chaos Orb", count: 1 },
+      { name: "Mox Emerald", count: 1 },
+      { name: "Mox Ruby", count: 1 },
+      { name: "Sol Ring", count: 1 },
+      { name: "Berserk", count: 2 },
+      { name: "Giant Growth", count: 4 },
+      { name: "Lightning Bolt", count: 6 },
+      { name: "Shatter", count: 2 },
+      { name: "Disintegrate", count: 1 },
+      { name: "Regrowth", count: 1 },
+      { name: "Wheel of Fortune", count: 1 },
+      { name: "Sylvan Library", count: 2 },
+      { name: "Forest", count: 4 },
+      { name: "Mountain", count: 4 },
+      { name: "Pendelhaven", count: 2 },
+      { name: "Mishra's Factory", count: 4 },
+      { name: "Strip Mine", count: 1 },
+      { name: "Taiga", count: 4 },
+    ],
+  },
+  {
+    id: "atog",
+    label: "Atog",
+    name: "Atog",
+    colors: ["red", "blue"],
+    deckList:
+      "4 Atog / 3 Serendib Efreet / 2 Ankh of Mishra / Black Lotus / 4 Black Vise / Chaos Orb / Mox Emerald / Mox Jet / Mox Pearl / Mox Ruby / Mox Sapphire / Relic Barrier / Sol Ring / Ancestral Recall / 8 Lightning Bolt / 4 Psionic Blast / Shatter / Demonic Tutor / Mind Twist / Time Walk / Timetwister / Wheel of Fortune / Copy Artifact / 3 Badlands / 3 City of Brass / 2 Island / Library of Alexandria / 4 Mishra's Factory / Strip Mine / Underground Sea / 4 Volcanic Island",
+    cards: [
+      { name: "Atog", count: 4 },
+      { name: "Serendib Efreet", count: 3 },
+      { name: "Ankh of Mishra", count: 2 },
+      { name: "Black Lotus", count: 1 },
+      { name: "Black Vise", count: 4 },
+      { name: "Chaos Orb", count: 1 },
+      { name: "Mox Emerald", count: 1 },
+      { name: "Mox Jet", count: 1 },
+      { name: "Mox Pearl", count: 1 },
+      { name: "Mox Ruby", count: 1 },
+      { name: "Mox Sapphire", count: 1 },
+      { name: "Relic Barrier", count: 1 },
+      { name: "Sol Ring", count: 1 },
+      { name: "Ancestral Recall", count: 1 },
+      { name: "Lightning Bolt", count: 8 },
+      { name: "Psionic Blast", count: 4 },
+      { name: "Shatter", count: 1 },
+      { name: "Demonic Tutor", count: 1 },
+      { name: "Mind Twist", count: 1 },
+      { name: "Time Walk", count: 1 },
+      { name: "Timetwister", count: 1 },
+      { name: "Wheel of Fortune", count: 1 },
+      { name: "Copy Artifact", count: 1 },
+      { name: "Badlands", count: 3 },
+      { name: "City of Brass", count: 3 },
+      { name: "Island", count: 2 },
+      { name: "Library of Alexandria", count: 1 },
+      { name: "Mishra's Factory", count: 4 },
+      { name: "Strip Mine", count: 1 },
+      { name: "Underground Sea", count: 1 },
+      { name: "Volcanic Island", count: 4 },
+    ],
+  },
 ]);
 
 export const POLICIES = Object.freeze([
@@ -377,7 +463,7 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "Old-school specialist: a value net (256 hidden units) trained purely from mirror self-play on the four real decks, played with greedy rollout lookahead. Beats Handcoded Policy 68.8% on that field (the 11-deck generalist champion scores 67.1) and respects counterspells and racing math the generalist never learned.",
+      "Old-school specialist value net played with greedy rollout lookahead. The card pool just grew to 13 decks / 88 cards (RG Berserk, Atog), which invalidated every prior artifact's feature schema: a retrain for the 13-deck era is pending, and until it lands the arena falls back to the Handcoded Policy opponent.",
     versionDate: "2026-08-04",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
@@ -438,7 +524,7 @@ export const EVOLUTION_PILOTS = Object.freeze([
 
 export const EVOLUTION_DEFAULTS = Object.freeze({
   generations: 3,
-  population: 11,
+  population: 13,
   games: 1,
   pilot: "handcrafted",
   seed: "424242",
@@ -447,7 +533,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 export const EVOLUTION_LIMITS = Object.freeze({
   seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
   generations: { min: 1, max: 200 },
-  population: { min: 11, max: 32 },
+  population: { min: 13, max: 32 },
   games: { min: 1, max: 16 },
   retainedResults: MAX_EVOLUTION_RESULTS,
   savedDecks: MAX_SAVED_DECKS,
@@ -787,7 +873,10 @@ function reportDecision(value) {
           }];
         })
       : [];
-  } else if (value.kind === "cleanup_discard") {
+  } else if (
+    value.kind === "cleanup_discard" ||
+    value.kind === "sylvan_return"
+  ) {
     decision.count = Number.isSafeInteger(value.count) ? value.count : 0;
     decision.options = Array.isArray(value.options)
       ? value.options.flatMap((option) => {
@@ -2097,7 +2186,10 @@ function validateActionForDecision(input, decision) {
     return { decisionId: decision.id, index: input.index };
   }
 
-  if (decision.kind === "cleanup_discard") {
+  if (
+    decision.kind === "cleanup_discard" ||
+    decision.kind === "sylvan_return"
+  ) {
     const count = decision.count;
     const options = Array.isArray(decision.options) ? decision.options : [];
     if (
@@ -2117,7 +2209,7 @@ function validateActionForDecision(input, decision) {
       throw new ApiError(
         422,
         "illegal_action",
-        `Cleanup requires exactly ${Number.isSafeInteger(count) ? count : 0} unique legal hand positions`,
+        `${decision.kind === "sylvan_return" ? "Sylvan Library" : "Cleanup"} requires exactly ${Number.isSafeInteger(count) ? count : 0} unique legal hand positions`,
       );
     }
     return { decisionId: decision.id, indices: input.indices };
@@ -2658,6 +2750,7 @@ export function webGameMetadata(deckCatalog = null, evolutionManager = null) {
       "blockers",
       "damage_order",
       "cleanup_discard",
+      "sylvan_return",
       "mulligan",
     ],
     defaults: DEFAULT_CONFIG,

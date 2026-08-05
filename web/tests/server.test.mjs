@@ -135,7 +135,7 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   assert.equal(response.status, 200);
   assert.deepEqual(
     body.decks.map(({ id }) => id),
-    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie", "br-midrange"],
+    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie", "br-midrange", "rg-berserk", "atog"],
   );
   assert.match(
     body.decks.find(({ id }) => id === "blue").deckList,
@@ -146,7 +146,7 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
   const spz = body.policies.find(({ id }) => id === "spz");
-  assert.match(spz?.description ?? "", /mirror self-play/);
+  assert.match(spz?.description ?? "", /13-deck era is pending/);
   assert.equal(body.defaults.bluffMode, false);
   assert.deepEqual(body.decisionKinds, [
     "priority",
@@ -154,6 +154,7 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
     "blockers",
     "damage_order",
     "cleanup_discard",
+    "sylvan_return",
     "mulligan",
   ]);
 });

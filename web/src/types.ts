@@ -430,7 +430,9 @@ export interface CleanupDiscardOption {
 }
 
 export interface CleanupDiscardDecision {
-  kind: "cleanup_discard";
+  // Sylvan Library's return-2-to-library decision reuses the exact
+  // cleanup-discard shape (count + hand-index options).
+  kind: "cleanup_discard" | "sylvan_return";
   decisionId: string | number;
   count: number;
   options: CleanupDiscardOption[];

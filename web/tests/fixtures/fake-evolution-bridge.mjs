@@ -49,6 +49,8 @@ if (args.includes("--evolve-json")) {
     ["robots", "Robots"],
     ["white-weenie", "White Weenie"],
     ["br-midrange", "BR Midrange"],
+    ["rg-berserk", "RG Berserk"],
+    ["atog", "Atog"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {
