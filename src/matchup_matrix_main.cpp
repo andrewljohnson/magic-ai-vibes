@@ -112,19 +112,15 @@ int main(int argc, char** argv) {
         }
     }
 
+    // Current metagame only: the real old-school decks (2026-08-05
+    // direction; retired synthetics live on in git history and old
+    // matrix JSONs). Evolved data/*.deck files still join below.
     std::vector<DeckEntry> decks = {
-        {"green", green_deck()},
-        {"red", red_deck()},
-        {"blue", blue_deck()},
-        {"white", white_control_deck()},
-        {"ru-aggro", ru_aggro_deck()},
-        {"robots", robots_deck()},
-        {"white-weenie", white_weenie_deck()},
-        {"br-midrange", br_midrange_deck()},
         {"rg-berserk", rg_berserk_deck()},
         {"atog", atog_deck()},
-        {"lotus-combo", lotus_combo_deck()},
-        {"burn", burn_deck()},
+        {"br-midrange", br_midrange_deck()},
+        {"robots", robots_deck()},
+        {"white-weenie", white_weenie_deck()},
         {"uwr", uwr_deck()},
     };
     // Persisted evolved decks join the matrix: data/*.deck holds forty
