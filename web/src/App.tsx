@@ -26,6 +26,7 @@ import {
   performBugReportCopy,
   type BugReportCopyState,
 } from "./bug-report-copy";
+import { cardArt } from "./card-art";
 import { ApiRequestError } from "./errors";
 import {
   blockerPairsFromKeys,
@@ -389,6 +390,7 @@ function CardFace({
   ].filter((value): value is string => Boolean(value));
   const title = publicDescription.join(" • ");
   const accessibleLabel = publicDescription.join(", ");
+  const art = cardArt(card.name);
   const zoomCard = useContext(CardZoomContext);
   const setHoverTip = useContext(CardHoverContext);
   const pressTimerRef = useRef<number | null>(null);
@@ -475,11 +477,16 @@ function CardFace({
         <ManaCostPips card={card} />
       </span>
       <span className="card-field">
+        {art && (
+          <span className="card-art" aria-hidden="true">
+            {art}
+          </span>
+        )}
         {card.flying ? (
           <span className="card-flying-cue" aria-hidden="true">
             FLYING
           </span>
-        ) : (
+        ) : art ? null : (
           <span className="card-glyph" aria-hidden="true">
             {card.type?.toLowerCase().includes("land") ? "◆" : "◇"}
           </span>
