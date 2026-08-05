@@ -49,6 +49,52 @@ std::array<std::vector<CardId>, 2> mirror_decks(std::size_t deck_index) {
     return {spz_decks()[deck_index], spz_decks()[deck_index]};
 }
 
+// Fixture decks: inline card lists (formerly the retired synthetic
+// metagame decks). Test scaffolding only; they are not part of the
+// six-deck metagame.
+std::vector<CardId> fixture_green_deck() {
+    std::vector<CardId> deck(16, CardId::Forest);
+    deck.insert(deck.end(), 4, CardId::LlanowarElves);
+    deck.insert(deck.end(), 6, CardId::GrizzlyBears);
+    deck.insert(deck.end(), 2, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 4, CardId::MossBeast);
+    deck.insert(deck.end(), 4, CardId::ForestColossus);
+    deck.insert(deck.end(), 4, CardId::GiantGrowth);
+    return deck;
+}
+
+std::vector<CardId> fixture_red_deck() {
+    std::vector<CardId> deck(15, CardId::Mountain);
+    deck.insert(deck.end(), 9, CardId::LightningBolt);
+    deck.insert(deck.end(), 7, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 4, CardId::GrayOgre);
+    deck.insert(deck.end(), 3, CardId::HillGiant);
+    deck.insert(deck.end(), 2, CardId::FireElemental);
+    return deck;
+}
+
+std::vector<CardId> fixture_blue_deck() {
+    std::vector<CardId> deck(15, CardId::Island);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::AncestralRecall);
+    deck.push_back(CardId::TimeWalk);
+    deck.push_back(CardId::Braingeyser);
+    deck.insert(deck.end(), 4, CardId::FlyingMen);
+    deck.insert(deck.end(), 4, CardId::ForceSpike);
+    deck.insert(deck.end(), 8, CardId::Counterspell);
+    deck.insert(deck.end(), 4, CardId::AirElemental);
+    return deck;
+}
+
+std::vector<CardId> fixture_lotus_combo_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 10, CardId::Disintegrate);
+    deck.insert(deck.end(), 10, CardId::Channel);
+    deck.insert(deck.end(), 20, CardId::BlackLotus);
+    return deck;
+}
+
 SPZ_TEST(feature_count_is_stable) {
     expect(spz_feature_count() > 0, "feature count positive");
 }
@@ -117,8 +163,9 @@ SPZ_TEST(reconstruction_supports_determinization) {
 }
 
 SPZ_TEST(features_and_rollout_policy_ignore_opponent_hidden_partition) {
+    // Mountain-holder vs Island/Counterspell-holder fixture lists.
     const std::array<std::vector<CardId>, 2> game_decks = {
-        spz_decks()[1], spz_decks()[2]};
+        fixture_red_deck(), fixture_blue_deck()};
     GameState first;
     first.active_player = 0;
     first.starting_player = 0;
@@ -334,7 +381,7 @@ SPZ_TEST(pass_dominance_prune_blocks_zero_effect_casts) {
     // A state with Braingeyser and four untapped Islands: the X=0 casts are
     // strictly dominated by Pass and must never be selected, regardless of
     // how an arbitrary value net happens to score them.
-    const auto deck = blue_deck();
+    const auto deck = fixture_blue_deck();
     GameState state;
     state.turn_number = 6;
     state.active_player = 0;
@@ -405,8 +452,8 @@ SPZ_TEST(champion_pumps_declared_blocker_in_response_window) {
     const auto net =
         std::make_shared<const SpzNet>(SpzNet::load(artifact));
 
-    const auto green = green_deck();
-    const auto red = red_deck();
+    const auto green = fixture_green_deck();
+    const auto red = fixture_red_deck();
     GameState state;
     state.turn_number = 7;
     state.active_player = 0;  // Red attacks; SPZ defends as player 1.
@@ -495,7 +542,7 @@ SPZ_TEST(channel_combo_kill_survives_prunes_and_rollout_finds_it) {
     // schema without the flag could not value the combo state. With both
     // fixed, casting Channel rolls out into a lethal Disintegrate and any
     // net must find the line.
-    const auto combo = lotus_combo_deck();
+    const auto combo = fixture_lotus_combo_deck();
     GameState state;
     state.turn_number = 5;
     state.active_player = 0;
@@ -789,8 +836,8 @@ SPZ_TEST(stack_response_with_real_upside_survives_window_end_prune) {
     // outcome - Giant Growth saves the Bears from the Bolt. The
     // aligned comparison sees different creatures at window's end and
     // must retain the Growth; some nets must actually choose it.
-    const auto green = green_deck();
-    const auto red = red_deck();
+    const auto green = fixture_green_deck();
+    const auto red = fixture_red_deck();
     GameState state;
     state.turn_number = 4;
     state.active_player = 0;  // the OPPONENT's turn
@@ -866,8 +913,8 @@ SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
     // of its own cast Giant Growth on the opponent's summoning-sick Orcs.
     // Buffing an enemy creature has no upside versus passing and must never
     // be selected, whatever an arbitrary value net thinks of it.
-    const auto green = green_deck();
-    const auto red = red_deck();
+    const auto green = fixture_green_deck();
+    const auto red = fixture_red_deck();
     GameState state;
     state.turn_number = 4;
     state.active_player = 1;  // SPZ's own turn.

@@ -100,6 +100,71 @@ void remove_fixture_card(std::vector<old_school::CardId>& cards,
     cards.erase(position);
 }
 
+// Fixture decks: inline card lists (formerly the retired synthetic
+// metagame decks). Test scaffolding only; they are not part of the
+// six-deck metagame.
+std::vector<old_school::CardId> fixture_green_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(16, CardId::Forest);
+    deck.insert(deck.end(), 4, CardId::LlanowarElves);
+    deck.insert(deck.end(), 6, CardId::GrizzlyBears);
+    deck.insert(deck.end(), 2, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 4, CardId::MossBeast);
+    deck.insert(deck.end(), 4, CardId::ForestColossus);
+    deck.insert(deck.end(), 4, CardId::GiantGrowth);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_red_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(15, CardId::Mountain);
+    deck.insert(deck.end(), 9, CardId::LightningBolt);
+    deck.insert(deck.end(), 7, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 4, CardId::GrayOgre);
+    deck.insert(deck.end(), 3, CardId::HillGiant);
+    deck.insert(deck.end(), 2, CardId::FireElemental);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_blue_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(15, CardId::Island);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::AncestralRecall);
+    deck.push_back(CardId::TimeWalk);
+    deck.push_back(CardId::Braingeyser);
+    deck.insert(deck.end(), 4, CardId::FlyingMen);
+    deck.insert(deck.end(), 4, CardId::ForceSpike);
+    deck.insert(deck.end(), 8, CardId::Counterspell);
+    deck.insert(deck.end(), 4, CardId::AirElemental);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_white_control_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(22, CardId::Plains);
+    deck.insert(deck.end(), 3, CardId::Millstone);
+    deck.insert(deck.end(), 15, CardId::Moat);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_lotus_combo_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 10, CardId::Disintegrate);
+    deck.insert(deck.end(), 10, CardId::Channel);
+    deck.insert(deck.end(), 20, CardId::BlackLotus);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_burn_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(12, CardId::Mountain);
+    deck.insert(deck.end(), 18, CardId::LightningBolt);
+    return deck;
+}
+
 struct DeterminizationFixture {
     old_school::GameState state;
     std::array<std::vector<old_school::CardId>, 2> decks;
@@ -109,8 +174,8 @@ DeterminizationFixture determinization_fixture() {
     DeterminizationFixture fixture{
         .state = {},
         .decks = {
-            old_school::white_control_deck(),
-            old_school::blue_deck(),
+            fixture_white_control_deck(),
+            fixture_blue_deck(),
         },
     };
     auto& state = fixture.state;
@@ -267,9 +332,9 @@ DeterminizationFixture attack_evaluation_fixture(
     DeterminizationFixture fixture{
         .state = {},
         .decks = {
-            old_school::green_deck(),
-            red_blocker ? old_school::red_deck()
-                        : old_school::green_deck(),
+            fixture_green_deck(),
+            red_blocker ? fixture_red_deck()
+                        : fixture_green_deck(),
         },
     };
     auto& state = fixture.state;
@@ -531,55 +596,6 @@ TEST(old_school_card_definitions_are_complete) {
 }
 
 TEST(starting_decks_have_the_requested_cards) {
-    const auto green_deck = old_school::green_deck();
-    CHECK(green_deck.size() == 40);
-    CHECK(count_card(green_deck, old_school::CardId::Forest) == 16);
-    CHECK(count_card(green_deck, old_school::CardId::LlanowarElves) == 4);
-    CHECK(count_card(green_deck, old_school::CardId::GrizzlyBears) == 6);
-    CHECK(count_card(green_deck, old_school::CardId::IronrootTreefolk) == 2);
-    CHECK(count_card(green_deck, old_school::CardId::MossBeast) == 4);
-    CHECK(count_card(green_deck, old_school::CardId::ForestColossus) == 4);
-    CHECK(count_card(green_deck, old_school::CardId::GiantGrowth) == 4);
-
-    const auto red_deck = old_school::red_deck();
-    CHECK(red_deck.size() == 40);
-    CHECK(count_card(red_deck, old_school::CardId::Mountain) == 15);
-    CHECK(count_card(red_deck, old_school::CardId::LightningBolt) == 9);
-    CHECK(count_card(red_deck, old_school::CardId::IronclawOrcs) == 7);
-    CHECK(count_card(red_deck, old_school::CardId::GrayOgre) == 4);
-    CHECK(count_card(red_deck, old_school::CardId::HillGiant) == 3);
-    CHECK(count_card(red_deck, old_school::CardId::FireElemental) == 2);
-
-    const auto blue_deck = old_school::blue_deck();
-    CHECK(blue_deck.size() == 40);
-    CHECK(count_card(blue_deck, old_school::CardId::Island) == 15);
-    CHECK(count_card(blue_deck, old_school::CardId::MoxSapphire) == 1);
-    CHECK(count_card(blue_deck, old_school::CardId::SolRing) == 1);
-    CHECK(count_card(blue_deck, old_school::CardId::AncestralRecall) == 1);
-    CHECK(count_card(blue_deck, old_school::CardId::TimeWalk) == 1);
-    CHECK(count_card(blue_deck, old_school::CardId::Braingeyser) == 1);
-    CHECK(count_card(blue_deck, old_school::CardId::FlyingMen) == 4);
-    CHECK(count_card(blue_deck, old_school::CardId::ForceSpike) == 4);
-    CHECK(count_card(blue_deck, old_school::CardId::Counterspell) == 8);
-    CHECK(count_card(blue_deck, old_school::CardId::AirElemental) == 4);
-
-    const auto white_deck = old_school::white_control_deck();
-    CHECK(white_deck.size() == 40);
-    CHECK(count_card(white_deck, old_school::CardId::Plains) == 22);
-    CHECK(count_card(white_deck, old_school::CardId::Millstone) == 3);
-    CHECK(count_card(white_deck, old_school::CardId::Moat) == 15);
-
-    const auto ru_deck = old_school::ru_aggro_deck();
-    CHECK(ru_deck.size() == 40);
-    CHECK(count_card(ru_deck, old_school::CardId::Mountain) == 13);
-    CHECK(count_card(ru_deck, old_school::CardId::Island) == 4);
-    CHECK(count_card(ru_deck, old_school::CardId::FlyingMen) == 3);
-    CHECK(count_card(ru_deck, old_school::CardId::IronclawOrcs) == 5);
-    CHECK(count_card(ru_deck, old_school::CardId::GrayOgre) == 2);
-    CHECK(count_card(ru_deck, old_school::CardId::HillGiant) == 8);
-    CHECK(count_card(ru_deck, old_school::CardId::LightningBolt) == 3);
-    CHECK(count_card(ru_deck, old_school::CardId::Disintegrate) == 2);
-
     const auto weenie = old_school::white_weenie_deck();
     CHECK(weenie.size() == 60);
     CHECK(count_card(weenie, old_school::CardId::BenalishHero) == 4);
@@ -1033,8 +1049,8 @@ TEST(white_lock_plan_diagnostic_fixture_is_valid_and_locked) {
             old_school::Target::player_target(1))));
 
     const std::array<std::vector<old_school::CardId>, 2> decks = {
-        old_school::white_control_deck(),
-        old_school::red_deck(),
+        fixture_white_control_deck(),
+        fixture_red_deck(),
     };
     const auto sampled =
         old_school::sample_determinization(state, decks, 0, 0x10C4ULL);
@@ -2817,8 +2833,8 @@ TEST(lotus_combo_deck_threatens_lethal_disintegrate) {
         {.id = 1, .card = old_school::CardId::BlackLotus});
     state.players[0].channel_active = true;
     state.players[0].life = 20;
-    state.players[0].library = old_school::lotus_combo_deck();
-    state.players[1].library = old_school::burn_deck();
+    state.players[0].library = fixture_lotus_combo_deck();
+    state.players[1].library = fixture_burn_deck();
     const auto actions =
         old_school::legal_priority_actions(state, 0, true);
     int best_x = 0;
@@ -2846,7 +2862,7 @@ TEST(handcrafted_sequences_the_channel_kill_and_takes_exact_lethal) {
     state.active_player = 0;
     state.starting_player = 0;
     state.next_permanent_id = 10;
-    auto pool = old_school::lotus_combo_deck();
+    auto pool = fixture_lotus_combo_deck();
     const auto take = [&pool](old_school::CardId card) {
         const auto found = std::find(pool.begin(), pool.end(), card);
         CHECK(found != pool.end());
@@ -3033,7 +3049,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 13,
+        .population = 6,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3046,28 +3062,21 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 13);
-    CHECK(first.best.total.games == 52);
+    CHECK(first.best.by_opponent.size() == 6);
+    CHECK(first.best.total.games == 24);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          52);
+          24);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
     std::vector<old_school::CardId> metagame_pool;
     for (auto deck : {
-             old_school::green_deck(),
-             old_school::red_deck(),
-             old_school::blue_deck(),
-             old_school::white_control_deck(),
-             old_school::ru_aggro_deck(),
-             old_school::robots_deck(),
-             old_school::white_weenie_deck(),
-             old_school::br_midrange_deck(),
              old_school::rg_berserk_deck(),
              old_school::atog_deck(),
-             old_school::lotus_combo_deck(),
-             old_school::burn_deck(),
+             old_school::br_midrange_deck(),
+             old_school::robots_deck(),
+             old_school::white_weenie_deck(),
              old_school::uwr_deck(),
          }) {
         metagame_pool.insert(
@@ -3124,7 +3133,7 @@ old_school::GameState pass_dominance_braingeyser_state() {
         old_school::CardId::Mountain,
     };
 
-    state.players[0].library = old_school::blue_deck();
+    state.players[0].library = fixture_blue_deck();
     remove_fixture_card(
         state.players[0].library,
         old_school::CardId::Braingeyser);
@@ -3137,7 +3146,7 @@ old_school::GameState pass_dominance_braingeyser_state() {
     remove_fixture_card(
         state.players[0].library,
         old_school::CardId::Island);
-    state.players[1].library = old_school::red_deck();
+    state.players[1].library = fixture_red_deck();
     remove_fixture_card(
         state.players[1].library,
         old_school::CardId::Mountain);
@@ -3869,8 +3878,8 @@ TEST(terminal_interactive_prompts_for_cleanup_discard) {
     const auto result = old_school::run_interactive_match(
         input, output, 0xC1E47E42ULL,
         {
-            .human_deck = old_school::DeckId::Blue,
-            .opponent_deck = old_school::DeckId::Green,
+            .human_deck = old_school::DeckId::Robots,
+            .opponent_deck = old_school::DeckId::RGBerserk,
         });
     const std::string transcript = output.str();
     CHECK(result.abandoned || result.game.has_value());
@@ -3898,8 +3907,8 @@ TEST(all_bot_kinds_complete_cleanup_deterministically) {
         }
         const auto run = [&config] {
             old_school::Game game(
-                old_school::blue_deck(),
-                old_school::blue_deck(),
+                fixture_blue_deck(),
+                fixture_blue_deck(),
                 0xB07C1EA4ULL, config);
             const auto result = game.run();
             return std::pair{
@@ -4511,7 +4520,7 @@ TEST(uwr_deck_is_sixty_cards_and_determinization_conserves_new_zones) {
     red.creatures = {creature(8, old_school::CardId::GrayOgre)};
     red.exile = {old_school::CardId::FireElemental};
     red.graveyard = {old_school::CardId::Mountain};
-    auto red_library = old_school::red_deck();
+    auto red_library = fixture_red_deck();
     for (const auto card : std::vector<old_school::CardId>{
              old_school::CardId::LightningBolt,
              old_school::CardId::Mountain, old_school::CardId::GrayOgre,
@@ -4527,7 +4536,7 @@ TEST(uwr_deck_is_sixty_cards_and_determinization_conserves_new_zones) {
     }
 
     const std::array<std::vector<old_school::CardId>, 2> decks = {
-        old_school::uwr_deck(), old_school::red_deck()};
+        old_school::uwr_deck(), fixture_red_deck()};
     const auto sampled =
         old_school::sample_determinization(state, decks, 0, 0xBEEF);
     CHECK(sampled.players[0].hand == state.players[0].hand);
@@ -4564,7 +4573,7 @@ TEST(default_mulligan_heuristic_rejects_unplayable_hands) {
 
 TEST(handcrafted_mulligan_demands_three_lands_or_digs_for_the_combo) {
     using old_school::CardId;
-    const auto red = old_school::red_deck();
+    const auto red = fixture_red_deck();
     // Two lands: mulligan. Three lands: keep.
     CHECK(old_school::handcrafted_mulligan_choice(
         {CardId::Mountain, CardId::Mountain, CardId::LightningBolt,
@@ -4591,7 +4600,7 @@ TEST(handcrafted_mulligan_demands_three_lands_or_digs_for_the_combo) {
          CardId::LightningBolt, CardId::LightningBolt},
         red));
 
-    const auto lotus = old_school::lotus_combo_deck();
+    const auto lotus = fixture_lotus_combo_deck();
     // Three lands but no combo: the lotus deck still mulligans.
     CHECK(old_school::handcrafted_mulligan_choice(
         {CardId::Mountain, CardId::Mountain, CardId::Mountain,
@@ -6301,7 +6310,7 @@ TEST(taiga_pays_red_or_green_and_new_decks_have_the_right_sizes) {
 
     CHECK(rg_berserk_deck().size() == 60);
     CHECK(atog_deck().size() == 61);
-    CHECK(kDeckCount == 13);
+    CHECK(kDeckCount == 6);
     CHECK(deck_name(DeckId::RGBerserk) == "RG Berserk");
     CHECK(deck_name(DeckId::Atog) == "Atog");
     // Every card of both decks resolves a definition (no enum gap).

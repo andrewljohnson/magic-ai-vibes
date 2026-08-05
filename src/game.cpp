@@ -2279,41 +2279,6 @@ const CardDefinition& card_definition(CardId card) {
     return kCardDefinitions[index];
 }
 
-std::vector<CardId> green_deck() {
-    std::vector<CardId> deck(16, CardId::Forest);
-    deck.insert(deck.end(), 4, CardId::LlanowarElves);
-    deck.insert(deck.end(), 6, CardId::GrizzlyBears);
-    deck.insert(deck.end(), 2, CardId::IronrootTreefolk);
-    deck.insert(deck.end(), 4, CardId::MossBeast);
-    deck.insert(deck.end(), 4, CardId::ForestColossus);
-    deck.insert(deck.end(), 4, CardId::GiantGrowth);
-    return deck;
-}
-
-std::vector<CardId> red_deck() {
-    std::vector<CardId> deck(15, CardId::Mountain);
-    deck.insert(deck.end(), 9, CardId::LightningBolt);
-    deck.insert(deck.end(), 7, CardId::IronclawOrcs);
-    deck.insert(deck.end(), 4, CardId::GrayOgre);
-    deck.insert(deck.end(), 3, CardId::HillGiant);
-    deck.insert(deck.end(), 2, CardId::FireElemental);
-    return deck;
-}
-
-std::vector<CardId> lotus_combo_deck() {
-    std::vector<CardId> deck;
-    deck.insert(deck.end(), 10, CardId::Disintegrate);
-    deck.insert(deck.end(), 10, CardId::Channel);
-    deck.insert(deck.end(), 20, CardId::BlackLotus);
-    return deck;
-}
-
-std::vector<CardId> burn_deck() {
-    std::vector<CardId> deck(12, CardId::Mountain);
-    deck.insert(deck.end(), 18, CardId::LightningBolt);
-    return deck;
-}
-
 std::vector<CardId> uwr_deck() {
     std::vector<CardId> deck;
     deck.insert(deck.end(), 4, CardId::SavannahLions);
@@ -2339,39 +2304,6 @@ std::vector<CardId> uwr_deck() {
     deck.push_back(CardId::StripMine);
     deck.insert(deck.end(), 4, CardId::Tundra);
     deck.insert(deck.end(), 4, CardId::VolcanicIsland);
-    return deck;
-}
-
-std::vector<CardId> blue_deck() {
-    std::vector<CardId> deck(15, CardId::Island);
-    deck.push_back(CardId::MoxSapphire);
-    deck.push_back(CardId::SolRing);
-    deck.push_back(CardId::AncestralRecall);
-    deck.push_back(CardId::TimeWalk);
-    deck.push_back(CardId::Braingeyser);
-    deck.insert(deck.end(), 4, CardId::FlyingMen);
-    deck.insert(deck.end(), 4, CardId::ForceSpike);
-    deck.insert(deck.end(), 8, CardId::Counterspell);
-    deck.insert(deck.end(), 4, CardId::AirElemental);
-    return deck;
-}
-
-std::vector<CardId> white_control_deck() {
-    std::vector<CardId> deck(22, CardId::Plains);
-    deck.insert(deck.end(), 3, CardId::Millstone);
-    deck.insert(deck.end(), 15, CardId::Moat);
-    return deck;
-}
-
-std::vector<CardId> ru_aggro_deck() {
-    std::vector<CardId> deck(13, CardId::Mountain);
-    deck.insert(deck.end(), 4, CardId::Island);
-    deck.insert(deck.end(), 3, CardId::FlyingMen);
-    deck.insert(deck.end(), 5, CardId::IronclawOrcs);
-    deck.insert(deck.end(), 2, CardId::GrayOgre);
-    deck.insert(deck.end(), 8, CardId::HillGiant);
-    deck.insert(deck.end(), 3, CardId::LightningBolt);
-    deck.insert(deck.end(), 2, CardId::Disintegrate);
     return deck;
 }
 
@@ -8707,32 +8639,18 @@ SimulationSummary run_matchup(const std::vector<CardId>& first_deck,
 
 std::vector<CardId> deck_cards(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return green_deck();
-    case DeckId::Red:
-        return red_deck();
-    case DeckId::Blue:
-        return blue_deck();
-    case DeckId::White:
-        return white_control_deck();
-    case DeckId::RUAggro:
-        return ru_aggro_deck();
-    case DeckId::LotusCombo:
-        return lotus_combo_deck();
-    case DeckId::Burn:
-        return burn_deck();
-    case DeckId::UWR:
-        return uwr_deck();
-    case DeckId::Robots:
-        return robots_deck();
-    case DeckId::WhiteWeenie:
-        return white_weenie_deck();
-    case DeckId::BRMidrange:
-        return br_midrange_deck();
     case DeckId::RGBerserk:
         return rg_berserk_deck();
     case DeckId::Atog:
         return atog_deck();
+    case DeckId::BRMidrange:
+        return br_midrange_deck();
+    case DeckId::Robots:
+        return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -8741,66 +8659,30 @@ std::vector<CardId> deck_cards(DeckId deck) {
 
 SimulationSummary run_simulation(std::size_t games, std::uint64_t seed,
                                  GameConfig game_config) {
-    return run_matchup(green_deck(), red_deck(), games, seed,
+    return run_matchup(rg_berserk_deck(), atog_deck(), games, seed,
                        game_config);
 }
 
 std::string_view deck_name(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return "Green Growth";
-    case DeckId::Red:
-        return "Creatures & Bolts";
-    case DeckId::Blue:
-        return "Counter Flyer";
-    case DeckId::White:
-        return "Moat Mill";
-    case DeckId::RUAggro:
-        return "RU Aggro";
-    case DeckId::LotusCombo:
-        return "Lotus Combo";
-    case DeckId::Burn:
-        return "Burn";
-    case DeckId::UWR:
-        return "Lion-dib-bolt";
-    case DeckId::Robots:
-        return "Robots";
-    case DeckId::WhiteWeenie:
-        return "White Weenie";
-    case DeckId::BRMidrange:
-        return "BR Midrange";
     case DeckId::RGBerserk:
         return "RG Berserk";
     case DeckId::Atog:
         return "Atog";
+    case DeckId::BRMidrange:
+        return "BR Midrange";
+    case DeckId::Robots:
+        return "Robots";
+    case DeckId::WhiteWeenie:
+        return "White Weenie";
+    case DeckId::UWR:
+        return "Lion-dib-bolt";
     }
     return "Unknown";
 }
 
 std::string_view deck_list(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return "16 Forest / 4 Llanowar Elves / 6 Grizzly Bears / "
-               "2 Ironroot Treefolk / 4 Moss Beast / "
-               "4 Forest Colossus / 4 Giant Growth";
-    case DeckId::Red:
-        return "15 Mountain / 9 Lightning Bolt / 7 Ironclaw Orcs / "
-               "4 Gray Ogre / 3 Hill Giant / 2 Fire Elemental";
-    case DeckId::Blue:
-        return "15 Island / 1 Mox Sapphire / 1 Sol Ring / "
-               "1 Ancestral Recall / 1 Time Walk / 1 Braingeyser / "
-               "4 Flying Men / 4 Force Spike / 8 Counterspell / "
-               "4 Air Elemental";
-    case DeckId::White:
-        return "22 Plains / 3 Millstone / 15 Moat";
-    case DeckId::RUAggro:
-        return "13 Mountain / 4 Island / 3 Flying Men / "
-               "5 Ironclaw Orcs / 2 Gray Ogre / 8 Hill Giant / "
-               "3 Lightning Bolt / 2 Disintegrate";
-    case DeckId::LotusCombo:
-        return "20 Black Lotus / 10 Channel / 10 Disintegrate";
-    case DeckId::Burn:
-        return "12 Mountain / 18 Lightning Bolt";
     case DeckId::UWR:
         return "4 Savannah Lions / 4 Serendib Efreet / 2 Serra Angel / "
                "4 Black Vise / Mox Pearl / Mox Ruby / Mox Sapphire / "
@@ -9072,19 +8954,12 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
     game_config.bots = {config.pilot, config.pilot};
 
     const std::array<std::vector<CardId>, kDeckCount> metagame = {
-        deck_cards(DeckId::Green),
-        deck_cards(DeckId::Red),
-        deck_cards(DeckId::Blue),
-        deck_cards(DeckId::White),
-        deck_cards(DeckId::RUAggro),
-        deck_cards(DeckId::LotusCombo),
-        deck_cards(DeckId::Burn),
-        deck_cards(DeckId::UWR),
-        deck_cards(DeckId::Robots),
-        deck_cards(DeckId::WhiteWeenie),
-        deck_cards(DeckId::BRMidrange),
         deck_cards(DeckId::RGBerserk),
         deck_cards(DeckId::Atog),
+        deck_cards(DeckId::BRMidrange),
+        deck_cards(DeckId::Robots),
+        deck_cards(DeckId::WhiteWeenie),
+        deck_cards(DeckId::UWR),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

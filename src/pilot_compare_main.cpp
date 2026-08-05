@@ -130,7 +130,7 @@ struct SeatTracker {
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::size_t deck_index = 4;  // RU Aggro
+    std::size_t deck_index = 0;  // RG Berserk
     std::size_t games_per_opponent = 12;
     std::uint64_t seed = 20260798;
     std::size_t narrations = 3;

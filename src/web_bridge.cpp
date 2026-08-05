@@ -29,32 +29,18 @@ namespace {
 
 std::vector<CardId> deck_cards(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return green_deck();
-    case DeckId::Red:
-        return red_deck();
-    case DeckId::Blue:
-        return blue_deck();
-    case DeckId::White:
-        return white_control_deck();
-    case DeckId::RUAggro:
-        return ru_aggro_deck();
-    case DeckId::LotusCombo:
-        return lotus_combo_deck();
-    case DeckId::Burn:
-        return burn_deck();
-    case DeckId::UWR:
-        return uwr_deck();
-    case DeckId::Robots:
-        return robots_deck();
-    case DeckId::WhiteWeenie:
-        return white_weenie_deck();
-    case DeckId::BRMidrange:
-        return br_midrange_deck();
     case DeckId::RGBerserk:
         return rg_berserk_deck();
     case DeckId::Atog:
         return atog_deck();
+    case DeckId::BRMidrange:
+        return br_midrange_deck();
+    case DeckId::Robots:
+        return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -89,32 +75,18 @@ std::vector<CardId> configured_deck_cards(
 
 std::string_view deck_id_token(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return "green";
-    case DeckId::Red:
-        return "red";
-    case DeckId::Blue:
-        return "blue";
-    case DeckId::White:
-        return "white";
-    case DeckId::RUAggro:
-        return "ru-aggro";
-    case DeckId::LotusCombo:
-        return "lotus-combo";
-    case DeckId::Burn:
-        return "burn";
-    case DeckId::UWR:
-        return "uwr";
-    case DeckId::Robots:
-        return "robots";
-    case DeckId::WhiteWeenie:
-        return "white-weenie";
-    case DeckId::BRMidrange:
-        return "br-midrange";
     case DeckId::RGBerserk:
         return "rg-berserk";
     case DeckId::Atog:
         return "atog";
+    case DeckId::BRMidrange:
+        return "br-midrange";
+    case DeckId::Robots:
+        return "robots";
+    case DeckId::WhiteWeenie:
+        return "white-weenie";
+    case DeckId::UWR:
+        return "uwr";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -1499,41 +1471,20 @@ class JsonController {
 } // namespace
 
 DeckId parse_deck_id(std::string_view value) {
-    if (value == "green") {
-        return DeckId::Green;
-    }
-    if (value == "red") {
-        return DeckId::Red;
-    }
-    if (value == "blue") {
-        return DeckId::Blue;
-    }
-    if (value == "white") {
-        return DeckId::White;
-    }
-    if (value == "ru-aggro" || value == "ru") {
-        return DeckId::RUAggro;
-    }
-    if (value == "robots") {
-        return DeckId::Robots;
-    }
-    if (value == "white-weenie" || value == "ww") {
-        return DeckId::WhiteWeenie;
-    }
-    if (value == "br-midrange" || value == "br") {
-        return DeckId::BRMidrange;
-    }
     if (value == "rg-berserk" || value == "berserk") {
         return DeckId::RGBerserk;
     }
     if (value == "atog") {
         return DeckId::Atog;
     }
-    if (value == "lotus-combo" || value == "lotus") {
-        return DeckId::LotusCombo;
+    if (value == "br-midrange" || value == "br") {
+        return DeckId::BRMidrange;
     }
-    if (value == "burn") {
-        return DeckId::Burn;
+    if (value == "robots") {
+        return DeckId::Robots;
+    }
+    if (value == "white-weenie" || value == "ww") {
+        return DeckId::WhiteWeenie;
     }
     if (value == "uwr" || value == "uwr-aggro") {
         return DeckId::UWR;

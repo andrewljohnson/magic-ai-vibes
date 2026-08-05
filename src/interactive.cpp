@@ -1493,32 +1493,18 @@ class TerminalSession {
 
 std::vector<CardId> interactive_deck(DeckId deck) {
     switch (deck) {
-    case DeckId::Green:
-        return green_deck();
-    case DeckId::Red:
-        return red_deck();
-    case DeckId::Blue:
-        return blue_deck();
-    case DeckId::White:
-        return white_control_deck();
-    case DeckId::RUAggro:
-        return ru_aggro_deck();
-    case DeckId::LotusCombo:
-        return lotus_combo_deck();
-    case DeckId::Burn:
-        return burn_deck();
-    case DeckId::UWR:
-        return uwr_deck();
-    case DeckId::Robots:
-        return robots_deck();
-    case DeckId::WhiteWeenie:
-        return white_weenie_deck();
-    case DeckId::BRMidrange:
-        return br_midrange_deck();
     case DeckId::RGBerserk:
         return rg_berserk_deck();
     case DeckId::Atog:
         return atog_deck();
+    case DeckId::BRMidrange:
+        return br_midrange_deck();
+    case DeckId::Robots:
+        return robots_deck();
+    case DeckId::WhiteWeenie:
+        return white_weenie_deck();
+    case DeckId::UWR:
+        return uwr_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

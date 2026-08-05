@@ -53,6 +53,55 @@ void expect(bool condition, std::string_view message) {
     }
 }
 
+// Fixture decks: 40-card inline lists (formerly the retired synthetic
+// metagame decks), used as custom-deck session inputs. Test scaffolding
+// only; they are not part of the six-deck metagame.
+std::vector<old_school::CardId> fixture_green_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(16, CardId::Forest);
+    deck.insert(deck.end(), 4, CardId::LlanowarElves);
+    deck.insert(deck.end(), 6, CardId::GrizzlyBears);
+    deck.insert(deck.end(), 2, CardId::IronrootTreefolk);
+    deck.insert(deck.end(), 4, CardId::MossBeast);
+    deck.insert(deck.end(), 4, CardId::ForestColossus);
+    deck.insert(deck.end(), 4, CardId::GiantGrowth);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_red_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(15, CardId::Mountain);
+    deck.insert(deck.end(), 9, CardId::LightningBolt);
+    deck.insert(deck.end(), 7, CardId::IronclawOrcs);
+    deck.insert(deck.end(), 4, CardId::GrayOgre);
+    deck.insert(deck.end(), 3, CardId::HillGiant);
+    deck.insert(deck.end(), 2, CardId::FireElemental);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_blue_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(15, CardId::Island);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::AncestralRecall);
+    deck.push_back(CardId::TimeWalk);
+    deck.push_back(CardId::Braingeyser);
+    deck.insert(deck.end(), 4, CardId::FlyingMen);
+    deck.insert(deck.end(), 4, CardId::ForceSpike);
+    deck.insert(deck.end(), 8, CardId::Counterspell);
+    deck.insert(deck.end(), 4, CardId::AirElemental);
+    return deck;
+}
+
+std::vector<old_school::CardId> fixture_white_control_deck() {
+    using old_school::CardId;
+    std::vector<CardId> deck(22, CardId::Plains);
+    deck.insert(deck.end(), 3, CardId::Millstone);
+    deck.insert(deck.end(), 15, CardId::Moat);
+    return deck;
+}
+
 std::string indexed_responses(std::size_t count,
                               std::size_t priority_index) {
     std::ostringstream responses;
@@ -87,8 +136,8 @@ std::string responses_with_cleanup_value(
 
 old_school::web::BridgeConfig fast_config() {
     return {
-        .human_deck = old_school::DeckId::RUAggro,
-        .opponent_deck = old_school::DeckId::Red,
+        .human_deck = old_school::DeckId::RGBerserk,
+        .opponent_deck = old_school::DeckId::BRMidrange,
         .opponent_bot = old_school::BotKind::Handcrafted,
         .game_seed = 42,
         .monte_carlo_rollouts = 1,
@@ -116,10 +165,10 @@ void test_names_parse_strictly() {
     using old_school::web::parse_evolution_pilot;
     using old_school::web::parse_opponent_bot;
 
-    expect(parse_deck_id("green") == DeckId::Green,
-           "green deck did not parse");
-    expect(parse_deck_id("ru-aggro") == DeckId::RUAggro,
-           "RU Aggro deck did not parse");
+    expect(parse_deck_id("rg-berserk") == DeckId::RGBerserk,
+           "rg-berserk deck did not parse");
+    expect(parse_deck_id("white-weenie") == DeckId::WhiteWeenie,
+           "white-weenie deck did not parse");
     expect(parse_opponent_bot("random") == BotKind::Random,
            "random policy did not parse");
     expect(parse_opponent_bot("monte-carlo") ==
@@ -176,7 +225,7 @@ void test_names_parse_strictly() {
 }
 
 void test_exact_custom_deck_transport_is_strict() {
-    const auto deck = old_school::blue_deck();
+    const auto deck = fixture_blue_deck();
     expect(
         old_school::web::parse_exact_deck_cards(
             card_id_csv(deck)) == deck,
@@ -261,8 +310,9 @@ void test_debug_reveal_is_explicit() {
 
 old_school::web::BridgeConfig cleanup_config() {
     auto config = fast_config();
-    config.human_deck = old_school::DeckId::Blue;
-    config.opponent_deck = old_school::DeckId::Green;
+    // The draw-heavy blue fixture list overfills the human hand.
+    config.human_deck_cards = fixture_blue_deck();
+    config.opponent_deck_cards = fixture_green_deck();
     config.opponent_bot = old_school::BotKind::Random;
     return config;
 }
@@ -280,19 +330,22 @@ std::string complete_transcript(
 }
 
 void test_custom_decks_are_exact_session_inputs() {
-    auto named = fast_config();
-    named.human_deck = old_school::DeckId::Green;
-    named.opponent_deck = old_school::DeckId::Red;
+    // Two sessions with identical custom vectors but different named
+    // fallbacks: equal transcripts prove the custom vectors, not the
+    // named decks, are the exact session decks.
+    auto custom = fast_config();
+    custom.human_deck = old_school::DeckId::RGBerserk;
+    custom.opponent_deck = old_school::DeckId::UWR;
+    custom.human_deck_cards = fixture_green_deck();
+    custom.opponent_deck_cards = fixture_red_deck();
 
-    auto custom = named;
-    custom.human_deck = old_school::DeckId::RUAggro;
-    custom.opponent_deck = old_school::DeckId::White;
-    custom.human_deck_cards = old_school::green_deck();
-    custom.opponent_deck_cards = old_school::red_deck();
+    auto refallbacked = custom;
+    refallbacked.human_deck = old_school::DeckId::WhiteWeenie;
+    refallbacked.opponent_deck = old_school::DeckId::Robots;
 
     expect(
         complete_transcript(custom) ==
-            complete_transcript(named),
+            complete_transcript(refallbacked),
         "custom vectors were not the exact session decks");
 }
 
@@ -394,8 +447,8 @@ void test_evolution_json_is_complete_and_deterministic() {
             std::string::npos,
         "evolution JSON omitted aggregate fitness");
     expect(
-        json.find("\"deck\":\"ru-aggro\","
-                  "\"name\":\"RU Aggro\"") !=
+        json.find("\"deck\":\"white-weenie\","
+                  "\"name\":\"White Weenie\"") !=
             std::string::npos,
         "evolution JSON omitted a metagame opponent");
     expect(
@@ -479,8 +532,10 @@ void test_bluff_mode_emits_only_otherwise_forced_passes() {
 
 void test_legal_millstone_activation_prevents_auto_pass() {
     auto config = fast_config();
-    config.human_deck = old_school::DeckId::White;
-    config.opponent_deck = old_school::DeckId::Green;
+    // Millstone lives in the pool but no metagame deck; the fixture
+    // list keeps the activation coverage.
+    config.human_deck_cards = fixture_white_control_deck();
+    config.opponent_deck_cards = fixture_green_deck();
     config.opponent_bot = old_school::BotKind::Random;
     expect(!config.bluff_mode,
            "Millstone auto-pass fixture unexpectedly enabled Bluff");

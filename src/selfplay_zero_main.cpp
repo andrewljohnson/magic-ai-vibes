@@ -83,10 +83,8 @@ struct Arguments {
 
 std::vector<std::size_t> parse_deck_list(const std::string& value) {
     static constexpr std::array<std::string_view, kSpzDeckCount> kIds = {
-        "green",  "red",    "blue",         "white",
-        "ru-aggro", "lotus-combo", "burn", "uwr",
-        "robots", "white-weenie", "br-midrange",
-        "rg-berserk", "atog",
+        "rg-berserk", "atog", "br-midrange",
+        "robots", "white-weenie", "uwr",
     };
     std::vector<std::size_t> result;
     std::stringstream stream(value);

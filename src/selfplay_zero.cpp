@@ -324,20 +324,16 @@ std::vector<float> spz_features_colors(
 
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
-        green_deck(), red_deck(), blue_deck(), white_control_deck(),
-        ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
-        robots_deck(), white_weenie_deck(), br_midrange_deck(),
-        rg_berserk_deck(), atog_deck(),
+        rg_berserk_deck(), atog_deck(),   br_midrange_deck(),
+        robots_deck(),     white_weenie_deck(), uwr_deck(),
     };
     return decks;
 }
 
 std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
-        "Green Growth", "Creatures & Bolts", "Counter Flyer",
-        "Moat Mill", "RU Aggro", "Lotus Combo", "Burn",
-        "Lion-dib-bolt", "Robots", "White Weenie", "BR Midrange",
-        "RG Berserk", "Atog",
+        "RG Berserk", "Atog", "BR Midrange", "Robots",
+        "White Weenie", "Lion-dib-bolt",
     };
     return names.at(deck_index);
 }
@@ -5244,9 +5240,41 @@ bool run_behavior_fixture(const BehaviorFixture& fixture,
 SpzBehaviorRates run_behavior_probes(
     const std::shared_ptr<const SpzNet>& net, std::uint64_t seed) {
     SpzBehaviorRates rates;
-    const auto red = red_deck();
-    const auto green = green_deck();
-    const auto blue = blue_deck();
+    // Probe fixture decks, built inline from pool cards (they are not
+    // metagame decks). A fixture deck only needs to contain the
+    // fixture's zones as a multiset subset; the rest of the list shapes
+    // the determinizer's hidden-card worlds.
+    // Mono-red burn/aggro (40 cards): land-drop, self-bolt, Force Spike
+    // caster, and race-read probes.
+    const std::vector<CardId> red = [] {
+        std::vector<CardId> deck(16, CardId::Mountain);
+        deck.insert(deck.end(), 8, CardId::LightningBolt);
+        deck.insert(deck.end(), 8, CardId::IronclawOrcs);
+        deck.insert(deck.end(), 4, CardId::GrayOgre);
+        deck.insert(deck.end(), 4, CardId::HillGiant);
+        return deck;
+    }();
+    // Mono-green creatures plus Giant Growth (40 cards): land-drop and
+    // growth-save probes.
+    const std::vector<CardId> green = [] {
+        std::vector<CardId> deck(16, CardId::Forest);
+        deck.insert(deck.end(), 8, CardId::LlanowarElves);
+        deck.insert(deck.end(), 8, CardId::GrizzlyBears);
+        deck.insert(deck.end(), 4, CardId::ErhnamDjinn);
+        deck.insert(deck.end(), 4, CardId::GiantGrowth);
+        return deck;
+    }();
+    // Counterspell-holder list (40 cards): Force Spike probes' seat and
+    // the counter-respect probe's opponent, whose unknown hand is
+    // sampled from this list so open mana threatens counters.
+    const std::vector<CardId> blue = [] {
+        std::vector<CardId> deck(18, CardId::Island);
+        deck.insert(deck.end(), 4, CardId::ForceSpike);
+        deck.insert(deck.end(), 8, CardId::Counterspell);
+        deck.insert(deck.end(), 4, CardId::FlyingMen);
+        deck.insert(deck.end(), 6, CardId::AirElemental);
+        return deck;
+    }();
 
     // 1. Land drop: only a land and pass are on offer.
     {

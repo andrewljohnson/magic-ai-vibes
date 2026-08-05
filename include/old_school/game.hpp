@@ -147,19 +147,11 @@ struct CardDefinition {
 
 const CardDefinition& card_definition(CardId card);
 
-std::vector<CardId> green_deck();
-std::vector<CardId> red_deck();
-std::vector<CardId> blue_deck();
-std::vector<CardId> white_control_deck();
-std::vector<CardId> ru_aggro_deck();
-std::vector<CardId> robots_deck();
-std::vector<CardId> white_weenie_deck();
-std::vector<CardId> br_midrange_deck();
 std::vector<CardId> rg_berserk_deck();
 std::vector<CardId> atog_deck();
-// Stress decks outside the five-deck metagame environment.
-std::vector<CardId> lotus_combo_deck();
-std::vector<CardId> burn_deck();
+std::vector<CardId> br_midrange_deck();
+std::vector<CardId> robots_deck();
+std::vector<CardId> white_weenie_deck();
 std::vector<CardId> uwr_deck();
 
 using PermanentId = std::uint64_t;
@@ -981,22 +973,15 @@ SimulationSummary run_simulation(std::size_t games, std::uint64_t seed,
                                  GameConfig game_config = {});
 
 enum class DeckId : std::uint8_t {
-    Green,
-    Red,
-    Blue,
-    White,
-    RUAggro,
-    LotusCombo,
-    Burn,
-    UWR,
-    Robots,
-    WhiteWeenie,
-    BRMidrange,
     RGBerserk,
     Atog,
+    BRMidrange,
+    Robots,
+    WhiteWeenie,
+    UWR,
 };
 
-inline constexpr std::size_t kDeckCount = 13;
+inline constexpr std::size_t kDeckCount = 6;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 
