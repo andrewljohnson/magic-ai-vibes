@@ -692,6 +692,175 @@ SPZ_TEST(dead_ritual_on_opponents_turn_is_pruned_despite_creature) {
     }
 }
 
+SPZ_TEST(dead_ritual_riding_a_nonempty_stack_is_pruned) {
+    // Reported from live play (replay os-refix-o7, turn 12): with the
+    // opponent's spell already on the stack, SPZ cast Dark Ritual as
+    // the last responder holding nothing but lands - guaranteed dead
+    // mana. The acted branch settles when the Ritual leaves the stack
+    // (the underlying spell still pending) while the pass branch
+    // settles by resolving that underlying spell, so the two settled
+    // states were never comparable and the no-upside prune could
+    // structurally never fire. The strict value-dominance prune also
+    // retained it live because the Ritual was paid through City of
+    // Brass, whose self-ping breaks that prune's exact-identity
+    // requirement (no_upside tolerates actor-worse life; the strict
+    // prune does not). Both branches must be force-passed to the
+    // shared end of the window and compared there.
+    const auto br = br_midrange_deck();
+    const auto uwr = uwr_deck();
+    GameState state;
+    state.turn_number = 4;
+    state.active_player = 0;  // the OPPONENT's turn
+    state.starting_player = 0;
+    state.next_permanent_id = 9;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "ritual fixture card is in deck");
+        pool.erase(found);
+    };
+    auto uwr_pool = uwr;
+    remove_one(uwr_pool, CardId::Plateau);
+    state.players[0].lands.push_back({CardId::Plateau, false});
+    state.players[0].hand.assign(3, CardId::LightningBolt);
+    for (int held = 0; held < 3; ++held) {
+        remove_one(uwr_pool, CardId::LightningBolt);
+    }
+    state.players[0].library = uwr_pool;
+
+    auto br_pool = br;
+    // The Ritual's only payment source is City of Brass, as live: the
+    // self-ping makes the acted branch strictly worse rather than
+    // exactly-equal-minus-resources.
+    remove_one(br_pool, CardId::CityOfBrass);
+    state.players[1].lands.push_back({CardId::CityOfBrass, false});
+    // The live hand: lands plus the Ritual, nothing castable at all.
+    remove_one(br_pool, CardId::DarkRitual);
+    state.players[1].hand.push_back(CardId::DarkRitual);
+    for (int island = 0; island < 2; ++island) {
+        remove_one(br_pool, CardId::VolcanicIsland);
+        state.players[1].hand.push_back(CardId::VolcanicIsland);
+    }
+    remove_one(br_pool, CardId::Swamp);
+    state.players[1].hand.push_back(CardId::Swamp);
+    state.players[1].library = br_pool;
+
+    // The opponent bolts SPZ's face; SPZ holds priority to respond
+    // with the Bolt still on the stack.
+    expect(apply_priority_action(
+               state, 0,
+               PriorityAction::cast_lightning_bolt(
+                   Target::player_target(1)),
+               false),
+           "opponent's Bolt goes on the stack");
+    expect(state.stack.size() == 1, "the Bolt is pending");
+
+    const auto observation = observe_game_state(state, 1);
+    expect(observation.stack.size() == 1,
+           "the pending Bolt is public information");
+    const auto actions = legal_priority_actions(state, 1, false);
+    bool ritual_available = false;
+    for (const auto& action : actions) {
+        ritual_available |=
+            action.kind == PriorityActionKind::CastDarkRitual;
+    }
+    expect(ritual_available, "fixture offers the Dark Ritual");
+    const std::array<std::vector<CardId>, 2> game_decks = {uwr, br};
+    for (std::uint64_t net_seed = 1; net_seed <= 30; ++net_seed) {
+        const auto net = std::make_shared<const SpzNet>(
+            spz_feature_count(), 8, net_seed);
+        SpzPolicyConfig policy;
+        policy.worlds = 1;
+        policy.block_prediction_worlds = 1;
+        policy.seed = net_seed;
+        const auto controller =
+            make_spz_controller(net, game_decks, 1, policy);
+        const std::size_t chosen = controller.choose_priority_action(
+            observation, TurnPhase::FirstMain, actions);
+        expect(actions[chosen].kind !=
+                   PriorityActionKind::CastDarkRitual,
+               "no ritual into dead mana while a spell is pending");
+    }
+}
+
+SPZ_TEST(stack_response_with_real_upside_survives_window_end_prune) {
+    // Negative control for the window-end alignment: the same shape of
+    // decision (an opponent spell pending on the stack, the actor as
+    // last responder) but the response genuinely changes the settled
+    // outcome - Giant Growth saves the Bears from the Bolt. The
+    // aligned comparison sees different creatures at window's end and
+    // must retain the Growth; some nets must actually choose it.
+    const auto green = green_deck();
+    const auto red = red_deck();
+    GameState state;
+    state.turn_number = 4;
+    state.active_player = 0;  // the OPPONENT's turn
+    state.starting_player = 0;
+    state.next_permanent_id = 9;
+    const auto remove_one = [](std::vector<CardId>& pool, CardId card) {
+        const auto found = std::find(pool.begin(), pool.end(), card);
+        expect(found != pool.end(), "control fixture card is in deck");
+        pool.erase(found);
+    };
+    auto red_pool = red;
+    remove_one(red_pool, CardId::Mountain);
+    state.players[0].lands.push_back({CardId::Mountain, false});
+    remove_one(red_pool, CardId::LightningBolt);
+    state.players[0].hand.push_back(CardId::LightningBolt);
+    state.players[0].library = red_pool;
+
+    auto green_pool = green;
+    remove_one(green_pool, CardId::Forest);
+    state.players[1].lands.push_back({CardId::Forest, false});
+    remove_one(green_pool, CardId::GrizzlyBears);
+    state.players[1].creatures.push_back({
+        .id = 2,
+        .card = CardId::GrizzlyBears,
+        .summoning_sick = false,
+    });
+    remove_one(green_pool, CardId::GiantGrowth);
+    state.players[1].hand.push_back(CardId::GiantGrowth);
+    remove_one(green_pool, CardId::Forest);
+    state.players[1].hand.push_back(CardId::Forest);
+    state.players[1].library = green_pool;
+
+    expect(apply_priority_action(
+               state, 0,
+               PriorityAction::cast_lightning_bolt(
+                   Target::creature_target(1, 2)),
+               false),
+           "opponent's Bolt targets the Bears");
+    expect(state.stack.size() == 1, "the Bolt is pending");
+
+    const auto observation = observe_game_state(state, 1);
+    const auto actions = legal_priority_actions(state, 1, false);
+    bool growth_available = false;
+    for (const auto& action : actions) {
+        growth_available |=
+            action.kind == PriorityActionKind::CastGiantGrowth;
+    }
+    expect(growth_available, "fixture offers the Giant Growth");
+    const std::array<std::vector<CardId>, 2> game_decks = {red, green};
+    int growth_chosen = 0;
+    for (std::uint64_t net_seed = 1; net_seed <= 30; ++net_seed) {
+        const auto net = std::make_shared<const SpzNet>(
+            spz_feature_count(), 8, net_seed);
+        SpzPolicyConfig policy;
+        policy.worlds = 1;
+        policy.block_prediction_worlds = 1;
+        policy.seed = net_seed;
+        const auto controller =
+            make_spz_controller(net, game_decks, 1, policy);
+        const std::size_t chosen = controller.choose_priority_action(
+            observation, TurnPhase::FirstMain, actions);
+        if (actions[chosen].kind ==
+            PriorityActionKind::CastGiantGrowth) {
+            ++growth_chosen;
+        }
+    }
+    expect(growth_chosen > 0,
+           "the saving Growth is never pruned; some nets choose it");
+}
+
 SPZ_TEST(no_upside_prune_blocks_pumping_enemy_creatures) {
     // Reported from live play: SPZ (green, active player) with no creatures
     // of its own cast Giant Growth on the opponent's summoning-sick Orcs.

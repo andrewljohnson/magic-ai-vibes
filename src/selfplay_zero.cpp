@@ -2574,6 +2574,149 @@ struct SpzAgent {
                               0);
     }
 
+    // ------------------------------------------------------------------
+    // Window-boundary alignment. The immediate settlements above stop at
+    // DIFFERENT boundaries whenever the action rides a nonempty stack
+    // (the acted branch settles when the action's object leaves the
+    // stack, the underlying objects still pending; the pass branch
+    // settles by resolving the top underlying object) or the decision is
+    // window-ending (the pass branch ends the phase and both pools die
+    // while the acted branch's window stays open). There the
+    // identical-context preconditions of no_upside_versus_pass - equal
+    // stacks, comparable pools - can structurally never hold, and dead
+    // spends escape (live report, replay os-refix-o7 turn 12: Dark
+    // Ritual cast as the last responder onto a pending stack with only
+    // lands in hand). Force-passing BOTH branches to the shared end of
+    // the current window restores a meaningful comparison: the same
+    // pending objects resolve in the same order, both pools die, and a
+    // dead spend settles to exactly the passed state minus the spent
+    // resources. Every step is the engine's deterministic forced-pass
+    // transition - no randomness is consumed - and any branch that turns
+    // terminal, throws, or fails to settle fails closed by retaining the
+    // candidate.
+
+    static bool settled_game_over(const GameState& state) {
+        return state.players[0].life <= 0 ||
+               state.players[1].life <= 0 || state.failed_draw[0] ||
+               state.failed_draw[1];
+    }
+
+    // An immediate settlement force-passed to the end of the current
+    // priority window, plus both players' floating pools captured just
+    // before the window-ending pass cleared them (the pools the actor
+    // could still have spent inside this window).
+    struct WindowEndSettlement {
+        ResolvedPriorityActionConsequence settled;
+        std::array<ManaCost, 2> pools_before_end{};
+    };
+
+    static std::optional<WindowEndSettlement> settle_to_window_end(
+        ResolvedPriorityActionConsequence settled) {
+        if (settled.terminal || settled_game_over(settled.state)) {
+            return std::nullopt;
+        }
+        const std::array<ManaCost, 2> immediate_pools = {
+            settled.state.players[0].mana_pool,
+            settled.state.players[1].mana_pool};
+        WindowEndSettlement outcome{
+            .settled = std::move(settled),
+            .pools_before_end = immediate_pools,
+        };
+        constexpr std::size_t kMaximumWindowEndPasses = 1024;
+        std::size_t steps = 0;
+        while (!outcome.settled.window_ended) {
+            if (++steps > kMaximumWindowEndPasses) {
+                return std::nullopt;
+            }
+            outcome.pools_before_end = {
+                outcome.settled.state.players[0].mana_pool,
+                outcome.settled.state.players[1].mana_pool};
+            try {
+                const PriorityPassResult pass = pass_priority(
+                    outcome.settled.state, outcome.settled.priority);
+                ++outcome.settled.priority_passes;
+                if (pass == PriorityPassResult::WindowEnded) {
+                    outcome.settled.window_ended = true;
+                } else if (pass ==
+                           PriorityPassResult::StackObjectResolved) {
+                    ++outcome.settled.stack_resolutions;
+                    if (settled_game_over(outcome.settled.state)) {
+                        return std::nullopt;
+                    }
+                }
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+        }
+        return outcome;
+    }
+
+    // The pass branch's window-end settlement is shared by every
+    // candidate action of one decision; computed lazily at most once,
+    // exactly like pass_settled itself.
+    struct SharedPassWindowEnd {
+        bool computed = false;
+        std::optional<WindowEndSettlement> settlement;
+    };
+
+    static bool no_upside_versus_pass_at_window_end(
+        std::size_t actor,
+        const ResolvedPriorityActionConsequence& action_settled,
+        const ResolvedPriorityActionConsequence& pass_settled,
+        SharedPassWindowEnd& pass_window_end, bool sorcery_window) {
+        if (action_settled.terminal || pass_settled.terminal) {
+            return false;
+        }
+        if (action_settled.window_ended == pass_settled.window_ended &&
+            action_settled.state.stack == pass_settled.state.stack) {
+            // Same boundary: the direct comparison was already decisive.
+            return false;
+        }
+        // The floating pool's upside must be judged while the pool is
+        // alive, not after both pools die at window's end: an action
+        // whose pool unlocks a spell castable in this window is never
+        // pruned. First on the immediate settlements ...
+        if (pool_unlocks_new_cast(action_settled.state.players[actor],
+                                  pass_settled.state.players[actor],
+                                  sorcery_window)) {
+            return false;
+        }
+        if (!pass_window_end.computed) {
+            pass_window_end.computed = true;
+            pass_window_end.settlement =
+                settle_to_window_end(pass_settled);
+        }
+        if (!pass_window_end.settlement.has_value()) {
+            return false;
+        }
+        const auto action_window_end =
+            settle_to_window_end(action_settled);
+        if (!action_window_end.has_value()) {
+            return false;
+        }
+        // ... then again just before the window ends, when pending
+        // resolutions (a drawn hand, say) may have created new casts
+        // the immediate check could not see.
+        {
+            PlayerState acted_actor =
+                action_window_end->settled.state.players[actor];
+            acted_actor.mana_pool =
+                action_window_end->pools_before_end[actor];
+            PlayerState passed_actor =
+                pass_window_end.settlement->settled.state
+                    .players[actor];
+            passed_actor.mana_pool =
+                pass_window_end.settlement->pools_before_end[actor];
+            if (pool_unlocks_new_cast(acted_actor, passed_actor,
+                                      sorcery_window)) {
+                return false;
+            }
+        }
+        return no_upside_versus_pass(
+            actor, action_window_end->settled,
+            pass_window_end.settlement->settled, sorcery_window);
+    }
+
     // True when the action's settled consequence differs from passing only
     // by raised temporary bonuses on the actor's own creatures (plus the
     // actor's spent resources). Such a pump has no upside when it provably
@@ -2779,6 +2922,7 @@ struct SpzAgent {
             state, priority.player, sorcery,
             std::min(priority.consecutive_passes, 1),
             PriorityAction::pass());
+        SharedPassWindowEnd pass_window_end;
         // Two passes: settle every candidate and stage the non-terminal
         // net evaluations, then run them as one batched forward pass.
         struct Staged {
@@ -2822,8 +2966,11 @@ struct SpzAgent {
             }
             if (action.kind != PriorityActionKind::Pass &&
                 pass_settled.has_value() &&
-                no_upside_versus_pass(priority.player, *consequence,
-                                      *pass_settled, sorcery)) {
+                (no_upside_versus_pass(priority.player, *consequence,
+                                       *pass_settled, sorcery) ||
+                 no_upside_versus_pass_at_window_end(
+                     priority.player, *consequence, *pass_settled,
+                     pass_window_end, sorcery))) {
                 continue;
             }
             Staged entry{&action};
@@ -3495,6 +3642,7 @@ struct SpzAgent {
             position.state, position.priority.player, position.sorcery,
             std::min(position.priority.consecutive_passes, 1),
             PriorityAction::pass());
+        SharedPassWindowEnd pass_window_end;
         std::vector<double> scores;
         for (const PriorityAction& action : actions) {
             const auto consequence = resolve_priority_action_consequence(
@@ -3507,9 +3655,13 @@ struct SpzAgent {
             }
             if (action.kind != PriorityActionKind::Pass &&
                 pass_settled.has_value() &&
-                no_upside_versus_pass(position.priority.player,
-                                      *consequence, *pass_settled,
-                                      position.sorcery)) {
+                (no_upside_versus_pass(position.priority.player,
+                                       *consequence, *pass_settled,
+                                       position.sorcery) ||
+                 no_upside_versus_pass_at_window_end(
+                     position.priority.player, *consequence,
+                     *pass_settled, pass_window_end,
+                     position.sorcery))) {
                 continue;
             }
             double score = 0.0;
@@ -3791,6 +3943,7 @@ struct SpzAgent {
             const auto pass_settled = resolve_priority_action_consequence(
                 reconstructed, seat, sorcery_actions, 0,
                 PriorityAction::pass());
+            SharedPassWindowEnd pass_window_end;
             if (pass_settled.has_value()) {
                 for (std::size_t index = 0; index < actions.size();
                      ++index) {
@@ -3808,7 +3961,10 @@ struct SpzAgent {
                     }
                     if (no_upside_versus_pass(seat, *settled,
                                               *pass_settled,
-                                              sorcery_actions)) {
+                                              sorcery_actions) ||
+                        no_upside_versus_pass_at_window_end(
+                            seat, *settled, *pass_settled,
+                            pass_window_end, sorcery_actions)) {
                         dominated[index] = true;
                         continue;
                     }
