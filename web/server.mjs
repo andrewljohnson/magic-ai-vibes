@@ -1899,17 +1899,32 @@ function bridgeArguments(config, deckCatalog) {
     args.push("--bluff-mode");
   }
   if (config.players[1].policyId === "spz") {
-    // Arena opponent = the old-school specialist: it out-plays the
-    // 11-deck champion on the four real decks humans actually face
-    // (68.8 vs 67.1 on the paired 4-deck gate) and carries the
-    // counter-respect / race-read behaviors the generalist lacks. The
-    // 11-deck champion remains the formal gauntlet titleholder.
-    // Absolute path: the bridge resolves relative artifact paths
-    // against its own cwd, and a miss silently falls back to the
-    // Handcrafted opponent (all-zero fingerprint).
+    // Arena opponent selection: the old-school specialist out-plays
+    // the 11-deck champion on the four real decks (68.8 vs 67.1 on
+    // the paired 4-deck gate) but collapses off its metagame (37.0
+    // full-matrix mean vs the champion's 61.2), so it only takes the
+    // seat when BOTH decks are old-school; anything else gets the
+    // generalist champion. Absolute paths: the bridge resolves
+    // relative artifact paths against its own cwd, and a miss
+    // silently falls back to the Handcrafted opponent (all-zero
+    // fingerprint).
+    const oldSchoolDecks = new Set([
+      "uwr",
+      "robots",
+      "white-weenie",
+      "br-midrange",
+    ]);
+    const bothOldSchool = config.players.every((player) =>
+      oldSchoolDecks.has(player.deckId),
+    );
     args.push(
       "--spz-artifact",
-      path.resolve(SERVER_DIRECTORY, "../data/spz-oldschool.txt"),
+      path.resolve(
+        SERVER_DIRECTORY,
+        bothOldSchool
+          ? "../data/spz-oldschool.txt"
+          : "../data/spz-champion.txt",
+      ),
     );
   }
   return args;
