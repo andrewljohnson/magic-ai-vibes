@@ -82,8 +82,8 @@ test("journey Pass priority settles and unsupported branches fail promptly", asy
   const harness = makeHarness(t, { actionTimeoutMs: 500 });
   const { game: opening } = await harness.create({
     players: [
-      { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "handcrafted" },
+      { deckId: "rg-berserk", policyId: "human" },
+      { deckId: "rg-berserk", policyId: "handcrafted" },
     ],
     seed: 42,
     debugReveal: false,
@@ -121,8 +121,8 @@ test("delayed journey mode has a real bounded in-flight interval", async (t) => 
   });
   const { game: opening } = await harness.create({
     players: [
-      { deckId: "green", policyId: "human" },
-      { deckId: "green", policyId: "handcrafted" },
+      { deckId: "rg-berserk", policyId: "human" },
+      { deckId: "rg-berserk", policyId: "handcrafted" },
     ],
     seed: 42,
     debugReveal: false,
@@ -255,7 +255,7 @@ test("deterministic UI contract covers every deck and opponent policy", async (t
   const metadata = harness.metadata();
   assert.deepEqual(
     metadata.decks.map(({ id }) => id),
-    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie", "br-midrange", "rg-berserk", "atog"],
+    ["rg-berserk", "atog", "br-midrange", "robots", "white-weenie", "uwr"],
   );
   assert.deepEqual(
     metadata.policies.map(({ id }) => id),
@@ -307,8 +307,8 @@ test("debug reveal is explicit and leaves the human hand visible", async (t) => 
   const harness = makeHarness(t);
   const { game } = await harness.create({
     players: [
-      { deckId: "blue", policyId: "human" },
-      { deckId: "white", policyId: "handcrafted" },
+      { deckId: "atog", policyId: "human" },
+      { deckId: "white-weenie", policyId: "handcrafted" },
     ],
     seed: 707,
     debugReveal: true,

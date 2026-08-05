@@ -93,8 +93,8 @@ test("reproduction summaries keep setup stable while public context advances", a
 
   const config = {
     players: [
-      { deckId: "ru-aggro", policyId: "human" },
-      { deckId: "blue", policyId: "spz" },
+      { deckId: "rg-berserk", policyId: "human" },
+      { deckId: "atog", policyId: "spz" },
     ],
     seed: "18446744073709551615",
     rollouts: 2,
@@ -137,11 +137,11 @@ test("reproduction summaries keep setup stable while public context advances", a
 
   assert.equal(
     first,
-    'you=ru-aggro/human | opponent=blue/spz | game-seed=18446744073709551615 | rollouts=2 | deep-rollouts=8 | model=self-play-zero/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | model-search=K3/H1 | bluff=on | reveal=off | turn=1 | phase=first_main | priority-holder=You | latest-event="You started turn 1"',
+    'you=rg-berserk/human | opponent=atog/spz | game-seed=18446744073709551615 | rollouts=2 | deep-rollouts=8 | model=self-play-zero/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | model-search=K3/H1 | bluff=on | reveal=off | turn=1 | phase=first_main | priority-holder=You | latest-event="You started turn 1"',
   );
   assert.equal(
     advanced,
-    'you=ru-aggro/human | opponent=blue/spz | game-seed=18446744073709551615 | rollouts=2 | deep-rollouts=8 | model=self-play-zero/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | model-search=K3/H1 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
+    'you=rg-berserk/human | opponent=atog/spz | game-seed=18446744073709551615 | rollouts=2 | deep-rollouts=8 | model=self-play-zero/C0 | model-fingerprint=0000000000000000000000000000000000000000000000000000000000000000 | model-search=K3/H1 | bluff=on | reveal=off | turn=3 | phase=declare_attackers | priority-holder=None | latest-event="You declared 2 attacker(s)"',
   );
   assert.equal(
     first.slice(0, first.indexOf(" | turn=")),

@@ -26,8 +26,8 @@ test("the production session manager drives the real engine bridge without HTTP"
 
   const requestedConfig = {
     players: [
-      { deckId: "ru-aggro", policyId: "human" },
-      { deckId: "red", policyId: "random" },
+      { deckId: "rg-berserk", policyId: "human" },
+      { deckId: "br-midrange", policyId: "random" },
     ],
     seed: 42,
     debugReveal: false,

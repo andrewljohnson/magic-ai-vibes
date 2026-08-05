@@ -3213,7 +3213,7 @@ function EvolutionDialog({
             <span className="eyebrow">DECK LAB</span>
             <h1 id="evolution-dialog-title">Evolve a deck</h1>
             <p id="evolution-dialog-description">
-              Search the shared card pool against the five-deck metagame, then
+              Search the shared card pool against the six-deck metagame, then
               bring the result straight to the match room.
             </p>
           </div>

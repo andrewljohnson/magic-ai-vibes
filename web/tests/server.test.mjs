@@ -118,7 +118,7 @@ async function json(response) {
   return { response, body };
 }
 
-test("serves the arena and publishes five-deck game metadata", async (t) => {
+test("serves the arena and publishes six-deck game metadata", async (t) => {
   const { request } = await startTestServer(t);
 
   const page = await request("/");
@@ -135,18 +135,18 @@ test("serves the arena and publishes five-deck game metadata", async (t) => {
   assert.equal(response.status, 200);
   assert.deepEqual(
     body.decks.map(({ id }) => id),
-    ["green", "red", "blue", "white", "ru-aggro", "lotus-combo", "burn", "uwr", "robots", "white-weenie", "br-midrange", "rg-berserk", "atog"],
+    ["rg-berserk", "atog", "br-midrange", "robots", "white-weenie", "uwr"],
   );
   assert.match(
-    body.decks.find(({ id }) => id === "blue").deckList,
-    /Force Spike/,
+    body.decks.find(({ id }) => id === "uwr").deckList,
+    /Savannah Lions/,
   );
   assert.deepEqual(
     body.policies.map(({ id }) => id),
     ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
   const spz = body.policies.find(({ id }) => id === "spz");
-  assert.match(spz?.description ?? "", /13-deck era is pending/);
+  assert.match(spz?.description ?? "", /six-deck era is pending/);
   assert.equal(body.defaults.bluffMode, false);
   assert.deepEqual(body.decisionKinds, [
     "priority",
@@ -229,8 +229,8 @@ test("bug reports preserve public decisions and successful actions without hidde
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId: "spz" },
+          { deckId: "atog", policyId: "human" },
+          { deckId: "atog", policyId: "spz" },
         ],
         seed: 42,
         debugReveal: true,
@@ -331,8 +331,8 @@ test("bug reports preserve public decisions and successful actions without hidde
   assert.equal(exported.response.status, 200);
   const report = exported.body.report;
   assert.deepEqual(report.match.config.players, [
-    { deckId: "blue", policyId: "human" },
-    { deckId: "blue", policyId: "spz" },
+    { deckId: "atog", policyId: "human" },
+    { deckId: "atog", policyId: "spz" },
   ]);
   assert.deepEqual(report.match.model, {
     family: "self-play-zero",
@@ -629,8 +629,8 @@ test("bug reports omit validated actions whose bridge advance fails", async (t) 
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "blue", policyId: "spz" },
+          { deckId: "atog", policyId: "human" },
+          { deckId: "atog", policyId: "spz" },
         ],
         seed: 42,
         debugReveal: false,
@@ -713,8 +713,8 @@ test("bug-report action transcripts stay isolated across live sessions", async (
   );
   const gameConfig = {
     players: [
-      { deckId: "blue", policyId: "human" },
-      { deckId: "blue", policyId: "spz" },
+      { deckId: "atog", policyId: "human" },
+      { deckId: "atog", policyId: "spz" },
     ],
     seed: 42,
   };
@@ -784,8 +784,8 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         players: [
-          { deckId: "blue", policyId: "human" },
-          { deckId: "white", policyId: "monte-carlo" },
+          { deckId: "atog", policyId: "human" },
+          { deckId: "white-weenie", policyId: "monte-carlo" },
         ],
         seed: "18446744073709551615",
         debugReveal: true,
@@ -802,8 +802,8 @@ test("creates a session and maps canonical config to bridge flags", async (t) =>
   assert.equal(body.game.decision.id, "priority-1");
   assert.equal(body.game.decision.kind, "priority");
   assert.deepEqual(body.game.snapshot.received, {
-    humanDeck: "blue",
-    opponentDeck: "white",
+    humanDeck: "atog",
+    opponentDeck: "white-weenie",
     opponentPolicy: "monte-carlo",
     seed: "18446744073709551615",
     rollouts: "3",
@@ -831,8 +831,8 @@ test("rejects stale and illegal choices before progressing a valid game", async 
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       players: [
-        { deckId: "ru-aggro", policyId: "human" },
-        { deckId: "red", policyId: "handcrafted" },
+        { deckId: "rg-berserk", policyId: "human" },
+        { deckId: "br-midrange", policyId: "handcrafted" },
       ],
       seed: 42,
     }),
@@ -1005,13 +1005,13 @@ test("rejects malformed config without spawning a game", async (t) => {
     {
       players: [
         { deckId: "alpha", policyId: "human" },
-        { deckId: "red", policyId: "random" },
+        { deckId: "br-midrange", policyId: "random" },
       ],
     },
     {
       players: [
-        { deckId: "green", policyId: "human" },
-        { deckId: "red", policyId: "oracle" },
+        { deckId: "rg-berserk", policyId: "human" },
+        { deckId: "br-midrange", policyId: "oracle" },
       ],
     },
     { seed: "18446744073709551616" },

@@ -149,8 +149,8 @@ async function configureFixedMatch(page, { bluffMode = false } = {}) {
   await setup.waitFor();
   const nearSeat = setup.locator(".seat-0");
   const farSeat = setup.locator(".seat-1");
-  await nearSeat.locator("select").nth(0).selectOption("green");
-  await farSeat.locator("select").nth(0).selectOption("red");
+  await nearSeat.locator("select").nth(0).selectOption("rg-berserk");
+  await farSeat.locator("select").nth(0).selectOption("br-midrange");
   await farSeat.locator("select").nth(1).selectOption("handcrafted");
 
   const numberInputs = setup.locator('input[type="number"]');
@@ -180,8 +180,8 @@ async function configureRealEngineMatch(page, { bluffMode }) {
   await setup.waitFor();
   const nearSeat = setup.locator(".seat-0");
   const farSeat = setup.locator(".seat-1");
-  await nearSeat.locator("select").nth(0).selectOption("green");
-  await farSeat.locator("select").nth(0).selectOption("red");
+  await nearSeat.locator("select").nth(0).selectOption("rg-berserk");
+  await farSeat.locator("select").nth(0).selectOption("br-midrange");
   await farSeat.locator("select").nth(1).selectOption("random");
 
   const numberInputs = setup.locator('input[type="number"]');

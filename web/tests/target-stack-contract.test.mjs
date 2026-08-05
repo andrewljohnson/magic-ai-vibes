@@ -42,8 +42,8 @@ test("targeted-stack fixture exposes both public targets and a legal response", 
   const harness = makeHarness(t);
   const { game: initial } = await harness.create({
     players: [
-      { deckId: "green", policyId: "human" },
-      { deckId: "red", policyId: "handcrafted" },
+      { deckId: "rg-berserk", policyId: "human" },
+      { deckId: "br-midrange", policyId: "handcrafted" },
     ],
     seed: 42,
     debugReveal: false,

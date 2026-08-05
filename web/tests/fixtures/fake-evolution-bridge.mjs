@@ -38,19 +38,12 @@ if (args.includes("--evolve-json")) {
   );
   if (args.includes("--evolution-invalid")) cardIds[0] = 1;
   const opponentDecks = [
-    ["green", "Green Growth"],
-    ["red", "Creatures & Bolts"],
-    ["blue", "Counter Flyer"],
-    ["white", "Moat Mill"],
-    ["ru-aggro", "RU Aggro"],
-    ["lotus-combo", "Lotus Combo"],
-    ["burn", "Burn"],
-    ["uwr", "Lion-dib-bolt"],
-    ["robots", "Robots"],
-    ["white-weenie", "White Weenie"],
-    ["br-midrange", "BR Midrange"],
     ["rg-berserk", "RG Berserk"],
     ["atog", "Atog"],
+    ["br-midrange", "BR Midrange"],
+    ["robots", "Robots"],
+    ["white-weenie", "White Weenie"],
+    ["uwr", "Lion-dib-bolt"],
   ];
   const games = gamesPerOpponent * 4;
   const fitness = {

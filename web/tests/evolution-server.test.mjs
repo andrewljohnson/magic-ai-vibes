@@ -122,7 +122,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   );
   assert.deepEqual(meta.body.evolution.defaults, {
     generations: 3,
-    population: 13,
+    population: 6,
     games: 1,
     pilot: "handcrafted",
     seed: "424242",
@@ -132,7 +132,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
     max: 200,
   });
   assert.deepEqual(meta.body.evolution.limits.population, {
-    min: 13,
+    min: 6,
     max: 32,
   });
   assert.deepEqual(meta.body.evolution.limits.games, {
@@ -150,7 +150,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   const invalidBodies = [
     { generations: 0 },
     { generations: 201 },
-    { population: 12 },
+    { population: 5 },
     { population: 33 },
     { games: 0 },
     { games: 17 },
@@ -179,7 +179,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
   const created = await json(
     await post(request, "/api/evolutions", {
       generations: 2,
-      population: 13,
+      population: 6,
       games: 1,
       pilot: "handcrafted",
       seed: "4294967295",
@@ -191,7 +191,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
     seed: "4294967295",
     pilot: "handcrafted",
     generations: [50, 51],
-    population: 13,
+    population: 6,
     games: 1,
     best: {
       cards: [
@@ -199,26 +199,19 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
         { id: 2, name: "Grizzly Bears", count: 20 },
       ],
       stats: {
-        games: 52,
-        wins: 26,
-        losses: 26,
+        games: 24,
+        wins: 12,
+        losses: 12,
         draws: 0,
         winRate: 50,
       },
       byOpponent: [
-        ["green", "Green Growth"],
-        ["red", "Creatures & Bolts"],
-        ["blue", "Counter Flyer"],
-        ["white", "Moat Mill"],
-        ["ru-aggro", "RU Aggro"],
-        ["lotus-combo", "Lotus Combo"],
-        ["burn", "Burn"],
-        ["uwr", "Lion-dib-bolt"],
-        ["robots", "Robots"],
-        ["white-weenie", "White Weenie"],
-        ["br-midrange", "BR Midrange"],
         ["rg-berserk", "RG Berserk"],
         ["atog", "Atog"],
+        ["br-midrange", "BR Midrange"],
+        ["robots", "Robots"],
+        ["white-weenie", "White Weenie"],
+        ["uwr", "Lion-dib-bolt"],
       ].map(([deckId, name]) => ({
         deckId,
         name,
@@ -236,9 +229,9 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
           { id: 2, name: "Grizzly Bears", count: 20 },
         ],
         stats: {
-          games: 52,
-          wins: 26,
-          losses: 26,
+          games: 24,
+          wins: 12,
+          losses: 12,
           draws: 0,
           winRate: 50,
         },
@@ -249,11 +242,11 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
           { id: 2, name: "Grizzly Bears", count: 21 },
         ],
         stats: {
-          games: 52,
-          wins: 25,
-          losses: 27,
+          games: 24,
+          wins: 11,
+          losses: 13,
           draws: 0,
-          winRate: (100 * 25) / 52,
+          winRate: (100 * 11) / 24,
         },
       },
     ],
@@ -292,7 +285,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
   const meta = await json(await request("/api/meta"));
   const savedMeta = meta.body.decks.find(({ id }) => id === "deck-1");
   assert.deepEqual(savedMeta, saved.body.deck);
-  assert.equal(meta.body.decks.length, 14);
+  assert.equal(meta.body.decks.length, 7);
 
   const game = await json(
     await post(request, "/api/games", {
@@ -306,10 +299,10 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
   assert.equal(game.response.status, 201);
   assert.equal(game.body.game.config.players[0].deckId, "deck-1");
   assert.equal(game.body.game.config.players[1].deckId, "deck-1");
-  assert.equal(game.body.game.snapshot.received.humanDeck, "ru-aggro");
+  assert.equal(game.body.game.snapshot.received.humanDeck, "uwr");
   assert.equal(
     game.body.game.snapshot.received.opponentDeck,
-    "ru-aggro",
+    "uwr",
   );
   const exactVector = Array.from(
     { length: 40 },
@@ -362,7 +355,7 @@ test("saved decks disappear with their Node server process", async (t) => {
     await post(restarted.request, "/api/games", {
       players: [
         { deckId: "deck-1", policyId: "human" },
-        { deckId: "red", policyId: "random" },
+        { deckId: "br-midrange", policyId: "random" },
       ],
     }),
   );
