@@ -72,7 +72,11 @@ void run_jobs(std::size_t job_count, std::size_t threads,
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::size_t games_per_pairing = 300;
+    // Default favors iteration speed: a quick smoke grid in minutes.
+    // Pass --games 300 (or more) for publication-grade cells; the page
+    // labels the noise either way and shows the command to rerun
+    // bigger.
+    std::size_t games_per_pairing = 10;
     std::uint64_t seed = 20260730;
     std::string output_path = "build/telemetry/matchup-matrix.json";
     std::string spz_model = "data/spz-champion.txt";

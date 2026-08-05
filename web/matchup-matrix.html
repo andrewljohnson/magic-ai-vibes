@@ -38,6 +38,15 @@
   <p class="sub" id="status">Loading matchup-matrix.json… (regenerate with
     <code>make matchup-matrix && ./build/matchup-matrix</code>) ·
     <a href="monitor.html">training monitor</a></p>
+  <p class="sub" id="regen-control">Sample size for the next run:
+    <select>
+      <option value="10">10/pairing — smoke grid, minutes</option>
+      <option value="100">100/pairing — rough, ±5/cell</option>
+      <option value="300">300/pairing — publication, ±1.3/cell</option>
+      <option value="1000">1000/pairing — decisive, hours</option>
+    </select>
+    <code></code>
+    <button type="button">copy</button></p>
   <section id="calc-strip" style="display:none">
     <h2>Matrix calculation in progress</h2>
     <p class="desc" id="calc-status"></p>
@@ -104,6 +113,27 @@ async function load() {
     Math.max(2, Math.floor(data.games_per_pairing / 2)) * (decks.length - 1);
   const cellNoise = 100 / Math.sqrt(fieldGames);
   const meanNoise = cellNoise / Math.sqrt(decks.length);
+
+  // Regeneration control: remembers the preferred sample size and
+  // shows the exact command (the matrix is computed offline by the
+  // CLI; the page cannot launch it).
+  const sizeControl = document.getElementById("regen-control");
+  if (sizeControl) {
+    const stored = localStorage.getItem("matrixGamesPerPairing");
+    const select = sizeControl.querySelector("select");
+    const command = sizeControl.querySelector("code");
+    const applyChoice = (value) => {
+      localStorage.setItem("matrixGamesPerPairing", value);
+      command.textContent =
+        `./build/matchup-matrix --games ${value} --threads 10`;
+    };
+    if (stored) select.value = stored;
+    applyChoice(select.value);
+    select.addEventListener("change", () => applyChoice(select.value));
+    sizeControl.querySelector("button").addEventListener("click", () => {
+      navigator.clipboard?.writeText(command.textContent);
+    });
+  }
   document.getElementById("summary-desc").textContent =
     "Each cell: this bot pilots the deck against the other " +
     `${decks.length - 1} decks flown by ${data.reference_pilot}. A cell ` +
