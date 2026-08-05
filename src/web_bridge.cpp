@@ -51,6 +51,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_weenie_deck();
     case DeckId::BRMidrange:
         return br_midrange_deck();
+    case DeckId::RGBerserk:
+        return rg_berserk_deck();
+    case DeckId::Atog:
+        return atog_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -107,6 +111,10 @@ std::string_view deck_id_token(DeckId deck) {
         return "white-weenie";
     case DeckId::BRMidrange:
         return "br-midrange";
+    case DeckId::RGBerserk:
+        return "rg-berserk";
+    case DeckId::Atog:
+        return "atog";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -255,6 +263,16 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "activate_mishras_factory";
     case PriorityActionKind::ActivateStripMine:
         return "activate_strip_mine";
+    case PriorityActionKind::CastBerserk:
+        return "cast_berserk";
+    case PriorityActionKind::CastRegrowth:
+        return "cast_regrowth";
+    case PriorityActionKind::ActivatePendelhaven:
+        return "activate_pendelhaven";
+    case PriorityActionKind::ActivateAtog:
+        return "activate_atog";
+    case PriorityActionKind::ActivateRelicBarrier:
+        return "activate_relic_barrier";
     }
     throw std::logic_error("unknown priority action");
 }
@@ -499,7 +517,10 @@ std::string action_label(const PlayerObservation& observation,
     const bool activation =
         action.kind == PriorityActionKind::ActivateMillstone ||
         action.kind == PriorityActionKind::ActivateLibrary ||
-        action.kind == PriorityActionKind::ActivateStripMine;
+        action.kind == PriorityActionKind::ActivateStripMine ||
+        action.kind == PriorityActionKind::ActivatePendelhaven ||
+        action.kind == PriorityActionKind::ActivateAtog ||
+        action.kind == PriorityActionKind::ActivateRelicBarrier;
     std::string result =
         action.kind == PriorityActionKind::PlayLand
             ? "Play " + card
@@ -593,11 +614,13 @@ void write_creature(std::ostream& output,
            << ",\"damage\":" << creature.damage
            << ",\"power\":"
            << definition.power + creature.temporary_power_bonus +
-                  creature.plus_counters + creature.crusade_bonus
+                  creature.plus_counters +
+                  creature.static_power_bonus
            << ",\"toughness\":"
            << definition.toughness +
                   creature.temporary_toughness_bonus +
-                  creature.plus_counters + creature.crusade_bonus
+                  creature.plus_counters +
+                  creature.static_toughness_bonus
            << ",\"plusCounters\":" << creature.plus_counters;
     if (creature.is_copy) {
         output << ",\"copyOf\":";
@@ -953,6 +976,12 @@ class JsonController {
                     return choose_cleanup_discards(
                         observation, excess);
                 },
+            .choose_sylvan_returns =
+                [this](const PlayerObservation& observation,
+                       std::size_t count) {
+                    return choose_sylvan_returns(
+                        observation, count);
+                },
             .choose_mulligan =
                 [this](const PlayerObservation& observation) {
                     return choose_mulligan(observation);
@@ -1255,6 +1284,53 @@ class JsonController {
         return result;
     }
 
+    std::vector<std::size_t> choose_sylvan_returns(
+        const PlayerObservation& observation,
+        std::size_t count) {
+        // Mirrors the cleanup-discard decision: pick `count` unique
+        // hand positions; they go back on top of the library with the
+        // first selection drawn next.
+        const std::uint64_t id = next_decision_id();
+        output_ << "{\"type\":\"decision\",\"state\":";
+        write_state(output_, observation, phase_);
+        output_ << ",\"decision\":{\"id\":" << id
+                << ",\"kind\":\"sylvan_return\",\"count\":"
+                << count << ",\"options\":[";
+        for (std::size_t index = 0;
+             index < observation.hand.size(); ++index) {
+            if (index != 0) {
+                output_ << ',';
+            }
+            output_ << "{\"index\":" << index
+                    << ",\"card\":";
+            write_card(output_, observation.hand[index]);
+            output_ << '}';
+        }
+        output_ << "]}}\n" << std::flush;
+
+        const auto selected = parse_strict_unsigned_array_field(
+            read_response(id), "indices");
+        if (selected.size() != count) {
+            throw std::invalid_argument(
+                "sylvan response must select exactly the count");
+        }
+        if (!unique_values(selected)) {
+            throw std::invalid_argument(
+                "sylvan response contains duplicate positions");
+        }
+        std::vector<std::size_t> result;
+        result.reserve(selected.size());
+        for (const std::uint64_t position : selected) {
+            if (position >= observation.hand.size()) {
+                throw std::invalid_argument(
+                    "sylvan response selects an illegal position");
+            }
+            result.push_back(
+                static_cast<std::size_t>(position));
+        }
+        return result;
+    }
+
     bool choose_mulligan(const PlayerObservation& observation) {
         const std::uint64_t id = next_decision_id();
         output_ << "{\"type\":\"decision\",\"state\":";
@@ -1446,6 +1522,12 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "br-midrange" || value == "br") {
         return DeckId::BRMidrange;
+    }
+    if (value == "rg-berserk" || value == "berserk") {
+        return DeckId::RGBerserk;
+    }
+    if (value == "atog") {
+        return DeckId::Atog;
     }
     if (value == "lotus-combo" || value == "lotus") {
         return DeckId::LotusCombo;

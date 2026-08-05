@@ -135,12 +135,12 @@ void append_player_scalars(std::vector<float>& features,
         const int creature_power = definition.power +
                                    creature.temporary_power_bonus +
                                    creature.plus_counters +
-                                   creature.crusade_bonus;
+                                   creature.static_power_bonus;
         power += creature_power;
         toughness += definition.toughness +
                      creature.temporary_toughness_bonus +
                      creature.plus_counters +
-                     creature.crusade_bonus;
+                     creature.static_toughness_bonus;
         damage += creature.damage;
         bonus_power += creature.temporary_power_bonus;
         if (!creature.tapped) {
@@ -263,7 +263,8 @@ std::vector<float> spz_features_colors(
                 const int power =
                     definition.power +
                     creature.temporary_power_bonus +
-                    creature.plus_counters + creature.crusade_bonus;
+                    creature.plus_counters +
+                    creature.static_power_bonus;
                 if (!creature.tapped) {
                     tally.untapped += power;
                     if (definition.flying) {
@@ -326,6 +327,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
         green_deck(), red_deck(), blue_deck(), white_control_deck(),
         ru_aggro_deck(), lotus_combo_deck(), burn_deck(), uwr_deck(),
         robots_deck(), white_weenie_deck(), br_midrange_deck(),
+        rg_berserk_deck(), atog_deck(),
     };
     return decks;
 }
@@ -335,6 +337,7 @@ std::string_view spz_deck_name(std::size_t deck_index) {
         "Green Growth", "Creatures & Bolts", "Counter Flyer",
         "Moat Mill", "RU Aggro", "Lotus Combo", "Burn",
         "Lion-dib-bolt", "Robots", "White Weenie", "BR Midrange",
+        "RG Berserk", "Atog",
     };
     return names.at(deck_index);
 }
@@ -455,7 +458,7 @@ int creature_current_power(const CreaturePermanent& creature) {
         creature.is_copy ? creature.copy_of : creature.card;
     return card_definition(face).power +
            creature.temporary_power_bonus + creature.plus_counters +
-           creature.crusade_bonus;
+           creature.static_power_bonus;
 }
 
 int creature_current_toughness(const CreaturePermanent& creature) {
@@ -463,7 +466,7 @@ int creature_current_toughness(const CreaturePermanent& creature) {
         creature.is_copy ? creature.copy_of : creature.card;
     return card_definition(face).toughness +
            creature.temporary_toughness_bonus + creature.plus_counters +
-           creature.crusade_bonus;
+           creature.static_toughness_bonus;
 }
 
 void append_creature_slots_range(std::vector<float>& features,
@@ -562,11 +565,15 @@ ManaAvailable available_mana(const PublicPlayerState& player) {
             case CardId::Swamp:
                 mana.black += 1;
                 break;
+            case CardId::Pendelhaven:
+                mana.green += 1;
+                break;
             case CardId::Plateau:
             case CardId::Tundra:
             case CardId::VolcanicIsland:
             case CardId::UndergroundSea:
             case CardId::Badlands:
+            case CardId::Taiga:
             case CardId::CityOfBrass:
                 mana.wild += 1;
                 break;
@@ -1617,11 +1624,12 @@ SpzNet load_spz_net(const std::string& path) {
 // Policy network
 
 std::size_t spz_action_feature_count() {
-    // kind one-hot + card one-hot + target class (none/self/opponent
-    // player, own/enemy creature) + target creature card + countered spell
-    // card + chosen card (tutor/copy choice) + x scale +
-    // source-permanent flag.
-    return 32 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
+    // kind one-hot (40 slots leave headroom past the current 36
+    // PriorityActionKinds) + card one-hot + target class
+    // (none/self/opponent player, own/enemy creature) + target
+    // creature card + countered spell card + chosen card (tutor/copy/
+    // Regrowth choice) + x scale + source-permanent flag.
+    return 40 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
            1 + 1;
 }
 
@@ -1631,7 +1639,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 32;
+    offset += 40;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {
@@ -2317,6 +2325,11 @@ struct SpzAgent {
             return 1;
         case PriorityActionKind::ActivateMillstone:
             return 2;
+        case PriorityActionKind::ActivatePendelhaven:
+        case PriorityActionKind::ActivateAtog:
+        case PriorityActionKind::ActivateRelicBarrier:
+            // Tap or sacrifice costs only; no mana spent.
+            return 0;
         default: {
             const ManaCost& cost = card_definition(action.card).cost;
             return cost.generic + cost.green + cost.red + cost.blue +
@@ -2425,7 +2438,15 @@ struct SpzAgent {
                 other->summoning_sick != creature.summoning_sick ||
                 other->damage != creature.damage ||
                 other->plus_counters != creature.plus_counters ||
-                other->crusade_bonus != creature.crusade_bonus ||
+                other->static_power_bonus !=
+                    creature.static_power_bonus ||
+                other->static_toughness_bonus !=
+                    creature.static_toughness_bonus ||
+                other->trample != creature.trample ||
+                other->attacked_this_turn !=
+                    creature.attacked_this_turn ||
+                other->berserked_this_turn !=
+                    creature.berserked_this_turn ||
                 other->copy_of != creature.copy_of ||
                 other->is_copy != creature.is_copy ||
                 other->exile_on_death_this_turn !=

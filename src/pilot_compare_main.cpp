@@ -58,8 +58,8 @@ std::string action_label(const PriorityAction& action) {
     case PriorityActionKind::CastBraingeyser: return "braingeyser";
     case PriorityActionKind::CastForceSpike: return "force spike";
     case PriorityActionKind::ActivateMillstone: return "millstone";
+    default: return "other";
     }
-    return "other";
 }
 
 struct SeatTracker {

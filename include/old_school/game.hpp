@@ -93,10 +93,22 @@ enum class CardId : std::uint8_t {
     DarkRitual,
     Shatter,
     Swamp,
+    Taiga,
+    KirdApe,
+    ScrybSprites,
+    ArgothianPixies,
+    ErhnamDjinn,
+    Berserk,
+    Regrowth,
+    SylvanLibrary,
+    Pendelhaven,
+    Atog,
+    AnkhOfMishra,
+    RelicBarrier,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::Swamp) + 1;
+    static_cast<std::size_t>(CardId::RelicBarrier) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -143,6 +155,8 @@ std::vector<CardId> ru_aggro_deck();
 std::vector<CardId> robots_deck();
 std::vector<CardId> white_weenie_deck();
 std::vector<CardId> br_midrange_deck();
+std::vector<CardId> rg_berserk_deck();
+std::vector<CardId> atog_deck();
 // Stress decks outside the five-deck metagame environment.
 std::vector<CardId> lotus_combo_deck();
 std::vector<CardId> burn_deck();
@@ -180,14 +194,28 @@ struct CreaturePermanent {
     bool exile_on_death_this_turn = false;
     // +1/+1 counters (Triskelion); count into power and toughness.
     int plus_counters = 0;
-    // Static +1/+1 from Crusades in play (recomputed after every
-    // resolution; white creatures only).
-    int crusade_bonus = 0;
+    // Static battlefield buffs (Crusade, Sedge Troll's Swamp bonus,
+    // Kird Ape's Forest bonus), recomputed after every resolution.
+    // Power and toughness are tracked separately because Kird Ape's
+    // +1/+2 is asymmetric.
+    int static_power_bonus = 0;
     // Copy Artifact can copy artifact creatures (Su-Chi, Triskelion,
     // an animated Factory): the physical card stays CopyArtifact, the
     // behavioral face lives here.
     CardId copy_of = CardId::Forest;
     bool is_copy = false;
+    // Toughness half of the static buff (see static_power_bonus).
+    // Defaulted last so existing aggregate initializers stay valid.
+    int static_toughness_bonus = 0;
+    // Berserk grants trample until end of turn; cleared at cleanup
+    // like the temporary pump bonuses.
+    bool trample = false;
+    // Set when this creature is declared as an attacker, cleared at
+    // cleanup. Berserk's destroy clause reads it.
+    bool attacked_this_turn = false;
+    // Set when Berserk resolves on this creature this turn: if it
+    // also attacked, it is destroyed at cleanup.
+    bool berserked_this_turn = false;
 
     bool operator==(const CreaturePermanent&) const = default;
 };
@@ -334,6 +362,11 @@ enum class PriorityActionKind : std::uint8_t {
     ActivateJalumTome,
     CastDarkRitual,
     CastShatter,
+    CastBerserk,
+    CastRegrowth,
+    ActivatePendelhaven,
+    ActivateAtog,
+    ActivateRelicBarrier,
 };
 
 // One explicit mana float: tap this permanent for the given face
@@ -418,6 +451,25 @@ struct PriorityAction {
     static PriorityAction cast_dark_ritual();
     static PriorityAction cast_shatter(std::size_t owner,
                                        PermanentId artifact);
+    // Berserk: target creature doubles its power (+X/+0 where X is
+    // its power at resolution), gains trample until end of turn, and
+    // is destroyed at end of turn if it attacked this turn.
+    static PriorityAction cast_berserk(Target creature_target);
+    // Regrowth: Demonic Tutor's chosen-card pattern with the source
+    // being the caster's own graveyard.
+    static PriorityAction cast_regrowth(CardId chosen);
+    // Pendelhaven: tap to give a creature whose CURRENT stats are
+    // exactly 1/1 +1/+2 until end of turn.
+    static PriorityAction activate_pendelhaven(PermanentId land,
+                                               Target creature_target);
+    // Atog: sacrifice one of your artifacts (no mana): +2/+2 until
+    // end of turn. Multiple activations per turn are legal.
+    static PriorityAction activate_atog(PermanentId atog,
+                                        PermanentId artifact);
+    // Relic Barrier: tap to tap target artifact (any player's).
+    static PriorityAction activate_relic_barrier(PermanentId barrier,
+                                                 std::size_t owner,
+                                                 PermanentId artifact);
 
     bool operator==(const PriorityAction&) const = default;
 };
@@ -586,6 +638,14 @@ struct HumanController {
     std::function<std::vector<std::size_t>(
         const PlayerObservation&, std::size_t excess)>
         choose_cleanup_discards;
+    // Optional Sylvan Library upkeep decision: after drawing the two
+    // extra cards, return exactly `count` unique hand positions to
+    // put back on top of the library (the first position listed is
+    // drawn next). Absent, the seat returns its two lowest-valued
+    // cards (handcrafted valuation), which is also every bot's rule.
+    std::function<std::vector<std::size_t>(
+        const PlayerObservation&, std::size_t count)>
+        choose_sylvan_returns;
     // Optional Paris-mulligan decision at game start: return true to
     // shuffle the hand away and draw one fewer card. Absent, a
     // controller seat always keeps; a pure-bot seat uses the default
@@ -700,6 +760,16 @@ inline constexpr std::size_t kMaximumHandSize = 7;
 std::vector<CardId> cleanup_turn(
     GameState& state, std::size_t active_player,
     const std::vector<std::size_t>& discard_indices);
+// Sylvan Library's upkeep trigger fires when its controller has at
+// least one Sylvan Library in play. Multiple copies do NOT stack: one
+// trigger per upkeep regardless of count (simplest legal reading).
+bool has_sylvan_library(const GameState& state, std::size_t player);
+// After the two extra draws, move the chosen hand positions to the
+// TOP of the library. Deterministic order: indices[0] ends on top and
+// is drawn next, indices[1] directly beneath it.
+void sylvan_return_to_library(
+    GameState& state, std::size_t player,
+    const std::vector<std::size_t>& indices);
 
 enum class EndReason : std::uint8_t {
     LifeTotal,
@@ -814,6 +884,11 @@ class Game {
     choose_cleanup_discards(std::size_t player,
                             std::size_t excess);
     void perform_cleanup();
+    // Sylvan Library's upkeep: draw two extra cards, then return two
+    // chosen cards to the top of the library. Returns a result only
+    // when a draw from an empty library ends the game.
+    std::optional<GameResult>
+    perform_sylvan_library_upkeep(std::size_t player);
     GameResult run_from_turn(std::size_t first_turn);
     std::optional<GameResult> life_total_result() const;
     GameResult make_result(int winner, EndReason reason) const;
@@ -917,9 +992,11 @@ enum class DeckId : std::uint8_t {
     Robots,
     WhiteWeenie,
     BRMidrange,
+    RGBerserk,
+    Atog,
 };
 
-inline constexpr std::size_t kDeckCount = 11;
+inline constexpr std::size_t kDeckCount = 13;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

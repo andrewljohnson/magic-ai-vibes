@@ -85,11 +85,13 @@ void write_board(std::ostream& out, const PlayerObservation& obs) {
                                             : creature.card));
             out << ",\"power\":"
                 << definition.power + creature.temporary_power_bonus +
-                       creature.plus_counters + creature.crusade_bonus
+                       creature.plus_counters +
+                       creature.static_power_bonus
                 << ",\"toughness\":"
                 << definition.toughness +
                        creature.temporary_toughness_bonus +
-                       creature.plus_counters + creature.crusade_bonus
+                       creature.plus_counters +
+                       creature.static_toughness_bonus
                 << ",\"damage\":" << creature.damage << ",\"tapped\":"
                 << (creature.tapped ? "true" : "false") << ",\"sick\":"
                 << (creature.summoning_sick ? "true" : "false") << '}';

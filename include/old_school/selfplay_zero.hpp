@@ -22,7 +22,7 @@
 
 namespace old_school::selfplay_zero {
 
-inline constexpr std::size_t kSpzDeckCount = 11;
+inline constexpr std::size_t kSpzDeckCount = 13;
 
 // The metagame environment, in canonical order: the five sample decks plus
 // the lotus-combo and burn stress decks.

@@ -86,6 +86,7 @@ std::vector<std::size_t> parse_deck_list(const std::string& value) {
         "green",  "red",    "blue",         "white",
         "ru-aggro", "lotus-combo", "burn", "uwr",
         "robots", "white-weenie", "br-midrange",
+        "rg-berserk", "atog",
     };
     std::vector<std::size_t> result;
     std::stringstream stream(value);

@@ -121,6 +121,8 @@ int main(int argc, char** argv) {
         {"robots", robots_deck()},
         {"white-weenie", white_weenie_deck()},
         {"br-midrange", br_midrange_deck()},
+        {"rg-berserk", rg_berserk_deck()},
+        {"atog", atog_deck()},
         {"lotus-combo", lotus_combo_deck()},
         {"burn", burn_deck()},
         {"uwr", uwr_deck()},

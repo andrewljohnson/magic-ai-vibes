@@ -269,6 +269,32 @@ std::string action_name(const PlayerObservation& observation,
         return "Activate Jalum Tome";
     case PriorityActionKind::CastDarkRitual:
         return "Cast Dark Ritual";
+    case PriorityActionKind::CastBerserk:
+        return "Cast Berserk -> " +
+               (action.target.has_value()
+                    ? target_name(observation, *action.target)
+                    : std::string("(no target)"));
+    case PriorityActionKind::CastRegrowth:
+        return "Cast Regrowth";
+    case PriorityActionKind::ActivatePendelhaven:
+        return "Pendelhaven: +1/+2 -> " +
+               (action.target.has_value()
+                    ? target_name(observation, *action.target)
+                    : std::string("(no target)"));
+    case PriorityActionKind::ActivateAtog:
+        return "Atog: eat artifact #" +
+               std::to_string(action.target.has_value() &&
+                                      action.target->creature
+                                          .has_value()
+                                  ? *action.target->creature
+                                  : 0);
+    case PriorityActionKind::ActivateRelicBarrier:
+        return "Relic Barrier: tap artifact #" +
+               std::to_string(action.target.has_value() &&
+                                      action.target->creature
+                                          .has_value()
+                                  ? *action.target->creature
+                                  : 0);
     case PriorityActionKind::CastShatter:
         return "Cast Shatter -> artifact #" +
                std::to_string(action.target.has_value() &&
@@ -1489,6 +1515,10 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return white_weenie_deck();
     case DeckId::BRMidrange:
         return br_midrange_deck();
+    case DeckId::RGBerserk:
+        return rg_berserk_deck();
+    case DeckId::Atog:
+        return atog_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }

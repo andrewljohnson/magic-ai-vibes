@@ -594,9 +594,105 @@ constexpr std::array<CardDefinition, kCardCount> kCardDefinitions = {{
      0,
      0,
      false},
+    {CardId::Taiga,
+     "Taiga",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::KirdApe,
+     "Kird Ape",
+     CardType::Creature,
+     {.red = 1},
+     1,
+     1,
+     0,
+     false},
+    {CardId::ScrybSprites,
+     "Scryb Sprites",
+     CardType::Creature,
+     {.green = 1},
+     1,
+     1,
+     0,
+     true},
+    {CardId::ArgothianPixies,
+     "Argothian Pixies",
+     CardType::Creature,
+     {.generic = 1, .green = 1},
+     2,
+     1,
+     0,
+     false},
+    {CardId::ErhnamDjinn,
+     "Erhnam Djinn",
+     CardType::Creature,
+     {.generic = 3, .green = 1},
+     4,
+     5,
+     0,
+     false},
+    {CardId::Berserk,
+     "Berserk",
+     CardType::Instant,
+     {.green = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Regrowth,
+     "Regrowth",
+     CardType::Sorcery,
+     {.generic = 1, .green = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::SylvanLibrary,
+     "Sylvan Library",
+     CardType::Enchantment,
+     {.generic = 1, .green = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Pendelhaven,
+     "Pendelhaven",
+     CardType::Land,
+     {},
+     0,
+     0,
+     0,
+     false},
+    {CardId::Atog,
+     "Atog",
+     CardType::Creature,
+     {.generic = 1, .red = 1},
+     1,
+     2,
+     0,
+     false},
+    {CardId::AnkhOfMishra,
+     "Ankh of Mishra",
+     CardType::Artifact,
+     {.generic = 2},
+     0,
+     0,
+     0,
+     false},
+    {CardId::RelicBarrier,
+     "Relic Barrier",
+     CardType::Artifact,
+     {.generic = 2},
+     0,
+     0,
+     0,
+     false},
 }};
 
-constexpr std::array<CardId, 25> kCreatureCards = {
+constexpr std::array<CardId, 30> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -622,6 +718,11 @@ constexpr std::array<CardId, 25> kCreatureCards = {
     CardId::JuzamDjinn,
     CardId::SedgeTroll,
     CardId::HypnoticSpecter,
+    CardId::KirdApe,
+    CardId::ScrybSprites,
+    CardId::ArgothianPixies,
+    CardId::ErhnamDjinn,
+    CardId::Atog,
 };
 
 constexpr std::array<CardId, 6> kSorceryCards = {
@@ -633,7 +734,7 @@ constexpr std::array<CardId, 6> kSorceryCards = {
     CardId::Timetwister,
 };
 
-constexpr std::array<CardId, 12> kArtifactCards = {
+constexpr std::array<CardId, 14> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
@@ -646,11 +747,14 @@ constexpr std::array<CardId, 12> kArtifactCards = {
     CardId::MoxJet,
     CardId::ChaosOrb,
     CardId::JalumTome,
+    CardId::AnkhOfMishra,
+    CardId::RelicBarrier,
 };
 
-constexpr std::array<CardId, 2> kEnchantmentCards = {
+constexpr std::array<CardId, 3> kEnchantmentCards = {
     CardId::Moat,
     CardId::Crusade,
+    CardId::SylvanLibrary,
 };
 
 constexpr ManaCost kMillstoneActivationCost = {.generic = 2};
@@ -835,10 +939,14 @@ ManaCost land_mana(CardId card) {
         return {.blue = 1};
     case CardId::Badlands:
         return {.red = 1};
+    case CardId::Taiga:
+        return {.green = 1};
     case CardId::CityOfBrass:
         return {.generic = 1};
     case CardId::Swamp:
         return {.black = 1};
+    case CardId::Pendelhaven:
+        return {.green = 1};
     default:
         return {};
     }
@@ -912,6 +1020,13 @@ bool is_artifact_creature(CardId card) {
 bool land_has_swamp_type(CardId card) {
     return card == CardId::Swamp || card == CardId::Badlands ||
            card == CardId::UndergroundSea;
+}
+
+// Type-line fact: lands whose printed type line includes Forest - the
+// basic plus the RG dual. Anything keyed on "controls a Forest" (Kird
+// Ape) must use this, never CardId::Forest equality.
+bool land_has_forest_type(CardId card) {
+    return card == CardId::Forest || card == CardId::Taiga;
 }
 
 ManaPaymentPlan plan_mana_payment(const PlayerState& player,
@@ -1016,7 +1131,8 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
                     land == CardId::Tundra ||
                     land == CardId::VolcanicIsland ||
                     land == CardId::UndergroundSea ||
-                    land == CardId::Badlands;
+                    land == CardId::Badlands ||
+                    land == CardId::Taiga;
                 const int land_tier = city ? 2 : dual ? 1 : 0;
                 if (land_tier == tier &&
                     !player.lands[index].tapped &&
@@ -1178,6 +1294,7 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             case CardId::VolcanicIsland:
             case CardId::UndergroundSea:
             case CardId::Badlands:
+            case CardId::Taiga:
                 return 1;  // duals after basics
             case CardId::CityOfBrass:
                 return 2;  // the life ping
@@ -1398,12 +1515,13 @@ bool land_provides(CardId land, int ManaCost::*color) {
                color == &ManaCost::black;
     }
     if (color == &ManaCost::green) {
-        return land == CardId::Forest;
+        return land == CardId::Forest || land == CardId::Taiga ||
+               land == CardId::Pendelhaven;
     }
     if (color == &ManaCost::red) {
         return land == CardId::Mountain || land == CardId::Plateau ||
                land == CardId::VolcanicIsland ||
-               land == CardId::Badlands;
+               land == CardId::Badlands || land == CardId::Taiga;
     }
     if (color == &ManaCost::blue) {
         return land == CardId::Island || land == CardId::Tundra ||
@@ -1442,7 +1560,7 @@ std::vector<std::vector<PaymentTap>> alternative_payments(
         return land == CardId::Plateau || land == CardId::Tundra ||
                land == CardId::VolcanicIsland ||
                land == CardId::UndergroundSea ||
-               land == CardId::Badlands;
+               land == CardId::Badlands || land == CardId::Taiga;
     };
     const ManaPaymentPlan plan = plan_mana_payment(player, cost);
     if (!plan.possible || max_variants == 0) {
@@ -1771,19 +1889,20 @@ const CreaturePermanent* find_creature(
 int creature_power(const CreaturePermanent& creature) {
     return card_definition(creature_face(creature)).power +
            creature.temporary_power_bonus + creature.plus_counters +
-           creature.crusade_bonus;
+           creature.static_power_bonus;
 }
 
 int creature_toughness(const CreaturePermanent& creature) {
     return card_definition(creature_face(creature)).toughness +
            creature.temporary_toughness_bonus +
-           creature.plus_counters + creature.crusade_bonus;
+           creature.plus_counters + creature.static_toughness_bonus;
 }
 
-// Crusade is the pool's only global static pump: every white creature
-// (printed cost includes white) gets +1/+1 per Crusade in play, either
-// player's. Recomputed after every resolution so enter/leave events
-// need no individual triggers.
+// All static battlefield buffs, recomputed after every resolution so
+// enter/leave events need no individual triggers: Crusade (+1/+1 to
+// every white creature per copy, either player's), Sedge Troll (+1/+1
+// while its controller has a Swamp-typed land) and Kird Ape (+1/+2
+// while its controller has a Forest-typed land).
 void refresh_crusade_buffs(GameState& state) {
     int crusades = 0;
     for (const auto& player : state.players) {
@@ -1793,23 +1912,36 @@ void refresh_crusade_buffs(GameState& state) {
     }
     for (auto& player : state.players) {
         bool controls_swamp = false;
+        bool controls_forest = false;
         for (const auto& land : player.lands) {
             controls_swamp =
                 controls_swamp ||
                 land_has_swamp_type(land_face(land));
+            controls_forest =
+                controls_forest ||
+                land_has_forest_type(land_face(land));
         }
         for (auto& creature : player.creatures) {
-            int bonus =
+            int power_bonus =
                 card_definition(creature_face(creature))
                             .cost.white > 0
                     ? crusades
                     : 0;
+            int toughness_bonus = power_bonus;
             // Sedge Troll: +1/+1 while its controller has a Swamp.
             if (creature_face(creature) == CardId::SedgeTroll &&
                 controls_swamp) {
-                bonus += 1;
+                power_bonus += 1;
+                toughness_bonus += 1;
             }
-            creature.crusade_bonus = bonus;
+            // Kird Ape: +1/+2 while its controller has a Forest.
+            if (creature_face(creature) == CardId::KirdApe &&
+                controls_forest) {
+                power_bonus += 1;
+                toughness_bonus += 2;
+            }
+            creature.static_power_bonus = power_bonus;
+            creature.static_toughness_bonus = toughness_bonus;
         }
     }
 }
@@ -1842,10 +1974,16 @@ bool can_attack_through_moat(const GameState& state,
 bool can_block_creature(const CreaturePermanent& attacker,
                         const CreaturePermanent& blocker) {
     const auto& attacker_definition =
-        card_definition(attacker.card);
+        card_definition(creature_face(attacker));
     const auto& blocker_definition =
-        card_definition(blocker.card);
+        card_definition(creature_face(blocker));
     if (attacker_definition.flying && !blocker_definition.flying) {
+        return false;
+    }
+    // Argothian Pixies cannot be blocked by artifact creatures
+    // (Su-Chi, Triskelion, an animated Factory, and their copies).
+    if (creature_face(attacker) == CardId::ArgothianPixies &&
+        is_artifact_creature(creature_face(blocker))) {
         return false;
     }
     return blocker_definition.cannot_block_power_at_least == 0 ||
@@ -1895,6 +2033,36 @@ std::vector<PermanentId> legal_attackers_for_blocker(
         }
     }
     return legal_attackers;
+}
+
+// Uniform creature-destruction path (Chaos Orb, Berserk's end-of-turn
+// clause): the Su-Chi death rebate applies, the physical card goes to
+// its owner's graveyard.
+void destroy_creature_at(PlayerState& player, std::size_t index) {
+    const auto& creature = player.creatures[index];
+    if (creature_face(creature) == CardId::SuChi) {
+        player.mana_pool.generic += 4;
+    }
+    player.graveyard.push_back(creature.card);
+    player.creatures.erase(
+        player.creatures.begin() +
+        static_cast<std::ptrdiff_t>(index));
+}
+
+// Ankh of Mishra: whenever ANY land enters the battlefield (land
+// drops and land copies entering alike), each Ankh in play - either
+// player's - deals 2 damage to that land's controller.
+void trigger_ankh_land_entry(GameState& state,
+                             std::size_t land_controller) {
+    int ankhs = 0;
+    for (const auto& player : state.players) {
+        for (const auto& artifact : player.artifacts) {
+            ankhs +=
+                artifact_face(artifact) == CardId::AnkhOfMishra ? 1
+                                                                : 0;
+        }
+    }
+    state.players[land_controller].life -= 2 * ankhs;
 }
 
 void remove_dead_creatures(PlayerState& player) {
@@ -1987,6 +2155,30 @@ double handcrafted_card_value(CardId card) {
         return 650.0;
     case CardId::Swamp:
         return 100.0;
+    case CardId::Taiga:
+        return 150.0;
+    case CardId::KirdApe:
+        return 500.0;
+    case CardId::ScrybSprites:
+        return 350.0;
+    case CardId::ArgothianPixies:
+        return 550.0;
+    case CardId::ErhnamDjinn:
+        return 1'100.0;
+    case CardId::Berserk:
+        return 700.0;
+    case CardId::Regrowth:
+        return 800.0;
+    case CardId::SylvanLibrary:
+        return 900.0;
+    case CardId::Pendelhaven:
+        return 120.0;
+    case CardId::Atog:
+        return 600.0;
+    case CardId::AnkhOfMishra:
+        return 700.0;
+    case CardId::RelicBarrier:
+        return 400.0;
     case CardId::Forest:
     case CardId::Mountain:
     case CardId::Island:
@@ -2234,6 +2426,70 @@ std::vector<CardId> br_midrange_deck() {
     deck.push_back(CardId::LibraryOfAlexandria);
     deck.push_back(CardId::StripMine);
     deck.push_back(CardId::UndergroundSea);
+    return deck;
+}
+
+std::vector<CardId> rg_berserk_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::ArgothianPixies);
+    deck.insert(deck.end(), 4, CardId::ErhnamDjinn);
+    deck.insert(deck.end(), 4, CardId::KirdApe);
+    deck.insert(deck.end(), 3, CardId::LlanowarElves);
+    deck.insert(deck.end(), 3, CardId::ScrybSprites);
+    deck.push_back(CardId::ChaosOrb);
+    deck.push_back(CardId::MoxEmerald);
+    deck.push_back(CardId::MoxRuby);
+    deck.push_back(CardId::SolRing);
+    deck.insert(deck.end(), 2, CardId::Berserk);
+    deck.insert(deck.end(), 4, CardId::GiantGrowth);
+    deck.insert(deck.end(), 6, CardId::LightningBolt);
+    deck.insert(deck.end(), 2, CardId::Shatter);
+    deck.push_back(CardId::Disintegrate);
+    deck.push_back(CardId::Regrowth);
+    deck.push_back(CardId::WheelOfFortune);
+    deck.insert(deck.end(), 2, CardId::SylvanLibrary);
+    deck.insert(deck.end(), 4, CardId::Forest);
+    deck.insert(deck.end(), 4, CardId::Mountain);
+    deck.insert(deck.end(), 2, CardId::Pendelhaven);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.push_back(CardId::StripMine);
+    deck.insert(deck.end(), 4, CardId::Taiga);
+    return deck;
+}
+
+std::vector<CardId> atog_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::Atog);
+    deck.insert(deck.end(), 3, CardId::SerendibEfreet);
+    deck.insert(deck.end(), 2, CardId::AnkhOfMishra);
+    deck.push_back(CardId::BlackLotus);
+    deck.insert(deck.end(), 4, CardId::BlackVise);
+    deck.push_back(CardId::ChaosOrb);
+    deck.push_back(CardId::MoxEmerald);
+    deck.push_back(CardId::MoxJet);
+    deck.push_back(CardId::MoxPearl);
+    deck.push_back(CardId::MoxRuby);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::RelicBarrier);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::AncestralRecall);
+    deck.insert(deck.end(), 8, CardId::LightningBolt);
+    deck.insert(deck.end(), 4, CardId::PsionicBlast);
+    deck.push_back(CardId::Shatter);
+    deck.push_back(CardId::DemonicTutor);
+    deck.push_back(CardId::MindTwist);
+    deck.push_back(CardId::TimeWalk);
+    deck.push_back(CardId::Timetwister);
+    deck.push_back(CardId::WheelOfFortune);
+    deck.push_back(CardId::CopyArtifact);
+    deck.insert(deck.end(), 3, CardId::Badlands);
+    deck.insert(deck.end(), 3, CardId::CityOfBrass);
+    deck.insert(deck.end(), 2, CardId::Island);
+    deck.push_back(CardId::LibraryOfAlexandria);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.push_back(CardId::StripMine);
+    deck.push_back(CardId::UndergroundSea);
+    deck.insert(deck.end(), 4, CardId::VolcanicIsland);
     return deck;
 }
 
@@ -2646,6 +2902,50 @@ PriorityAction PriorityAction::cast_shatter(std::size_t owner,
             .target = Target::creature_target(owner, artifact)};
 }
 
+PriorityAction PriorityAction::cast_berserk(Target creature_target) {
+    return {.kind = PriorityActionKind::CastBerserk,
+            .card = CardId::Berserk,
+            .target = creature_target};
+}
+
+PriorityAction PriorityAction::cast_regrowth(CardId chosen) {
+    PriorityAction action{
+        .kind = PriorityActionKind::CastRegrowth,
+        .card = CardId::Regrowth};
+    action.chosen_card = chosen;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_pendelhaven(
+    PermanentId land, Target creature_target) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivatePendelhaven,
+        .card = CardId::Pendelhaven,
+        .target = creature_target};
+    action.source_permanent = land;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_atog(PermanentId atog,
+                                             PermanentId artifact) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateAtog,
+        .card = CardId::Atog,
+        .target = Target::creature_target(0, artifact)};
+    action.source_permanent = atog;
+    return action;
+}
+
+PriorityAction PriorityAction::activate_relic_barrier(
+    PermanentId barrier, std::size_t owner, PermanentId artifact) {
+    PriorityAction action{
+        .kind = PriorityActionKind::ActivateRelicBarrier,
+        .card = CardId::RelicBarrier,
+        .target = Target::creature_target(owner, artifact)};
+    action.source_permanent = barrier;
+    return action;
+}
+
 PriorityAction PriorityAction::tap_land_for_mana(PermanentId land,
                                                  int color_index) {
     PriorityAction action{
@@ -2833,6 +3133,20 @@ legal_priority_actions(const GameState& state, std::size_t player,
                 }
             }
         }
+        // Regrowth: Demonic Tutor's chosen-card pattern, but the
+        // source is the caster's OWN GRAVEYARD.
+        if (has_card(player_state.hand, CardId::Regrowth) &&
+            can_pay_memo(card_definition(CardId::Regrowth).cost)) {
+            std::vector<CardId> seen;
+            for (const CardId card : player_state.graveyard) {
+                if (std::find(seen.begin(), seen.end(), card) ==
+                    seen.end()) {
+                    seen.push_back(card);
+                    actions.push_back(
+                        PriorityAction::cast_regrowth(card));
+                }
+            }
+        }
         if (has_card(player_state.hand, CardId::Braingeyser)) {
             for (int x_value = 0;
                  x_value <= maximum_available_mana(player_state) &&
@@ -2958,6 +3272,20 @@ legal_priority_actions(const GameState& state, std::size_t player,
         }
     }
 
+    const auto& berserk = card_definition(CardId::Berserk);
+    if (has_card(player_state.hand, CardId::Berserk) &&
+        can_pay_memo(berserk.cost)) {
+        for (std::size_t controller = 0;
+             controller < state.players.size(); ++controller) {
+            for (const auto& creature :
+                 state.players[controller].creatures) {
+                actions.push_back(PriorityAction::cast_berserk(
+                    Target::creature_target(controller,
+                                            creature.id)));
+            }
+        }
+    }
+
     const auto& counterspell = card_definition(CardId::Counterspell);
     if (has_card(player_state.hand, CardId::Counterspell) &&
         can_pay_memo(counterspell.cost)) {
@@ -3052,6 +3380,57 @@ legal_priority_actions(const GameState& state, std::size_t player,
         for (const auto& artifact : player_state.artifacts) {
             actions.push_back(PriorityAction::activate_sage(
                 sage.id, artifact.id));
+        }
+    }
+    // Atog: sacrifice ONE of your artifacts (no mana, no tap):
+    // +2/+2 until end of turn. One action per (Atog, artifact);
+    // multiple activations per turn are legal.
+    for (const auto& atog : player_state.creatures) {
+        if (creature_face(atog) != CardId::Atog) {
+            continue;
+        }
+        for (const auto& artifact : player_state.artifacts) {
+            actions.push_back(PriorityAction::activate_atog(
+                atog.id, artifact.id));
+        }
+    }
+    // Pendelhaven: tap to give a creature whose CURRENT stats are
+    // exactly 1/1 +1/+2 until end of turn.
+    for (const auto& land : player_state.lands) {
+        if (land_face(land) != CardId::Pendelhaven || land.tapped) {
+            continue;
+        }
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            for (const auto& creature :
+                 state.players[owner].creatures) {
+                if (creature_power(creature) == 1 &&
+                    creature_toughness(creature) == 1) {
+                    actions.push_back(
+                        PriorityAction::activate_pendelhaven(
+                            land.id, Target::creature_target(
+                                         owner, creature.id)));
+                }
+            }
+        }
+    }
+    // Relic Barrier: tap to tap target artifact (any player's).
+    for (const auto& barrier : player_state.artifacts) {
+        if (artifact_face(barrier) != CardId::RelicBarrier ||
+            barrier.tapped) {
+            continue;
+        }
+        for (std::size_t owner = 0; owner < state.players.size();
+             ++owner) {
+            for (const auto& artifact :
+                 state.players[owner].artifacts) {
+                if (artifact.id == barrier.id) {
+                    continue;  // it taps itself as the cost
+                }
+                actions.push_back(
+                    PriorityAction::activate_relic_barrier(
+                        barrier.id, owner, artifact.id));
+            }
         }
     }
     for (const auto& trike : player_state.creatures) {
@@ -3181,6 +3560,7 @@ bool apply_priority_action(GameState& state, std::size_t player,
         }
         player_state.land_played_this_turn = true;
         ++state.stats[player].lands_played;
+        trigger_ankh_land_entry(state, player);
         refresh_crusade_buffs(state);
         return true;
 
@@ -3798,6 +4178,144 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::CastBerserk: {
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        const auto& definition = card_definition(CardId::Berserk);
+        if (!pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, CardId::Berserk)) {
+            return false;
+        }
+        state.stack.push_back({
+            .id = state.next_stack_object_id++,
+            .card = CardId::Berserk,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::CastRegrowth: {
+        const auto& definition = card_definition(CardId::Regrowth);
+        if (!action.chosen_card.has_value() ||
+            !has_card(player_state.graveyard, *action.chosen_card) ||
+            !pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand, CardId::Regrowth)) {
+            return false;
+        }
+        StackObject spell{
+            .kind = StackObjectKind::Spell,
+            .id = state.next_stack_object_id++,
+            .card = CardId::Regrowth,
+            .controller = player,
+        };
+        spell.chosen_card = action.chosen_card;
+        state.stack.push_back(spell);
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::ActivatePendelhaven: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        for (auto& land : player_state.lands) {
+            if (land.id == *action.source_permanent &&
+                land_face(land) == CardId::Pendelhaven &&
+                !land.tapped) {
+                const auto* target = find_creature(
+                    state.players[action.target->player],
+                    *action.target->creature);
+                if (target == nullptr ||
+                    creature_power(*target) != 1 ||
+                    creature_toughness(*target) != 1) {
+                    return false;
+                }
+                land.tapped = true;
+                state.stack.push_back({
+                    .kind = StackObjectKind::ActivatedAbility,
+                    .id = state.next_stack_object_id++,
+                    .card = CardId::Pendelhaven,
+                    .controller = player,
+                    .target = action.target,
+                });
+                return true;
+            }
+        }
+        return false;
+    }
+
+    case PriorityActionKind::ActivateAtog: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        auto* atog =
+            find_creature(player_state, *action.source_permanent);
+        if (atog == nullptr ||
+            creature_face(*atog) != CardId::Atog) {
+            return false;
+        }
+        // Sacrificing the artifact is the cost, paid on activation:
+        // the same leave-play path as Sage of Lat-Nam's sacrifice.
+        bool sacrificed = false;
+        for (std::size_t index = 0;
+             index < player_state.artifacts.size(); ++index) {
+            if (player_state.artifacts[index].id ==
+                *action.target->creature) {
+                player_state.graveyard.push_back(
+                    player_state.artifacts[index].card);
+                player_state.artifacts.erase(
+                    player_state.artifacts.begin() +
+                    static_cast<std::ptrdiff_t>(index));
+                sacrificed = true;
+                break;
+            }
+        }
+        if (!sacrificed) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::Atog,
+            .controller = player,
+            .target = Target::creature_target(
+                player, *action.source_permanent),
+        });
+        return true;
+    }
+
+    case PriorityActionKind::ActivateRelicBarrier: {
+        if (!action.source_permanent.has_value() ||
+            !action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        auto* barrier =
+            find_artifact(player_state, *action.source_permanent);
+        if (barrier == nullptr || barrier->tapped ||
+            artifact_face(*barrier) != CardId::RelicBarrier) {
+            return false;
+        }
+        barrier->tapped = true;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::RelicBarrier,
+            .controller = player,
+            .target = action.target,
+        });
+        return true;
+    }
+
     case PriorityActionKind::TapLandForMana: {
         if (!action.source_permanent.has_value()) {
             return false;
@@ -4045,18 +4563,11 @@ bool resolve_top_of_stack_inner(
             }
             for (std::size_t index = 0;
                  index < owner.creatures.size(); ++index) {
-                const auto& creature = owner.creatures[index];
-                if (creature.id != target_id) {
+                if (owner.creatures[index].id != target_id) {
                     continue;
                 }
                 // Destruction is a death: Su-Chi's rebate applies.
-                if (creature_face(creature) == CardId::SuChi) {
-                    owner.mana_pool.generic += 4;
-                }
-                owner.graveyard.push_back(creature.card);
-                owner.creatures.erase(
-                    owner.creatures.begin() +
-                    static_cast<std::ptrdiff_t>(index));
+                destroy_creature_at(owner, index);
                 return true;
             }
             for (std::size_t index = 0;
@@ -4097,6 +4608,51 @@ bool resolve_top_of_stack_inner(
                     static_cast<std::ptrdiff_t>(worst));
             }
             return true;
+        }
+        if (spell.card == CardId::Pendelhaven) {
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            auto* target = find_creature(
+                state.players[spell.target->player],
+                *spell.target->creature);
+            // The target must still be exactly 1/1 at resolution.
+            if (target == nullptr || creature_power(*target) != 1 ||
+                creature_toughness(*target) != 1) {
+                return true;  // fizzles
+            }
+            target->temporary_power_bonus += 1;
+            target->temporary_toughness_bonus += 2;
+            return true;
+        }
+        if (spell.card == CardId::Atog) {
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            auto* atog = find_creature(
+                state.players[spell.target->player],
+                *spell.target->creature);
+            if (atog == nullptr) {
+                return true;  // Atog left play: fizzles
+            }
+            atog->temporary_power_bonus += 2;
+            atog->temporary_toughness_bonus += 2;
+            return true;
+        }
+        if (spell.card == CardId::RelicBarrier) {
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            auto& owner = state.players[spell.target->player];
+            auto* artifact =
+                find_artifact(owner, *spell.target->creature);
+            if (artifact != nullptr) {
+                artifact->tapped = true;
+            }
+            return true;  // absent target: fizzles
         }
         if (spell.card == CardId::StripMine) {
             if (!spell.target.has_value() ||
@@ -4179,6 +4735,26 @@ bool resolve_top_of_stack_inner(
                         static_cast<std::size_t>(
                             definition.effect_damage);
                 }
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
+    if (spell.card == CardId::Berserk) {
+        if (spell.target.has_value() &&
+            spell.target->creature.has_value()) {
+            auto* creature = find_creature(
+                state.players[spell.target->player],
+                *spell.target->creature);
+            if (creature != nullptr) {
+                // +X/+0 where X is its power at resolution, trample
+                // until end of turn, and destruction at end of turn
+                // if it attacked this turn (checked at cleanup).
+                const int power_now = creature_power(*creature);
+                creature->temporary_power_bonus += power_now;
+                creature->trample = true;
+                creature->berserked_this_turn = true;
             }
         }
         controller.graveyard.push_back(spell.card);
@@ -4506,6 +5082,24 @@ bool resolve_top_of_stack_inner(
         return true;
     }
 
+    if (spell.card == CardId::Regrowth) {
+        // Demonic Tutor's pattern with the caster's own graveyard as
+        // the source. The chosen card leaves the graveyard BEFORE
+        // Regrowth itself is put there.
+        if (spell.chosen_card.has_value()) {
+            const auto found =
+                std::find(controller.graveyard.begin(),
+                          controller.graveyard.end(),
+                          *spell.chosen_card);
+            if (found != controller.graveyard.end()) {
+                controller.hand.push_back(*found);
+                controller.graveyard.erase(found);
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
     if (spell.card == CardId::CopyArtifact) {
         if (!spell.target.has_value() ||
             !spell.target->creature.has_value()) {
@@ -4548,6 +5142,9 @@ bool resolve_top_of_stack_inner(
                 copy.is_copy = true;
                 copy.entered_this_turn = true;
                 controller.lands.push_back(copy);
+                // A land copy entering play is a land entering the
+                // battlefield: Ankh of Mishra fires.
+                trigger_ankh_land_entry(state, spell.controller);
                 return true;
             }
             CreaturePermanent copy{
@@ -4858,6 +5455,11 @@ ManaCost pass_dominance_available_mana(
             break;
         case CardId::Swamp:
             ++available.black;
+            break;
+        case CardId::Pendelhaven:
+            // Single-color like a basic; duals stay out (matching
+            // the existing conservative treatment).
+            ++available.green;
             break;
         default:
             break;
@@ -5453,30 +6055,38 @@ bool resolve_combat(
         blockers_by_attacker[attacker_id].push_back(blocker_id);
     }
 
+    // Combat damage to a player triggers Hypnotic Specter's discard
+    // (house determinism: the first card in hand). Unblocked hits and
+    // trample excess both qualify.
+    const auto combat_damage_to_defender = [&](
+        const CreaturePermanent& attacker, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        state.players[defending_player].life -= amount;
+        state.stats[attacking_player].damage_to_opponent +=
+            static_cast<std::size_t>(amount);
+        if (creature_face(attacker) == CardId::HypnoticSpecter &&
+            !state.players[defending_player].hand.empty()) {
+            auto& victim = state.players[defending_player];
+            victim.graveyard.push_back(victim.hand.front());
+            victim.hand.erase(victim.hand.begin());
+        }
+    };
+
     for (const PermanentId attacker_id : attackers) {
         auto* attacker =
             find_creature(state.players[attacking_player], attacker_id);
         if (!card_definition(creature_face(*attacker)).vigilance) {
             attacker->tapped = true;
         }
+        // Berserk's destroy clause reads this at cleanup.
+        attacker->attacked_this_turn = true;
         const int attacker_power = creature_power(*attacker);
         const auto blocker_group = blockers_by_attacker.find(attacker_id);
 
         if (blocker_group == blockers_by_attacker.end()) {
-            state.players[defending_player].life -=
-                attacker_power;
-            state.stats[attacking_player].damage_to_opponent +=
-                static_cast<std::size_t>(attacker_power);
-            // Hypnotic Specter: combat damage to a player forces a
-            // discard (house determinism: the first card in hand).
-            if (creature_face(*attacker) ==
-                    CardId::HypnoticSpecter &&
-                attacker_power > 0 &&
-                !state.players[defending_player].hand.empty()) {
-                auto& victim = state.players[defending_player];
-                victim.graveyard.push_back(victim.hand.front());
-                victim.hand.erase(victim.hand.begin());
-            }
+            combat_damage_to_defender(*attacker, attacker_power);
             continue;
         }
 
@@ -5499,6 +6109,12 @@ bool resolve_combat(
                 std::min(damage_remaining, lethal_damage);
             blocker->damage += assigned_damage;
             damage_remaining -= assigned_damage;
+        }
+        // Trample: a blocked trampling attacker assigns each blocker
+        // only lethal damage (toughness minus already-marked damage,
+        // handled above) and the EXCESS to the defending player.
+        if (attacker->trample) {
+            combat_damage_to_defender(*attacker, damage_remaining);
         }
     }
 
@@ -5692,6 +6308,20 @@ std::vector<CardId> cleanup_turn(
     for (auto& player : state.players) {
         player.mana_pool = {};
         player.channel_active = false;
+        // Berserk's destroy clause resolves before the other
+        // end-of-turn expiry: a Berserked creature that attacked this
+        // turn is destroyed (the uniform death path - a Su-Chi face
+        // still rebates, though end-of-turn mana immediately empties).
+        // This precedes Factory reversion so a Berserked animated
+        // Factory that attacked dies as a creature.
+        for (std::size_t index = player.creatures.size();
+             index-- > 0;) {
+            if (player.creatures[index].berserked_this_turn &&
+                player.creatures[index].attacked_this_turn) {
+                destroy_creature_at(player, index);
+            }
+        }
+        player.mana_pool = {};
         for (std::size_t index = player.creatures.size();
              index-- > 0;) {
             if (creature_face(player.creatures[index]) ==
@@ -5713,9 +6343,62 @@ std::vector<CardId> cleanup_turn(
             creature.temporary_power_bonus = 0;
             creature.temporary_toughness_bonus = 0;
             creature.exile_on_death_this_turn = false;
+            creature.trample = false;
+            creature.attacked_this_turn = false;
+            creature.berserked_this_turn = false;
         }
     }
     return discarded;
+}
+
+bool has_sylvan_library(const GameState& state, std::size_t player) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Sylvan Library player must be 0 or 1");
+    }
+    // Multiple Sylvan Libraries do NOT stack: exactly one trigger per
+    // upkeep regardless of count (simplest legal reading).
+    const auto& enchantments = state.players[player].enchantments;
+    return std::find(enchantments.begin(), enchantments.end(),
+                     CardId::SylvanLibrary) != enchantments.end();
+}
+
+void sylvan_return_to_library(
+    GameState& state, std::size_t player,
+    const std::vector<std::size_t>& indices) {
+    if (player >= state.players.size()) {
+        throw std::out_of_range(
+            "Sylvan Library player must be 0 or 1");
+    }
+    auto& player_state = state.players[player];
+    std::vector<std::size_t> ordered = indices;
+    std::sort(ordered.begin(), ordered.end());
+    if (std::adjacent_find(ordered.begin(), ordered.end()) !=
+        ordered.end()) {
+        throw std::invalid_argument(
+            "Sylvan Library return positions must be unique");
+    }
+    if (!ordered.empty() &&
+        ordered.back() >= player_state.hand.size()) {
+        throw std::invalid_argument(
+            "Sylvan Library return position is outside the hand");
+    }
+    // Deterministic order: indices[0] ends on TOP of the library
+    // (drawn next), indices[1] directly beneath it. The library's
+    // back() is its top, so push in reverse selection order.
+    std::vector<CardId> returned;
+    returned.reserve(indices.size());
+    for (const std::size_t index : indices) {
+        returned.push_back(player_state.hand[index]);
+    }
+    for (std::size_t position = ordered.size(); position-- > 0;) {
+        player_state.hand.erase(
+            player_state.hand.begin() +
+            static_cast<std::ptrdiff_t>(ordered[position]));
+    }
+    for (std::size_t position = returned.size(); position-- > 0;) {
+        player_state.library.push_back(returned[position]);
+    }
 }
 
 PlayerObservation observe_game_state(const GameState& state,
@@ -5878,6 +6561,53 @@ Game::choose_cleanup_discards(std::size_t player,
     positions.resize(excess);
     std::sort(positions.begin(), positions.end());
     return positions;
+}
+
+std::optional<GameResult>
+Game::perform_sylvan_library_upkeep(std::size_t player) {
+    if (!has_sylvan_library(state_, player)) {
+        return std::nullopt;
+    }
+    // Draw two extra cards; an empty library loses the game exactly
+    // like the normal draw step.
+    for (int extra = 0; extra < 2; ++extra) {
+        if (!draw_card(player)) {
+            return make_result(
+                static_cast<int>(opponent_of(player)),
+                EndReason::EmptyLibrary);
+        }
+    }
+    // Return two cards to the top of the library. A controller seat
+    // with the optional chooser decides; every other seat (bots, SPZ,
+    // chooserless controllers) returns its two lowest-valued cards by
+    // the shared handcrafted valuation.
+    const auto& hand = state_.players[player].hand;
+    constexpr std::size_t kReturnCount = 2;
+    std::vector<std::size_t> selected;
+    ++state_.stats[player].decisions;
+    const auto* controller = human_controller(player);
+    if (controller != nullptr && controller->choose_sylvan_returns) {
+        selected = controller->choose_sylvan_returns(
+            human_observation(player), kReturnCount);
+        if (selected.size() != kReturnCount) {
+            throw std::invalid_argument(
+                "Sylvan Library return must select exactly two "
+                "cards");
+        }
+    } else {
+        std::vector<std::size_t> positions(hand.size());
+        std::iota(positions.begin(), positions.end(), 0);
+        std::stable_sort(
+            positions.begin(), positions.end(),
+            [&hand](std::size_t left, std::size_t right) {
+                return handcrafted_card_value(hand[left]) <
+                       handcrafted_card_value(hand[right]);
+            });
+        positions.resize(kReturnCount);
+        selected = positions;
+    }
+    sylvan_return_to_library(state_, player, selected);
+    return std::nullopt;
 }
 
 void Game::perform_cleanup() {
@@ -6493,6 +7223,142 @@ double Game::handcrafted_action_score(const PriorityAction& action,
                        handcrafted_card_value(
                            artifact_face(artifact)) /
                            2.0;
+            }
+        }
+        return -400.0;
+    }
+    case PriorityActionKind::CastBerserk: {
+        // Berserk is a lethal-push tool: the destroy drawback makes
+        // any non-closing use value destruction. Double the target's
+        // power only when that swings this turn's attack to lethal.
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            action.target->player != player) {
+            return -10'000.0;
+        }
+        const auto* target = find_creature(
+            state_.players[player], *action.target->creature);
+        if (target == nullptr) {
+            return -10'000.0;
+        }
+        if (state_.active_player != player) {
+            return -600.0;
+        }
+        const bool target_can_attack =
+            !target->tapped && !target->summoning_sick &&
+            can_attack_through_moat(state_, *target);
+        const bool target_attacking = target->attacked_this_turn;
+        if (!target_can_attack && !target_attacking) {
+            return -600.0;
+        }
+        int available_power = 0;
+        for (const auto& creature : player_state.creatures) {
+            if ((!creature.tapped && !creature.summoning_sick &&
+                 can_attack_through_moat(state_, creature)) ||
+                creature.attacked_this_turn) {
+                available_power += creature_power(creature);
+            }
+        }
+        const int bonus = creature_power(*target);
+        if (available_power < opponent_state.life &&
+            available_power + bonus >= opponent_state.life) {
+            return 9'600.0;
+        }
+        return -600.0;
+    }
+    case PriorityActionKind::CastRegrowth:
+        return 600.0 +
+               (action.chosen_card.has_value()
+                    ? handcrafted_card_value(*action.chosen_card) /
+                          2.0
+                    : 0.0);
+    case PriorityActionKind::ActivatePendelhaven: {
+        // A free +1/+2 is nearly always fine on one's own attacker or
+        // blocker; never help the opponent's creature.
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            action.target->player != player) {
+            return -10'000.0;
+        }
+        const auto* target = find_creature(
+            state_.players[player], *action.target->creature);
+        if (target == nullptr) {
+            return -10'000.0;
+        }
+        const bool own_combat =
+            state_.active_player == player &&
+            (phase == TurnPhase::BeginCombat ||
+             phase == TurnPhase::DeclareBlockers) &&
+            (target->attacked_this_turn ||
+             (!target->tapped && !target->summoning_sick));
+        const bool defending =
+            state_.active_player != player &&
+            phase == TurnPhase::DeclareBlockers;
+        return own_combat || defending ? 300.0 : -200.0;
+    }
+    case PriorityActionKind::ActivateAtog: {
+        // Value-based sacrifice judgment: the +2/+2 is worth a small
+        // fixed amount unless it closes the game this combat, so the
+        // Atog never eats a Mox outside a decisive push.
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            !action.source_permanent.has_value()) {
+            return -10'000.0;
+        }
+        const auto* atog = find_creature(
+            state_.players[player], *action.source_permanent);
+        const ArtifactPermanent* meal = nullptr;
+        for (const auto& artifact : player_state.artifacts) {
+            if (artifact.id == *action.target->creature) {
+                meal = &artifact;
+            }
+        }
+        if (atog == nullptr || meal == nullptr) {
+            return -10'000.0;
+        }
+        const double meal_value =
+            handcrafted_card_value(artifact_face(*meal));
+        const bool atog_in_combat =
+            state_.active_player == player &&
+            (phase == TurnPhase::BeginCombat ||
+             phase == TurnPhase::DeclareBlockers) &&
+            (atog->attacked_this_turn ||
+             (!atog->tapped && !atog->summoning_sick));
+        if (atog_in_combat) {
+            int available_power = 0;
+            for (const auto& creature : player_state.creatures) {
+                if ((!creature.tapped &&
+                     !creature.summoning_sick &&
+                     can_attack_through_moat(state_, creature)) ||
+                    creature.attacked_this_turn) {
+                    available_power += creature_power(creature);
+                }
+            }
+            if (available_power < opponent_state.life &&
+                available_power + 2 >= opponent_state.life) {
+                // Decisive: the pump closes the game.
+                return 9'400.0 - meal_value / 100.0;
+            }
+        }
+        return 250.0 - meal_value / 2.0;
+    }
+    case PriorityActionKind::ActivateRelicBarrier: {
+        // Tap down an opponent's untapped mana rock or utility
+        // artifact at their upkeep-ish windows; never tap one's own.
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value() ||
+            action.target->player != opponent) {
+            return -10'000.0;
+        }
+        for (const auto& artifact : opponent_state.artifacts) {
+            if (artifact.id == *action.target->creature) {
+                if (artifact.tapped) {
+                    return -400.0;
+                }
+                return 200.0 +
+                       handcrafted_card_value(
+                           artifact_face(artifact)) /
+                           4.0;
             }
         }
         return -400.0;
@@ -7217,6 +8083,14 @@ std::optional<GameResult> Game::play_combat_with_attackers(
     if (attackers.empty()) {
         return play_priority_window(false, TurnPhase::EndCombat);
     }
+    // Declared attackers have attacked this turn even if a response
+    // later removes them from combat (Berserk's destroy clause).
+    for (const PermanentId attacker_id : attackers) {
+        if (auto* creature =
+                find_creature(attacking_state, attacker_id)) {
+            creature->attacked_this_turn = true;
+        }
+    }
 
     std::vector<PermanentId> available_blockers;
     for (const auto& creature : defending_state.creatures) {
@@ -7528,6 +8402,12 @@ GameResult Game::run_from_turn(std::size_t first_turn) {
             return make_result(
                 static_cast<int>(opponent_of(state_.active_player)),
                 EndReason::EmptyLibrary);
+        }
+        // Sylvan Library rides the draw step: two extra draws, then
+        // two cards returned to the top of the library.
+        if (const auto sylvan_result =
+                perform_sylvan_library_upkeep(state_.active_player)) {
+            return *sylvan_result;
         }
         if (has_human_observer()) {
             notify_human_observers({
@@ -7849,6 +8729,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_weenie_deck();
     case DeckId::BRMidrange:
         return br_midrange_deck();
+    case DeckId::RGBerserk:
+        return rg_berserk_deck();
+    case DeckId::Atog:
+        return atog_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -7885,6 +8769,10 @@ std::string_view deck_name(DeckId deck) {
         return "White Weenie";
     case DeckId::BRMidrange:
         return "BR Midrange";
+    case DeckId::RGBerserk:
+        return "RG Berserk";
+    case DeckId::Atog:
+        return "Atog";
     }
     return "Unknown";
 }
@@ -7951,6 +8839,27 @@ std::string_view deck_list(DeckId deck) {
                "Sol Ring / 7 Swamp / 4 Badlands / 3 Mishra's Factory / "
                "2 City of Brass / 2 Volcanic Island / "
                "Library of Alexandria / Strip Mine / Underground Sea";
+    case DeckId::RGBerserk:
+        return "4 Argothian Pixies / 4 Erhnam Djinn / 4 Kird Ape / "
+               "3 Llanowar Elves / 3 Scryb Sprites / Chaos Orb / "
+               "Mox Emerald / Mox Ruby / Sol Ring / 2 Berserk / "
+               "4 Giant Growth / 6 Lightning Bolt / 2 Shatter / "
+               "Disintegrate / Regrowth / Wheel of Fortune / "
+               "2 Sylvan Library / 4 Forest / 4 Mountain / "
+               "2 Pendelhaven / 4 Mishra's Factory / Strip Mine / "
+               "4 Taiga";
+    case DeckId::Atog:
+        return "4 Atog / 3 Serendib Efreet / 2 Ankh of Mishra / "
+               "Black Lotus / 4 Black Vise / Chaos Orb / "
+               "Mox Emerald / Mox Jet / Mox Pearl / Mox Ruby / "
+               "Mox Sapphire / Relic Barrier / Sol Ring / "
+               "Ancestral Recall / 8 Lightning Bolt / "
+               "4 Psionic Blast / Shatter / Demonic Tutor / "
+               "Mind Twist / Time Walk / Timetwister / "
+               "Wheel of Fortune / Copy Artifact / 3 Badlands / "
+               "3 City of Brass / 2 Island / Library of Alexandria / "
+               "4 Mishra's Factory / Strip Mine / Underground Sea / "
+               "4 Volcanic Island";
     }
     return "Unknown";
 }
@@ -8174,6 +9083,8 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::Robots),
         deck_cards(DeckId::WhiteWeenie),
         deck_cards(DeckId::BRMidrange),
+        deck_cards(DeckId::RGBerserk),
+        deck_cards(DeckId::Atog),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

@@ -3033,7 +3033,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 11,
+        .population = 13,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3046,11 +3046,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 11);
-    CHECK(first.best.total.games == 44);
+    CHECK(first.best.by_opponent.size() == 13);
+    CHECK(first.best.total.games == 52);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          44);
+          52);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3064,6 +3064,8 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::robots_deck(),
              old_school::white_weenie_deck(),
              old_school::br_midrange_deck(),
+             old_school::rg_berserk_deck(),
+             old_school::atog_deck(),
              old_school::lotus_combo_deck(),
              old_school::burn_deck(),
              old_school::uwr_deck(),
@@ -4895,7 +4897,7 @@ TEST(sedge_counts_swamp_typed_duals_and_swords_pays_current_power) {
         old_school::PriorityAction::play_land(
             old_school::CardId::Badlands),
         true));
-    CHECK(player.creatures[0].crusade_bonus == 1);
+    CHECK(player.creatures[0].static_power_bonus == 1);
 
     // Swords from the enemy: exile at CURRENT power = 3 life.
     const int life_before = player.life;
@@ -4955,7 +4957,7 @@ TEST(br_midrange_mechanics_work) {
     CHECK(player.mana_pool.black == 3);
 
     // Sedge buff appeared with the refresh (Swamp in play).
-    CHECK(player.creatures[0].crusade_bonus == 1);
+    CHECK(player.creatures[0].static_power_bonus == 1);
 
     // Bolt off the Badlands: burn the face.
     CHECK(old_school::apply_priority_action(
@@ -5147,9 +5149,9 @@ TEST(crusade_pumps_white_creatures_and_fades_when_destroyed) {
         true));
     resolve_top(state, 0);
     // All white creatures pump - both sides; the green bear does not.
-    CHECK(player.creatures[0].crusade_bonus == 1);
-    CHECK(enemy.creatures[0].crusade_bonus == 0);
-    CHECK(enemy.creatures[1].crusade_bonus == 1);
+    CHECK(player.creatures[0].static_power_bonus == 1);
+    CHECK(enemy.creatures[0].static_power_bonus == 0);
+    CHECK(enemy.creatures[1].static_power_bonus == 1);
 
     // Disenchanting the Crusade removes the pump on resolution.
     enemy.hand = {old_school::CardId::Disenchant};
@@ -5163,8 +5165,8 @@ TEST(crusade_pumps_white_creatures_and_fades_when_destroyed) {
         false));
     resolve_top(state, 1);
     CHECK(player.enchantments.empty());
-    CHECK(player.creatures[0].crusade_bonus == 0);
-    CHECK(enemy.creatures[1].crusade_bonus == 0);
+    CHECK(player.creatures[0].static_power_bonus == 0);
+    CHECK(enemy.creatures[1].static_power_bonus == 0);
 }
 
 TEST(chaos_orb_destroys_any_permanent_and_jalum_tome_filters) {
