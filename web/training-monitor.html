@@ -249,11 +249,18 @@ function render() {
       liftBaseline === "Handcrafted"
         ? "For each metagame deck, on identical pairings: the net's win rate minus Handcrafted's flying the same deck against the same field. Above zero = the learned bot outflies the rules bot."
         : "This run predates the Handcrafted-baseline change: lift here is measured over Random pilots (net's win rate minus Random's on the same pairings).";
-    // One small line chart per deck, keyed from the telemetry itself so
-    // renamed/new decks appear without touching this file. All charts
-    // share one y-domain so lifts compare across decks at a glance.
+    // One small line chart per deck. The display roster is the CURRENT
+    // metagame only (real old-school decks, 2026-08-05 direction) -
+    // retired synthetic decks still exist in old telemetry rows but do
+    // not get charts.
+    const CURRENT_DECKS = new Set([
+      "Lion-dib-bolt", "Robots", "White Weenie", "BR Midrange",
+      "RG Berserk", "Atog",
+    ]);
     const deckNames = [...new Set(liftRows.flatMap(r =>
-      Object.keys(r).filter(k => k.startsWith("lift_")).map(k => k.slice(5))))].sort();
+      Object.keys(r).filter(k => k.startsWith("lift_")).map(k => k.slice(5))))]
+      .filter(deck => CURRENT_DECKS.has(deck))
+      .sort();
     const values = liftRows.flatMap(r =>
       deckNames.map(deck => r["lift_" + deck]).filter(v => v !== undefined));
     const top = Math.max(0.3, ...values) * 1.12;
