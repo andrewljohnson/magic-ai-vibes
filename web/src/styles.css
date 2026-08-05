@@ -2090,8 +2090,11 @@ textarea:focus-visible,
   font-size: var(--card-type-floor);
 }
 
-/* Debug reveal: the opponent's cards render tiny in the hidden-hand
-   strip (hover for the full card reader). */
+/* Debug reveal: the opponent's hand renders face-up in place of the
+   hidden strip, at the player's own hand-card size so name, cost pips,
+   type, and stats read at a glance. The opponent-hand row is an `auto`
+   grid track, so it only grows while reveal mode is on; the battlefield
+   (1fr) absorbs the difference. */
 .debug-hand {
   position: static;
   margin: 0;
@@ -2104,35 +2107,23 @@ textarea:focus-visible,
 }
 
 .debug-hand .hand-fan {
-  height: 62px;
-  padding: 3px 10px;
+  height: 192px;
+  padding: 6px 12px 10px;
   align-items: center;
 }
 
 .debug-hand .hand-card-wrap {
-  width: 42px;
-  height: 56px;
-  flex-basis: 42px;
+  width: 134px;
+  height: 178px;
+  flex: 0 0 134px;
   transform: none;
   animation: none;
 }
 
 .debug-hand .hand-card-wrap .card-face {
-  width: 40px;
-  height: 54px;
-  padding: 2px;
-  border-width: 2px;
-}
-
-.debug-hand .card-face {
-  --card-name-size: var(--type-floor);
-  --card-name-lines: 1;
-}
-
-.debug-hand .card-rules,
-.debug-hand .card-footer,
-.debug-hand .mana-cost {
-  display: none;
+  width: 132px;
+  height: 176px;
+  padding: 7px;
 }
 
 .debug-pill {
@@ -3974,6 +3965,23 @@ select {
 
   .permanent-list {
     min-height: 66px;
+  }
+
+  /* Revealed opponent hand: smaller cards so the battlefield keeps room. */
+  .debug-hand .hand-fan {
+    height: 152px;
+  }
+
+  .debug-hand .hand-card-wrap {
+    width: 106px;
+    height: 142px;
+    flex: 0 0 106px;
+  }
+
+  .debug-hand .hand-card-wrap .card-face {
+    width: 104px;
+    height: 140px;
+    padding: 5px;
   }
 }
 
