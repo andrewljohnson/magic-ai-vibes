@@ -259,18 +259,6 @@ int main(int argc, char** argv) {
                         std::move(prev_advantage));
         }
     }
-    {
-        // Old-school specialist: trained only on the four real decks
-        // (Lion-dib-bolt, Robots, White Weenie, BR Midrange); shown on
-        // the full grid so its off-metagame rows are visible too.
-        std::ifstream oldschool_probe("data/spz-oldschool.txt");
-        if (oldschool_probe) {
-            add_spz_bot("spz-oldschool",
-                        std::make_shared<const spz::SpzNet>(
-                            spz::load_spz_net("data/spz-oldschool.txt")),
-                        nullptr);
-        }
-    }
     if (only_bot) {
         std::erase_if(bots, [&](const BotEntry& bot) {
             return bot.name != *only_bot;
