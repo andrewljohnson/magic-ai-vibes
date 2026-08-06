@@ -357,8 +357,8 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "Old-school specialist value net played with greedy rollout lookahead. The metagame is now the six real old-school decks over the 88-card pool; the prior artifacts' feature schemas are invalidated and a retrain for the six-deck era is pending. Until it lands the arena falls back to the Handcoded Policy opponent.",
-    versionDate: "2026-08-04",
+      "Six-deck-era champion: a value net (256 hidden units, TD self-play) trained on the real old-school metagame over the 88-card pool, played with greedy rollout lookahead. Beats Handcoded Policy 71.5% on the six-deck field.",
+    versionDate: "2026-08-06",
     versionDateLabel: "Champion frozen",
     lifecycle: "Self-play champion",
   },

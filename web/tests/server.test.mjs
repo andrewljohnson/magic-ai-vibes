@@ -146,7 +146,7 @@ test("serves the arena and publishes six-deck game metadata", async (t) => {
     ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
   const spz = body.policies.find(({ id }) => id === "spz");
-  assert.match(spz?.description ?? "", /six-deck era is pending/);
+  assert.match(spz?.description ?? "", /[Ss]ix-deck/);
   assert.equal(body.defaults.bluffMode, false);
   assert.deepEqual(body.decisionKinds, [
     "priority",
