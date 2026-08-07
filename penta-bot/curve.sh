@@ -1,8 +1,8 @@
 #!/bin/zsh
 # Learning-curve run with league play and gate-guarded promotion.
 #
-# Starts from the restored smoke net in penta_net_latest.npz (3000 games)
-# and runs 8 chunks x 2000 games. Per chunk: train (warm start from the
+# Starts from the smoke net in penta_net_latest.npz (3000 games) and runs
+# $CHUNKS x 2000 games. Per chunk: train (warm start from the
 # LATEST weights), snapshot to penta_net.ckpt-<cumulative>.npz (history is
 # never overwritten), gate 60 vs random + 120 vs handcrafted on fixed
 # seeds, append the progress line, and promote to penta_net.npz (the
@@ -15,11 +15,12 @@ cd "$(dirname "$0")"
 PROGRESS=progress.txt
 LATEST=penta_net_latest.npz
 BEST_NET=penta_net.npz
+CHUNKS=${CHUNKS:-"1 2 3"}
 
 hc_pct() { echo "$1" | sed -E 's/.*-> *([0-9.]+)%.*/\1/' }
 
 TOTAL=3000
-echo "=== curve run $(date) | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08 | from restored smoke net ($TOTAL games) ===" >> "$PROGRESS"
+echo "=== curve run $(date) | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08, td-lambda 1.0 | from fresh v2 smoke net ($TOTAL games) ===" >> "$PROGRESS"
 
 # Baseline: snapshot the smoke net (it is chunk 1's frozen league
 # opponent) and gate it to set the promotion bar.
@@ -33,7 +34,7 @@ BEST=$(hc_pct "$HC")
 cp "$LATEST" "$BEST_NET"
 echo "      baseline: smoke net promoted as initial $BEST_NET (handcrafted ${BEST}%)" >> "$PROGRESS"
 
-for CHUNK in 1 2 3 4 5 6 7 8; do
+for CHUNK in ${=CHUNKS}; do
   FROZEN="penta_net.ckpt-${TOTAL}.npz"
   python3 trainer.py --games 2000 --init "$LATEST" --out "$LATEST" \
     --epsilon-start 0.10 --epsilon-final 0.08 \

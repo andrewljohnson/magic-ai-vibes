@@ -28,19 +28,28 @@ import sys
 
 import numpy as np
 
-# Where the built penta.so lives. Override with PENTA_PY_DIR.
+# The pinned engine binding: the penta.so copied into this directory is
+# preferred, so training is immune to upstream rebuilds of the clone.
+# Fallback is the build location in the penta clone; PENTA_PY_DIR overrides
+# that fallback.
+LOCAL_DIR = os.path.dirname(os.path.abspath(__file__))
 PENTA_PY_DIR = os.environ.get(
     "PENTA_PY_DIR", os.path.expanduser("~/proj/penta/bindings/penta-py")
 )
 
 
 def import_penta():
-    """Import the penta module from PENTA_PY_DIR (idempotent)."""
-    if PENTA_PY_DIR not in sys.path:
-        sys.path.insert(0, PENTA_PY_DIR)
-    import penta  # noqa: PLC0415
+    """Import the penta module, pinned copy first (idempotent)."""
+    for path in (LOCAL_DIR, PENTA_PY_DIR):
+        if os.path.exists(os.path.join(path, "penta.so")):
+            if path not in sys.path:
+                sys.path.insert(0, path)
+            import penta  # noqa: PLC0415
 
-    return penta
+            return penta
+    raise ImportError(
+        f"no penta.so in {LOCAL_DIR} or {PENTA_PY_DIR}; build the binding "
+        "(cargo build --release in bindings/penta-py) and copy it here")
 
 
 STEPS = (
@@ -70,7 +79,12 @@ class Extractor:
         self.engine_version = catalog["engineVersion"]
         self.protocol_version = catalog["protocolVersion"]
         # Deterministic definition -> slot mapping, sorted by definition id.
-        defs = sorted(card["definition"] for card in catalog["cards"])
+        # Protocol v2 catalogs list every format's cards with per-format
+        # legality flags; only cards legal in the catalog's own format
+        # (default: Old School 93/94) get feature slots. Protocol 0/1
+        # catalogs carry no flag and keep every card, as before.
+        defs = sorted(card["definition"] for card in catalog["cards"]
+                      if card.get("legal", True))
         self.def_slot = {d: i for i, d in enumerate(defs)}
         self.defs = len(defs)
         self.card_kind = {

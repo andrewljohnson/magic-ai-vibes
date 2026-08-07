@@ -7,12 +7,35 @@ open-source deterministic engine for Eternal Central Old School 93/94 Magic.
 Nothing here shares weights with our C++ bot -- different rules, simulator,
 and card pool -- only the recipe.
 
-Pinned versions: penta commit `899df8d`, `engine_version 0.1.0`,
-`protocol_version 0`, built with rustc/cargo 1.97.1 (the Rust toolchain was
-installed via rustup for this spike). The engine clone lives at
-`~/proj/penta` (outside this repo); the Python binding is
-`bindings/penta-py/penta.so` (`cargo build --release` + copy the dylib), and
-`PENTA_PY_DIR` overrides the default location.
+Pinned versions: penta commit `c206ab3` (upstream `origin/main`,
+"Integrate formats with bot protocol v2"), **`engine_version 0.3.0`,
+`protocol_version 2`**, built with the repo's pinned Rust toolchain
+(rust-toolchain.toml) from a pristine checkout. The built binding is
+**vendored here as `penta-bot/penta.so`** and `extractor.import_penta()`
+prefers that pinned copy; the fallback is the clone at
+`~/proj/penta/bindings/penta-py` (override with `PENTA_PY_DIR`). Both
+versions are also recorded in every saved net's metadata
+(`meta_engine_version` / `meta_protocol_version`, printed by gate.py).
+
+Protocol v2 adaptation notes (from protocol 0):
+
+- Concede left `legalActions` in protocol 1, so all Concede-skip logic is
+  gone; a single legal action is now the forced-move test directly, and
+  candidates are `obs["legalActions"]` as-is.
+- The v2 catalog lists every format's cards (244) with per-format
+  legality; the extractor keeps feature slots only for cards legal in the
+  catalog's own format (Old School 93/94: 128 definitions), so the
+  feature layout stays 675 = 5x128 + 35. Protocol 0/1 catalogs have no
+  legality flags and keep every card, as before.
+- Observation compatibility fields (`seat`, `life`, `graveyards`,
+  `battlefield[].definition/controller/tapped/power/toughness/attacking`,
+  `legalActions[].index`) are unchanged in v2; new fields (`format`,
+  `activeTurn`, `lastSeenHand`, `presentedPartId`, object IDs) are
+  ignored by the extractor.
+- Afterstate copies use the binding's `clone_game()` when present
+  (upstream clone-api work, unmerged at pin time); on this pin the
+  deterministic replay-reconstruction fallback is active, verified exact
+  by checks.py D1 in both external and opponent modes.
 
 ## Throughput measurements (M1-class laptop, single thread unless noted)
 
@@ -75,15 +98,40 @@ through the bindings; with that, rollout search ports directly.
 - `net.py` -- numpy mirror of our C++ `SpzNet`: one tanh hidden layer,
   sigmoid output, binary cross-entropy, minibatch SGD with momentum 0.9,
   uniform(+-1/sqrt(fan_in)) init, save/load as `.npz`. No torch.
-- `trainer.py` -- what shipped: **epsilon-greedy over 1-ply afterstates via
-  replay reconstruction** (the preferred branch of the plan; no fallback was
-  needed), TD(lambda=0.9, gamma=1) targets computed backward over each
-  seat's recorded afterstate values with the terminal 0/1 (0.5 draw/cap)
-  outcome, replay ring buffer, multiprocessing across seeds (8 workers, one
-  `Game` per task). Forced single-action decisions are played without
-  evaluation or recording.
+- `trainer.py` -- **epsilon-greedy over 1-ply afterstates** (copies via the
+  binding's `clone_game()` when present, else deterministic replay
+  reconstruction), targets computed backward over each seat's recorded
+  afterstate values with the terminal 0/1 (0.5 draw/cap) outcome, replay
+  ring buffer, multiprocessing across seeds (8 workers, one `Game` per
+  task). Forced single-action decisions are played without evaluation or
+  recording. **Targets default to pure undiscounted outcomes
+  (`--td-lambda 1.0`)** -- see the collapse post-mortem below.
 - `gate.py` -- greedy (epsilon 0) evaluation vs `handcrafted` and `random`,
   alternating seats, rotating deck pairs, fixed seeds, Wilson 95% LCB.
+- `checks.py` -- 26 standalone audit checks against the live engine: seat/
+  perspective labels (recorded rows must be the learner's own view with its
+  own outcome, in mirror, frozen-league, and handcrafted-league games), TD
+  target recursion, candidate-sampling uniformity, afterstate/fork
+  exactness, replay-ring arithmetic, league seat scheduling. Run
+  `python3 checks.py` after any trainer change.
+
+## Collapse post-mortem (2026-08 audit)
+
+Two league-guarded curve runs collapsed (handcrafted gate 16.5% -> 5%,
+then 17.5% -> 5.8%). A full audit (checks.py) cleared every labeling
+hypothesis -- no seat inversion, no TD off-by-one, no sampling prefix
+bias, no wrong-perspective afterstates, no ring bug. The defect was
+quantitative: **per-decision TD lambda 0.9 on penta trajectories of
+40-130 recorded decisions per seat leaves 55-78% of targets with under
+5% outcome weight**, so the net mostly regressed toward its own previous
+values; BCE fell while strength collapsed. The C++ SPZ recipe this port
+mirrors defaults to lambda 1.0 (and its champion line trains on hard
+undiscounted outcomes); its shorter effective trajectories made 0.9
+viable there. Fixes: `--td-lambda` defaults to 1.0 (pure outcome
+targets); frozen-league games record both seats (true outcome-labeled
+data, learner-net bootstraps); league learner seats de-aliased from the
+deck-pair rotation (both had even periods, so each ordered pair always
+seated the learner on the same side).
 
 ## Training config (smoke run)
 

@@ -2,10 +2,10 @@
 
 Plays the greedy afterstate policy (epsilon 0, same machinery as
 trainer.choose) against `handcrafted` and `random`, alternating seats and
-rotating deck pairs, with fixed seeds. Reconstruction for afterstates
-works in opponent mode too: the built-in opponent is seeded, so
-`Game(same args, same seed)` + replaying OUR action indices reproduces
-the live game exactly.
+rotating deck pairs, with fixed seeds. Afterstate copies come from
+`clone_game()` when the binding has it; the replay-reconstruction
+fallback works in opponent mode too, because the built-in opponent is
+seeded.
 
 Usage:
     python3 gate.py --net penta_net.npz --games 200
@@ -20,7 +20,7 @@ from multiprocessing import Pool
 
 from extractor import Extractor, import_penta
 from net import Net
-from trainer import DECKS, choose, matchup
+from trainer import DECKS, choose, make_fork, matchup
 
 
 def play_gate_game(net, extractor, penta, opponent, my_seat, d1, d2, seed,
@@ -35,8 +35,9 @@ def play_gate_game(net, extractor, penta, opponent, my_seat, d1, d2, seed,
     history = []
     while game.result() is None and len(history) < 3000:
         obs = json.loads(game.observe())
-        index, _, _ = choose(make_game, history, obs, net, extractor, rng,
-                             epsilon=0.0, max_eval=max_eval)
+        index, _, _ = choose(make_fork(make_game, history, game), obs, net,
+                             extractor, rng, epsilon=0.0, max_eval=max_eval,
+                             depth=len(history))
         game.act(index)
         history.append(index)
     result = game.result()

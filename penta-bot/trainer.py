@@ -2,12 +2,12 @@
 
 What is shipped (see README.md for the feasibility numbers behind this):
 
-- Decision policy: epsilon-greedy over 1-ply AFTERSTATES. penta's Python
-  binding exposes no clone, but the engine is deterministic, so a copy of
-  the live game is reconstructed by `Game(same decks/seed)` + replaying the
-  action history (~0.1 ms at decision 30). Each candidate action is played
-  on such a copy and the resulting observation (from the acting seat) is
-  scored by the value net; greedy picks the argmax.
+- Decision policy: epsilon-greedy over 1-ply AFTERSTATES. Copies of the
+  live game come from the binding's `clone_game()` (engine >= 0.3);
+  where the binding lacks it, the deterministic fallback reconstructs by
+  `Game(same decks/seed)` + replaying the action history. Each candidate
+  action is played on such a copy and the resulting observation (from the
+  acting seat) is scored by the value net; greedy picks the argmax.
 - Learning: TD(lambda), gamma=1, on each seat's trajectory of chosen
   afterstate values: the last recorded state's target is the 0/1(/0.5)
   outcome z, and going backward
@@ -34,9 +34,10 @@ What is shipped (see README.md for the feasibility numbers behind this):
   as before. The mode roll is derived from the game seed, so runs stay
   deterministic per seed.
 
-Forced moves (a single non-Concede action) are played without evaluation
-or recording; decisions with huge branching factors evaluate a random
-sample of at most --max-eval candidates.
+Forced moves (a single legal action; Concede left legalActions in protocol
+1) are played without evaluation or recording; decisions with huge
+branching factors evaluate a random sample of at most --max-eval
+candidates.
 
 Usage:
     python3 trainer.py --games 3000 --workers 8 --out penta_net.npz
@@ -74,19 +75,32 @@ def eval_budget(depth, max_eval):
     return max(4, max_eval // 4)
 
 
-def candidate_actions(obs):
-    acts = [a for a in obs["legalActions"] if a["type"] != "Concede"]
-    return acts if acts else obs["legalActions"]
+def make_fork(make_game, history, game=None):
+    """A callable producing copies of the live game state.
 
+    Prefers the binding's `clone_game()` (engine >= 0.3). The fallback,
+    for older bindings, rebuilds `Game(same args, same seed)` and replays
+    the recorded action indices -- exact, because the engine is
+    deterministic.
+    """
+    if game is not None and hasattr(game, "clone_game"):
+        return game.clone_game
 
-def afterstate_rows(make_game, history, seat, actions, extractor):
-    """Play each candidate on a reconstructed copy; return feature rows and
-    terminal outcomes (None where the game continues)."""
-    rows, terminals = [], []
-    for action in actions:
+    def fork():
         copy = make_game()
         for played in history:
             copy.act(played)
+        return copy
+
+    return fork
+
+
+def afterstate_rows(fork, seat, actions, extractor):
+    """Play each candidate on a forked copy; return feature rows and
+    terminal outcomes (None where the game continues)."""
+    rows, terminals = [], []
+    for action in actions:
+        copy = fork()
         copy.act(action["index"])
         result = copy.result()
         obs_after = json.loads(copy.observe(seat))
@@ -100,27 +114,27 @@ def afterstate_rows(make_game, history, seat, actions, extractor):
     return rows, terminals
 
 
-def choose(make_game, history, obs, net, extractor, rng, epsilon, max_eval):
+def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth):
     """Epsilon-greedy afterstate choice.
 
     Returns (action_index, features, value); features/value are None for
     forced moves, which are not recorded in the trajectory.
     """
-    actions = candidate_actions(obs)
+    actions = obs["legalActions"]
     if len(actions) == 1:
         return actions[0]["index"], None, None
     seat = obs["seat"]
 
     if epsilon > 0.0 and rng.random() < epsilon:
         picked = rng.choice(actions)
-        rows, terms = afterstate_rows(make_game, history, seat, [picked], extractor)
+        rows, terms = afterstate_rows(fork, seat, [picked], extractor)
         value = terms[0] if terms[0] is not None else net.value(rows[0])
         return picked["index"], rows[0], value
 
-    budget = eval_budget(len(history), max_eval)
+    budget = eval_budget(depth, max_eval)
     if len(actions) > budget:
         actions = rng.sample(actions, budget)
-    rows, terms = afterstate_rows(make_game, history, seat, actions, extractor)
+    rows, terms = afterstate_rows(fork, seat, actions, extractor)
     values = net.value_batch(np.stack(rows))
     scores = [t if t is not None else v for t, v in zip(terms, values)]
     best = int(np.argmax(scores))
@@ -161,16 +175,17 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     while game.result() is None and len(history) < MAX_DECISIONS:
         seat = game.decision_seat()
         obs = json.loads(game.observe())
+        fork = make_fork(make_game, history, game)
         if opponent_net is not None and seat != learner_seat:
             index, feats, value = choose(
-                make_game, history, obs, opponent_net, extractor, rng,
-                epsilon=0.0, max_eval=max_eval)
+                fork, obs, opponent_net, extractor, rng,
+                epsilon=0.0, max_eval=max_eval, depth=len(history))
             if feats is not None:
                 value = net.value(feats)  # learner-net bootstrap
         else:
             index, feats, value = choose(
-                make_game, history, obs, net, extractor, rng, epsilon,
-                max_eval)
+                fork, obs, net, extractor, rng, epsilon,
+                max_eval, depth=len(history))
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -216,7 +231,8 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     while game.result() is None and len(history) < MAX_DECISIONS:
         obs = json.loads(game.observe())
         index, feats, value = choose(
-            make_game, history, obs, net, extractor, rng, epsilon, max_eval)
+            make_fork(make_game, history, game), obs, net, extractor, rng,
+            epsilon, max_eval, depth=len(history))
         game.act(index)
         history.append(index)
         if feats is not None:

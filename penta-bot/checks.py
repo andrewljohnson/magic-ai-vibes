@@ -24,7 +24,7 @@ import numpy as np
 import trainer
 from extractor import Extractor, import_penta
 from net import Net
-from trainer import (afterstate_rows, candidate_actions, choose, eval_budget,
+from trainer import (afterstate_rows, choose, eval_budget, make_fork,
                      td_targets)
 
 penta = import_penta()
@@ -56,9 +56,9 @@ def rand_game_to_depth(seed, min_depth, want_seat=None, opponent="external"):
         obs = json.loads(game.observe())
         deep = len(history) >= min_depth
         if deep and (want_seat is None or obs["seat"] == want_seat) \
-                and len(candidate_actions(obs)) > 1:
+                and len(obs["legalActions"]) > 1:
             return game, history, make_game
-        index = rng.choice(candidate_actions(obs))["index"]
+        index = rng.choice(obs["legalActions"])["index"]
         game.act(index)
         history.append(index)
     return None, history, make_game
@@ -77,7 +77,7 @@ def check_a_observe_default_seat():
             obs = json.loads(game.observe())
             if obs["seat"] != game.decision_seat():
                 bad += 1
-            game.act(rng.choice(candidate_actions(obs))["index"])
+            game.act(rng.choice(obs["legalActions"])["index"])
             n += 1
     check("A1 observe() default == decision_seat()", bad == 0, f"{bad} mismatches")
 
@@ -141,10 +141,9 @@ def check_a_handcrafted_labels():
 
 
 def check_a_mirror_and_frozen_labels():
-    """Mirror games must record BOTH seats, each with its own outcome;
-    frozen-opponent games must record ONLY the learner seat. Captured by
-    intercepting td_targets (called once per recorded seat, in p1,p2
-    order)."""
+    """Mirror games and frozen-opponent games must record BOTH seats, each
+    with its own outcome and perspective. Captured by intercepting
+    td_targets (called once per recorded seat, in p1,p2 order)."""
     net = Net(EX.size, hidden=8, seed=4)
     frozen = Net(EX.size, hidden=8, seed=5)
     calls = []
@@ -269,7 +268,7 @@ def check_c_sampling_uniform():
         rng_walk = random.Random(seed)
         while game is not None and game.result() is None:
             obs = json.loads(game.observe())
-            acts = candidate_actions(obs)
+            acts = obs["legalActions"]
             if len(acts) >= 12:
                 state = (history[:], obs, make_game)
                 break
@@ -282,14 +281,15 @@ def check_c_sampling_uniform():
         check("C1 uniform candidate sampling", False, "no branchy state found")
         return
     history, obs, make_game = state
-    acts = candidate_actions(obs)
+    acts = obs["legalActions"]
     hist = {a["index"]: 0 for a in acts}
     net = ConstNet()
     trials = 400
+    fork = make_fork(make_game, history)
     for t in range(trials):
         rng = random.Random(t)
-        index, _, _ = choose(make_game, history, obs, net, EX, rng,
-                             epsilon=0.0, max_eval=4)
+        index, _, _ = choose(fork, obs, net, EX, rng,
+                             epsilon=0.0, max_eval=4, depth=len(history))
         hist[index] += 1
     n = len(acts)
     first4 = sum(hist[a["index"]] for a in acts[:4])
@@ -312,7 +312,7 @@ def check_c_epsilon_covers_all():
         rng_walk = random.Random(seed)
         while game is not None and game.result() is None:
             obs = json.loads(game.observe())
-            acts = candidate_actions(obs)
+            acts = obs["legalActions"]
             if len(acts) >= 8:
                 state = (history[:], obs, make_game)
                 break
@@ -325,13 +325,14 @@ def check_c_epsilon_covers_all():
         check("C3 epsilon explores the full candidate set", False, "no state")
         return
     history, obs, make_game = state
-    acts = candidate_actions(obs)
+    acts = obs["legalActions"]
     seen = set()
     net = ConstNet()
+    fork = make_fork(make_game, history)
     for t in range(300):
         rng = random.Random(7000 + t)
-        index, _, _ = choose(make_game, history, obs, net, EX, rng,
-                             epsilon=1.0, max_eval=4)
+        index, _, _ = choose(fork, obs, net, EX, rng,
+                             epsilon=1.0, max_eval=4, depth=len(history))
         seen.add(index)
     check("C3 epsilon explores the full candidate set (incl. past budget)",
           seen == {a["index"] for a in acts},
@@ -354,17 +355,18 @@ def check_d_replay_fidelity():
             history = []
             while game.result() is None and len(history) < 240:
                 if len(history) in (40, 120, 200):
-                    copy = make_game()
-                    for played in history:
-                        copy.act(played)
-                    for seat in ("p1", "p2"):
-                        if copy.observe(seat) != game.observe(seat):
-                            bad += 1
+                    copies = [make_fork(make_game, history)()]
+                    if hasattr(game, "clone_game"):
+                        copies.append(game.clone_game())
+                    for copy in copies:
+                        for seat in ("p1", "p2"):
+                            if copy.observe(seat) != game.observe(seat):
+                                bad += 1
                 obs = json.loads(game.observe())
-                idx = rng.choice(candidate_actions(obs))["index"]
+                idx = rng.choice(obs["legalActions"])["index"]
                 game.act(idx)
                 history.append(idx)
-        check(f"D1 replay reconstruction is exact ({opponent} mode)",
+        check(f"D1 replay/clone forks are exact ({opponent} mode)",
               bad == 0, f"{bad} divergent observations")
 
 
@@ -381,8 +383,9 @@ def check_d_afterstate_perspective():
             continue
         obs = json.loads(game.observe())
         assert obs["seat"] == want_seat
-        acts = candidate_actions(obs)[:4]
-        rows, terms = afterstate_rows(make_game, history, want_seat, acts, EX)
+        acts = obs["legalActions"][:4]
+        rows, terms = afterstate_rows(make_fork(make_game, history, game),
+                                      want_seat, acts, EX)
         bad = 0
         distinct = 0
         for action, row in zip(acts, rows):
@@ -418,9 +421,9 @@ def check_d_terminal_outcomes():
         history = []
         while game.result() is None and len(history) < 400:
             obs = json.loads(game.observe())
-            acts = candidate_actions(obs)
-            rows, terms = afterstate_rows(make_game, history, obs["seat"],
-                                          acts[:6], EX)
+            acts = obs["legalActions"]
+            rows, terms = afterstate_rows(make_fork(make_game, history, game),
+                                          obs["seat"], acts[:6], EX)
             chosen = None
             for a, t in zip(acts[:6], terms):
                 if t is not None:
