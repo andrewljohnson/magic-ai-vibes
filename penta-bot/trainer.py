@@ -207,10 +207,14 @@ def main():
     parser.add_argument("--round-games", type=int, default=64)
     parser.add_argument("--seed-base", type=int, default=1_000_000)
     parser.add_argument("--out", default="penta_net.npz")
+    parser.add_argument("--init", default="",
+                        help="warm-start weights (.npz) to continue from")
     args = parser.parse_args()
 
     extractor = Extractor()
     net = Net(extractor.size, hidden=args.hidden, seed=1)
+    if args.init:
+        net = Net.load(args.init)
     print(f"engine {extractor.engine_version} protocol "
           f"{extractor.protocol_version}; features {extractor.size} "
           f"({extractor.defs} defs x 5 zones + {extractor.n_scalars} scalars)")

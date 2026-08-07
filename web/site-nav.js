@@ -8,6 +8,7 @@
     ["decks.html", "Decks"],
     ["deck-scouting.html", "Scouting"],
     ["replay.html", "Replays"],
+    ["penta-monitor.html", "Penta bot"],
   ];
   const here = location.pathname.split("/").pop() || "monitor.html";
   const nav = document.createElement("nav");
