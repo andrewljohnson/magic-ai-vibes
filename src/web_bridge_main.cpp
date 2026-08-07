@@ -42,10 +42,10 @@ void print_help(std::ostream& output) {
     output
         << "Usage: old-school-web-bridge [session options]\n"
         << "  --human-deck rg-berserk|atog|br-midrange|robots|"
-           "white-weenie|uwr\n"
+           "white-weenie|uwr|blue-skies|the-deck\n"
         << "  --human-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-deck rg-berserk|atog|br-midrange|robots|"
-           "white-weenie|uwr\n"
+           "white-weenie|uwr|blue-skies|the-deck\n"
         << "  --opponent-deck-cards ID,ID,... (exactly 40)\n"
         << "  --opponent-policy random|monte-carlo|deep-monte-carlo|"
            "handcrafted|spz\n"
