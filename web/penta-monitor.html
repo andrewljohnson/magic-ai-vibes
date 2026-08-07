@@ -43,7 +43,8 @@
   <h2>Gate win rates</h2>
   <p class="desc">After each 2,000-game chunk: fixed-seed gates against
     penta's built-in bots (60 games vs random, 120 vs handcrafted).
-    The gray line is 50%.</p>
+    Each training run is its own pair of lines &mdash; earlier runs fade,
+    the latest run is bright. The gray line is 50%.</p>
   <svg id="gates" viewBox="0 0 960 300"></svg>
   <div class="legend">
     <span style="--c: var(--s2)">vs random</span>
@@ -117,13 +118,35 @@ async function poll() {
       ...gates.map(g => g.games), ...train.map(t => t.games), 5000);
     const xd = [3000, maxGames];
 
+    // The gate history can span several training runs that revisit the
+    // same cumulative-games positions (a restart begins a new run).
+    // Split whenever games stops increasing; fade earlier runs.
+    const runs = [];
+    for (const g of gates) {
+      const current = runs[runs.length - 1];
+      if (!current || g.games <= current[current.length - 1].games) {
+        runs.push([g]);
+      } else {
+        current.push(g);
+      }
+    }
     const gatesSvg = document.getElementById("gates");
-    gatesSvg.innerHTML =
-      axes(gatesSvg, xd, [0, 100], v => v.toFixed(0) + "%", 50) +
-      line(gatesSvg, gates.map(g => [g.games, g.random]), xd, [0, 100],
-           css("--s2"), 2, true) +
-      line(gatesSvg, gates.map(g => [g.games, g.handcrafted]), xd, [0, 100],
-           css("--s1"), 2.5, true);
+    let gateArt = axes(gatesSvg, xd, [0, 100], v => v.toFixed(0) + "%", 50);
+    runs.forEach((run, index) => {
+      const latest = index === runs.length - 1;
+      const alpha = latest ? "" : "66";
+      const w = latest ? 2.5 : 1.4;
+      gateArt +=
+        line(gatesSvg, run.map(g => [g.games, g.random]), xd, [0, 100],
+             css("--s2") + alpha, w, latest) +
+        line(gatesSvg, run.map(g => [g.games, g.handcrafted]), xd, [0, 100],
+             css("--s1") + alpha, w, latest);
+    });
+    gatesSvg.innerHTML = gateArt;
+    const runNote = runs.length > 1
+      ? ` Showing run ${runs.length} bright; ${runs.length - 1} earlier ` +
+        `run(s) faded.`
+      : "";
 
     const lossSvg = document.getElementById("loss");
     const losses = train.map(t => t.loss);
@@ -136,15 +159,18 @@ async function poll() {
            css("--s1"), 1.8, false);
 
     document.getElementById("gate-table").innerHTML =
-      "<table><tr><th>games</th><th>vs random</th><th>vs handcrafted</th></tr>" +
-      gates.map(g =>
-        `<tr><td>${g.games}</td><td>${g.random.toFixed(1)}%</td>` +
-        `<td>${g.handcrafted.toFixed(1)}%</td></tr>`).join("") +
+      "<table><tr><th>run</th><th>games</th><th>vs random</th>" +
+      "<th>vs handcrafted</th></tr>" +
+      runs.flatMap((run, index) => run.map(g =>
+        `<tr><td>${index + 1}</td><td>${g.games}</td>` +
+        `<td>${g.random.toFixed(1)}%</td>` +
+        `<td>${g.handcrafted.toFixed(1)}%</td></tr>`)).join("") +
       "</table>";
 
     document.getElementById("status").textContent =
-      `Live — telemetry updated ${data.updated}, page polls every 15 s. ` +
-      `${train.length ? "Training rate " +
+      `Live — telemetry updated ${data.updated}, page polls every 15 s.` +
+      runNote +
+      ` ${train.length ? "Training rate " +
         train[train.length - 1].rate.toFixed(1) + " games/s." : ""}`;
   } catch (e) {
     document.getElementById("status").textContent =
