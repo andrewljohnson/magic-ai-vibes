@@ -40,7 +40,7 @@ def snapshot():
                     "loss": float(match.group(3)),
                     "rate": float(match.group(4)),
                 })
-    gates = [{"games": SMOKE_GAMES, "random": 86.0, "handcrafted": 16.5,
+    gates = [{"games": SMOKE_GAMES, "random": 80.8, "handcrafted": 7.1,
               "note": "smoke"}]
     progress = os.path.join(ROOT, "progress.txt")
     if os.path.exists(progress):

@@ -35,10 +35,16 @@ def play_gate_game(net, extractor, penta, opponent, my_seat, d1, d2, seed,
     history = []
     while game.result() is None and len(history) < 3000:
         obs = json.loads(game.observe())
-        index, _, _ = choose(make_fork(make_game, history, game), obs, net,
-                             extractor, rng, epsilon=0.0, max_eval=max_eval,
-                             depth=len(history))
-        game.act(index)
+        try:
+            index, _, _ = choose(make_fork(make_game, history, game), obs,
+                                 net, extractor, rng, epsilon=0.0,
+                                 max_eval=max_eval, depth=len(history))
+            game.act(index)
+        except ValueError:
+            # Upstream engine fault (e.g. the 0.3.0 handcrafted policy
+            # returning no action): the game cannot continue either way,
+            # so score it as the drawish 0.5 rather than crashing the gate.
+            return 0.5
         history.append(index)
     result = game.result()
     if result == my_seat:

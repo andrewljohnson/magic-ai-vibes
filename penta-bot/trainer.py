@@ -274,17 +274,27 @@ def _worker_play(task):
     all_rows, all_targets, all_stats = [], [], []
     for d1, d2, seed, epsilon, mode, frozen_idx, learner_seat in games:
         rng = random.Random(seed * 2654435761 % (2**31))
-        if mode == "handcrafted":
-            rows, targets, stats = play_handcrafted_game(
-                net, extractor, penta, d1, d2, seed, epsilon, rng, max_eval,
-                learner_seat, lam=lam)
-        else:
-            opponent_net = (_WORKER["frozen"][frozen_idx]
-                            if mode == "frozen" else None)
-            rows, targets, stats = play_selfplay_game(
-                net, extractor, penta, d1, d2, seed, epsilon, rng, max_eval,
-                opponent_net=opponent_net, learner_seat=learner_seat,
-                lam=lam)
+        try:
+            if mode == "handcrafted":
+                rows, targets, stats = play_handcrafted_game(
+                    net, extractor, penta, d1, d2, seed, epsilon, rng,
+                    max_eval, learner_seat, lam=lam)
+            else:
+                opponent_net = (_WORKER["frozen"][frozen_idx]
+                                if mode == "frozen" else None)
+                rows, targets, stats = play_selfplay_game(
+                    net, extractor, penta, d1, d2, seed, epsilon, rng,
+                    max_eval, opponent_net=opponent_net,
+                    learner_seat=learner_seat, lam=lam)
+        except ValueError as error:
+            # Upstream engine fault mid-game (seen on 0.3.0: "the scripted
+            # opponent returned no action" from the built-in handcrafted
+            # policy). The game cannot continue and has no outcome, so it
+            # contributes no samples; the round line reports the count.
+            rows = np.empty((0, extractor.size), dtype=np.float32)
+            targets = np.empty(0, dtype=np.float32)
+            stats = {"decisions": 0, "result": "engine-error",
+                     "error": f"{d1} vs {d2} seed {seed}: {error}"}
         all_rows.append(rows)
         all_targets.append(targets)
         all_stats.append(stats)
@@ -400,8 +410,12 @@ def main():
 
             new = 0
             decisions, caps = [], 0
+            engine_errors = []
             for rows, targets, stats in results:
                 for s in stats:
+                    if s["result"] == "engine-error":
+                        engine_errors.append(s["error"])
+                        continue
                     decisions.append(s["decisions"])
                     caps += s["result"] == "cap"
                 for i in range(len(targets)):
@@ -428,6 +442,9 @@ def main():
                   f"samples {new:5d}  replay {replay_size:6d}  "
                   f"len {np.mean(decisions):5.1f}  caps {caps}  "
                   f"{rate:5.2f} games/s", flush=True)
+            for error in engine_errors:
+                print(f"      dropped game (engine error): {error}",
+                      flush=True)
 
     print(f"done: {played} games -> {args.out}")
 
