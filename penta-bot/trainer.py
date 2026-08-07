@@ -16,6 +16,14 @@ What is shipped (see README.md for the feasibility numbers behind this):
   minibatch SGD with momentum (net.py) trains after every round.
 - Self-play runs both seats with the same net; multiprocessing across
   seeds (one Game per task, one process pool) provides parallelism.
+- League play (anti-drift, per the SPZ C++ recipe): with probability
+  --league-handcrafted a game is played against penta's built-in
+  handcrafted bot, and otherwise with probability LEAGUE_FROZEN_FRACTION
+  (total, split across --league-frozen snapshots) the opponent seat is a
+  frozen snapshot net playing greedily. In both league modes only the
+  learner's seat is recorded as training data; mirror games record both
+  seats as before. The mode roll is derived from the game seed, so runs
+  stay deterministic per seed.
 
 Forced moves (a single non-Concede action) are played without evaluation
 or recording; decisions with huge branching factors evaluate a random
@@ -38,6 +46,9 @@ from net import Net
 
 DECKS = ("Sligh", "White Weenie", "The Deck", "Counterburn")
 TD_LAMBDA = 0.9
+# Total probability that a game seats a frozen snapshot (when any are
+# given), split evenly across the --league-frozen nets.
+LEAGUE_FROZEN_FRACTION = 0.25
 # Games that have not ended by here are passing-loop junk; score as a draw.
 MAX_DECISIONS = 600
 
@@ -119,8 +130,14 @@ def td_targets(values, z, lam=TD_LAMBDA):
 
 
 def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
-                       max_eval):
-    """One external-mode self-play game; returns (rows, targets, stats)."""
+                       max_eval, opponent_net=None, learner_seat=None):
+    """One external-mode game; returns (rows, targets, stats).
+
+    Mirror mode (opponent_net None) plays and records both seats with the
+    learner net. League-frozen mode seats opponent_net on the other seat,
+    playing greedily (epsilon 0); its decisions are not recorded, so only
+    the learner's seat generates training samples.
+    """
     def make_game():
         return penta.Game(d1, d2, opponent="external", seed=seed)
 
@@ -130,8 +147,15 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     while game.result() is None and len(history) < MAX_DECISIONS:
         seat = game.decision_seat()
         obs = json.loads(game.observe())
-        index, feats, value = choose(
-            make_game, history, obs, net, extractor, rng, epsilon, max_eval)
+        if opponent_net is not None and seat != learner_seat:
+            index, feats, value = choose(
+                make_game, history, obs, opponent_net, extractor, rng,
+                epsilon=0.0, max_eval=max_eval)
+            feats = None  # frozen opponent decisions are not training data
+        else:
+            index, feats, value = choose(
+                make_game, history, obs, net, extractor, rng, epsilon,
+                max_eval)
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -157,17 +181,57 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
             np.empty(0, dtype=np.float32), stats)
 
 
+def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
+                          max_eval, learner_seat):
+    """One league game vs penta's built-in handcrafted bot.
+
+    Only the learner's seat is observed and recorded (reconstruction
+    replays our own action indices, exactly as gate.py does against the
+    seeded built-in opponents). Returns (rows, targets, stats).
+    """
+    opponent_seat = "p2" if learner_seat == "p1" else "p1"
+
+    def make_game():
+        return penta.Game(d1, d2, opponent="handcrafted",
+                          opponent_seat=opponent_seat, seed=seed)
+
+    game = make_game()
+    history = []
+    feats_list, values = [], []
+    while game.result() is None and len(history) < MAX_DECISIONS:
+        obs = json.loads(game.observe())
+        index, feats, value = choose(
+            make_game, history, obs, net, extractor, rng, epsilon, max_eval)
+        game.act(index)
+        history.append(index)
+        if feats is not None:
+            feats_list.append(feats)
+            values.append(value)
+
+    result = game.result()  # None if the cap was hit
+    stats = {"decisions": len(history), "result": result or "cap"}
+    if not feats_list:
+        return (np.empty((0, extractor.size), dtype=np.float32),
+                np.empty(0, dtype=np.float32), stats)
+    if result is None or result == "draw":
+        z = 0.5
+    else:
+        z = 1.0 if result == learner_seat else 0.0
+    return np.stack(feats_list), td_targets(values, z), stats
+
+
 # -- multiprocessing plumbing -------------------------------------------
 
 _WORKER = {}
 
 
-def _worker_init(hidden):
+def _worker_init(hidden, frozen_paths):
     penta = import_penta()
     extractor = Extractor()
     _WORKER["penta"] = penta
     _WORKER["extractor"] = extractor
     _WORKER["net"] = Net(extractor.size, hidden=hidden, seed=0)
+    _WORKER["frozen"] = [Net.load(path) for path in frozen_paths]
 
 
 def _worker_play(task):
@@ -177,10 +241,18 @@ def _worker_play(task):
     extractor = _WORKER["extractor"]
     penta = _WORKER["penta"]
     all_rows, all_targets, all_stats = [], [], []
-    for d1, d2, seed, epsilon in games:
+    for d1, d2, seed, epsilon, mode, frozen_idx, learner_seat in games:
         rng = random.Random(seed * 2654435761 % (2**31))
-        rows, targets, stats = play_selfplay_game(
-            net, extractor, penta, d1, d2, seed, epsilon, rng, max_eval)
+        if mode == "handcrafted":
+            rows, targets, stats = play_handcrafted_game(
+                net, extractor, penta, d1, d2, seed, epsilon, rng, max_eval,
+                learner_seat)
+        else:
+            opponent_net = (_WORKER["frozen"][frozen_idx]
+                            if mode == "frozen" else None)
+            rows, targets, stats = play_selfplay_game(
+                net, extractor, penta, d1, d2, seed, epsilon, rng, max_eval,
+                opponent_net=opponent_net, learner_seat=learner_seat)
         all_rows.append(rows)
         all_targets.append(targets)
         all_stats.append(stats)
@@ -191,6 +263,19 @@ def matchup(game_number):
     """Rotate through ordered deck pairs (mirrors excluded)."""
     pairs = [(a, b) for a in DECKS for b in DECKS if a != b]
     return pairs[game_number % len(pairs)]
+
+
+def league_roll(seed, handcrafted_fraction, n_frozen):
+    """Deterministic per-seed opponent draw: ("mirror"|"handcrafted"|
+    "frozen", frozen_idx). Uses its own RNG stream so play RNG is
+    untouched."""
+    rng = random.Random(seed * 2246822519 % (2**31))
+    roll = rng.random()
+    if roll < handcrafted_fraction:
+        return "handcrafted", -1
+    if n_frozen and roll < handcrafted_fraction + LEAGUE_FROZEN_FRACTION:
+        return "frozen", rng.randrange(n_frozen)
+    return "mirror", -1
 
 
 def main():
@@ -209,6 +294,15 @@ def main():
     parser.add_argument("--out", default="penta_net.npz")
     parser.add_argument("--init", default="",
                         help="warm-start weights (.npz) to continue from")
+    parser.add_argument("--league-frozen", action="append", default=[],
+                        metavar="PATH",
+                        help="frozen snapshot net for league games "
+                             "(repeatable; ~25%% of games total seat one "
+                             "as the opponent)")
+    parser.add_argument("--league-handcrafted", type=float, default=0.0,
+                        metavar="FRACTION",
+                        help="fraction of games played vs the built-in "
+                             "handcrafted bot")
     args = parser.parse_args()
 
     extractor = Extractor()
@@ -218,6 +312,11 @@ def main():
     print(f"engine {extractor.engine_version} protocol "
           f"{extractor.protocol_version}; features {extractor.size} "
           f"({extractor.defs} defs x 5 zones + {extractor.n_scalars} scalars)")
+    if args.league_handcrafted or args.league_frozen:
+        frozen_frac = LEAGUE_FROZEN_FRACTION if args.league_frozen else 0.0
+        print(f"league: handcrafted {args.league_handcrafted:.2f}, frozen "
+              f"{frozen_frac:.2f} across {len(args.league_frozen)} "
+              f"snapshot(s) {args.league_frozen}")
 
     replay_X = np.empty((args.replay_capacity, extractor.size), dtype=np.float32)
     replay_y = np.empty(args.replay_capacity, dtype=np.float32)
@@ -228,7 +327,7 @@ def main():
     played = 0
     t_start = time.time()
     with Pool(args.workers, initializer=_worker_init,
-              initargs=(args.hidden,)) as pool:
+              initargs=(args.hidden, tuple(args.league_frozen))) as pool:
         while played < args.games:
             round_n = min(args.round_games, args.games - played)
             frac = played / max(1, args.games)
@@ -238,7 +337,12 @@ def main():
             for g in range(round_n):
                 number = played + g
                 d1, d2 = matchup(number)
-                game_specs.append((d1, d2, args.seed_base + number, epsilon))
+                seed = args.seed_base + number
+                mode, frozen_idx = league_roll(
+                    seed, args.league_handcrafted, len(args.league_frozen))
+                learner_seat = "p1" if number % 2 == 0 else "p2"
+                game_specs.append(
+                    (d1, d2, seed, epsilon, mode, frozen_idx, learner_seat))
             per_worker = [game_specs[w::args.workers]
                           for w in range(args.workers)]
             weights = net.get_weights()
