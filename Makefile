@@ -13,6 +13,7 @@ SELFPLAY_ZERO := $(BUILD_DIR)/selfplay-zero
 AUDIT_CHAMPION := $(BUILD_DIR)/audit-champion
 MATCHUP_MATRIX := $(BUILD_DIR)/matchup-matrix
 PILOT_COMPARE := $(BUILD_DIR)/pilot-compare
+VALUE_BIAS_PROBE := $(BUILD_DIR)/value-bias-probe
 SIM_BENCH := $(BUILD_DIR)/sim-bench
 REPLAY := $(BUILD_DIR)/replay
 WEB_BRIDGE := $(BUILD_DIR)/old-school-web-bridge
@@ -42,6 +43,7 @@ $(eval $(call link_program,$(SELFPLAY_ZERO),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOU
 $(eval $(call link_program,$(AUDIT_CHAMPION),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/audit_champion_main.cpp))
 $(eval $(call link_program,$(MATCHUP_MATRIX),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/matchup_matrix_main.cpp))
 $(eval $(call link_program,$(PILOT_COMPARE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/pilot_compare_main.cpp))
+$(eval $(call link_program,$(VALUE_BIAS_PROBE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/value_bias_probe_main.cpp))
 $(eval $(call link_program,$(SIM_BENCH),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/sim_bench_main.cpp))
 $(eval $(call link_program,$(REPLAY),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) src/replay_main.cpp))
 $(eval $(call link_program,$(WEB_BRIDGE),$(ENGINE_SOURCE) $(SELFPLAY_ZERO_SOURCE) $(WEB_BRIDGE_SOURCE) src/web_bridge_main.cpp))
@@ -54,7 +56,7 @@ $(WEB_DEPENDENCIES): web/package.json web/package-lock.json
 	npm --prefix web ci
 	@touch $(WEB_DEPENDENCIES)
 
-.PHONY: all test test-selfplay-zero test-web test-web-ui test-web-rendered selfplay-zero audit-champion matchup-matrix pilot-compare replay web-target-stack web-interaction web-journey web-delayed-journey web-build web clean
+.PHONY: all test test-selfplay-zero test-web test-web-ui test-web-rendered selfplay-zero audit-champion matchup-matrix pilot-compare value-bias-probe replay web-target-stack web-interaction web-journey web-delayed-journey web-build web clean
 
 audit-champion: $(AUDIT_CHAMPION)
 	./$(AUDIT_CHAMPION) --self-test
@@ -65,6 +67,8 @@ selfplay-zero: $(SELFPLAY_ZERO)
 matchup-matrix: $(MATCHUP_MATRIX)
 
 pilot-compare: $(PILOT_COMPARE)
+
+value-bias-probe: $(VALUE_BIAS_PROBE)
 
 sim-bench: $(SIM_BENCH)
 
