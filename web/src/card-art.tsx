@@ -1436,6 +1436,104 @@ const ART: Record<string, Art> = {
       <path d="M66 20 L74 20" stroke={GOLD} strokeWidth={2.4} />
     </Frame>
   ),
+  "Zephyr Falcon": (
+    <Frame bg={U.sky}>
+      <circle cx={20} cy={10} r={4} fill={U.pale} />
+      <circle cx={98} cy={13} r={3} fill={U.pale} />
+      <g fill={U.dark}>
+        <path d="M36 26 Q54 8 74 20 Q64 20 58 25 Q70 24 84 30 Q66 30 56 30 Q48 32 42 30 Z" />
+        <path d="M56 30 L61 36 L52 33 Z" />
+      </g>
+    </Frame>
+  ),
+  "Mahamoti Djinn": (
+    <Frame bg={U.mid}>
+      <circle cx={16} cy={9} r={3} fill={U.pale} />
+      <g fill={U.dark}>
+        <path d="M44 44 Q40 30 52 24 Q46 16 56 10 Q70 4 80 12 Q90 20 82 28 Q94 32 92 44 Z" />
+      </g>
+      <g fill={U.pale}>
+        <circle cx={63} cy={15} r={1.6} />
+        <circle cx={73} cy={15} r={1.6} />
+      </g>
+      <path d="M52 24 Q40 26 34 20 Q38 32 48 32 Z" fill={U.dark} />
+      <circle cx={68} cy={22} r={1.6} fill={GOLD} />
+    </Frame>
+  ),
+  "Jayemdae Tome": (
+    <Frame bg={A.sky}>
+      <Ground c={A.mid} y={36} />
+      <g>
+        <path d="M38 14 Q58 8 60 12 L60 34 Q58 30 38 36 Z" fill={U.dark} />
+        <path d="M82 14 Q62 8 60 12 L60 34 Q62 30 82 36 Z" fill={U.mid} />
+        <path d="M42 18 L56 15 M42 22 L56 19 M42 26 L56 23" stroke={A.pale} strokeWidth={1.2} fill="none" />
+        <circle cx={70} cy={20} r={2.4} fill={GOLD} />
+      </g>
+    </Frame>
+  ),
+  "Mana Vault": (
+    <Frame bg={A.sky}>
+      <Ground c={A.mid} y={35} />
+      <rect x={44} y={12} width={32} height={26} rx={3} fill={A.dark} />
+      <rect x={48} y={16} width={24} height={18} rx={2} fill={A.mid} />
+      <circle cx={60} cy={25} r={6} fill={GOLD} />
+      <circle cx={60} cy={25} r={2.4} fill={A.pale} />
+      <path d="M30 18 L38 22 M90 18 L82 22" stroke={GOLD} strokeWidth={2} />
+    </Frame>
+  ),
+  "Unstable Mutation": (
+    <Frame bg={U.sky}>
+      <g stroke={U.dark} strokeWidth={3} fill="none">
+        <path d="M34 34 Q46 6 62 20 Q74 30 60 32 Q50 32 56 24" />
+        <path d="M70 12 Q88 16 84 30" />
+      </g>
+      <circle cx={40} cy={12} r={2.6} fill={U.mid} />
+      <circle cx={86} cy={34} r={2.6} fill={U.mid} />
+      <circle cx={62} cy={20} r={2} fill={GOLD} />
+    </Frame>
+  ),
+  "Wrath of God": (
+    <Frame bg={W.sky}>
+      <Ground c={W.mid} y={38} />
+      <circle cx={60} cy={6} r={7} fill={W.pale} />
+      <g stroke={GOLD} strokeWidth={2.6} fill="none">
+        <path d="M60 8 L60 36" />
+        <path d="M48 8 L40 34" />
+        <path d="M72 8 L80 34" />
+        <path d="M36 10 L24 30" />
+        <path d="M84 10 L96 30" />
+      </g>
+      <path d="M28 38 L36 32 L44 38 Z" fill={W.dark} />
+      <path d="M76 38 L84 32 L92 38 Z" fill={W.dark} />
+    </Frame>
+  ),
+  "The Hive": (
+    <Frame bg={A.sky}>
+      <Ground c={A.mid} y={36} />
+      <g fill={GOLD}>
+        <ellipse cx={60} cy={14} rx={10} ry={5} />
+        <ellipse cx={60} cy={20} rx={13} ry={6} />
+        <ellipse cx={60} cy={27} rx={11} ry={5.5} />
+        <ellipse cx={60} cy={33} rx={7} ry={4.5} />
+      </g>
+      <circle cx={60} cy={33} r={2.2} fill={A.dark} />
+      <circle cx={78} cy={16} r={1.4} fill={A.dark} />
+      <circle cx={42} cy={20} r={1.4} fill={A.dark} />
+    </Frame>
+  ),
+  Wasp: (
+    <Frame bg={A.pale}>
+      <g>
+        <ellipse cx={56} cy={26} rx={9} ry={5} fill={K.mid} />
+        <path d="M64 24 Q74 22 78 26 Q74 30 64 28 Z" fill={GOLD} />
+        <circle cx={46} cy={24} r={3.4} fill={K.dark} />
+        <ellipse cx={54} cy={17} rx={7} ry={4} fill={U.pale} opacity={0.9} />
+        <ellipse cx={63} cy={16} rx={6} ry={3.4} fill={U.pale} opacity={0.9} />
+        <path d="M78 26 L86 27" stroke={K.dark} strokeWidth={1.4} />
+        <path d="M56 22 L56 30 M60 22 L60 30" stroke={GOLD} strokeWidth={1.2} />
+      </g>
+    </Frame>
+  ),
 };
 
 export function cardArt(name: string): JSX.Element | null {

@@ -122,7 +122,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   );
   assert.deepEqual(meta.body.evolution.defaults, {
     generations: 3,
-    population: 6,
+    population: 8,
     games: 1,
     pilot: "handcrafted",
     seed: "424242",
@@ -132,7 +132,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
     max: 200,
   });
   assert.deepEqual(meta.body.evolution.limits.population, {
-    min: 6,
+    min: 8,
     max: 32,
   });
   assert.deepEqual(meta.body.evolution.limits.games, {
@@ -150,7 +150,7 @@ test("publishes bounded evolution metadata and rejects invalid jobs", async (t) 
   const invalidBodies = [
     { generations: 0 },
     { generations: 201 },
-    { population: 5 },
+    { population: 7 },
     { population: 33 },
     { games: 0 },
     { games: 17 },
@@ -179,7 +179,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
   const created = await json(
     await post(request, "/api/evolutions", {
       generations: 2,
-      population: 6,
+      population: 8,
       games: 1,
       pilot: "handcrafted",
       seed: "4294967295",
@@ -191,7 +191,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
     seed: "4294967295",
     pilot: "handcrafted",
     generations: [50, 51],
-    population: 6,
+    population: 8,
     games: 1,
     best: {
       cards: [
@@ -199,9 +199,9 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
         { id: 2, name: "Grizzly Bears", count: 20 },
       ],
       stats: {
-        games: 24,
-        wins: 12,
-        losses: 12,
+        games: 32,
+        wins: 16,
+        losses: 16,
         draws: 0,
         winRate: 50,
       },
@@ -212,6 +212,8 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
         ["robots", "Robots"],
         ["white-weenie", "White Weenie"],
         ["uwr", "Lion-dib-bolt"],
+        ["blue-skies", "Blue Skies"],
+        ["the-deck", "The Deck"],
       ].map(([deckId, name]) => ({
         deckId,
         name,
@@ -229,9 +231,9 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
           { id: 2, name: "Grizzly Bears", count: 20 },
         ],
         stats: {
-          games: 24,
-          wins: 12,
-          losses: 12,
+          games: 32,
+          wins: 16,
+          losses: 16,
           draws: 0,
           winRate: 50,
         },
@@ -242,11 +244,11 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
           { id: 2, name: "Grizzly Bears", count: 21 },
         ],
         stats: {
-          games: 24,
-          wins: 11,
-          losses: 13,
+          games: 32,
+          wins: 15,
+          losses: 17,
           draws: 0,
-          winRate: (100 * 11) / 24,
+          winRate: (100 * 15) / 32,
         },
       },
     ],
@@ -285,7 +287,7 @@ test("saves only an engine result and plays its exact card vector", async (t) =>
   const meta = await json(await request("/api/meta"));
   const savedMeta = meta.body.decks.find(({ id }) => id === "deck-1");
   assert.deepEqual(savedMeta, saved.body.deck);
-  assert.equal(meta.body.decks.length, 7);
+  assert.equal(meta.body.decks.length, 9);
 
   const game = await json(
     await post(request, "/api/games", {

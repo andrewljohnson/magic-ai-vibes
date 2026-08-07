@@ -109,7 +109,20 @@ const CARD_NAMES = Object.freeze([
   "Atog",
   "Ankh of Mishra",
   "Relic Barrier",
+  "Zephyr Falcon",
+  "Mahamoti Djinn",
+  "Jayemdae Tome",
+  "Mana Vault",
+  "Unstable Mutation",
+  "Wrath of God",
+  "The Hive",
+  "Wasp",
 ]);
+
+// Pseudo-cards that exist only in play (The Hive's Wasp token). They
+// keep their CARD_NAMES slot (the list must mirror the engine enum
+// exactly) but are never legal in a deck.
+const NON_DECK_CARD_IDS = new Set([CARD_NAMES.indexOf("Wasp")]);
 
 export const DECKS = Object.freeze([
   {
@@ -325,6 +338,80 @@ export const DECKS = Object.freeze([
       { name: "Volcanic Island", count: 4 },
     ],
   },
+  {
+    id: "blue-skies",
+    label: "Blue Skies",
+    name: "Blue Skies",
+    colors: ["blue"],
+    deckList:
+      "4 Serendib Efreet / 4 Zephyr Falcon / 4 Flying Men / 2 Air Elemental / Mahamoti Djinn / 2 Jayemdae Tome / Chaos Orb / 2 Mana Vault / Sol Ring / Mox Sapphire / 4 Psionic Blast / 4 Force Spike / 4 Counterspell / Mana Drain / Braingeyser / 4 Unstable Mutation / Pendelhaven / Strip Mine / 4 Mishra's Factory / 14 Island",
+    cards: [
+      { name: "Serendib Efreet", count: 4 },
+      { name: "Zephyr Falcon", count: 4 },
+      { name: "Flying Men", count: 4 },
+      { name: "Air Elemental", count: 2 },
+      { name: "Mahamoti Djinn", count: 1 },
+      { name: "Jayemdae Tome", count: 2 },
+      { name: "Chaos Orb", count: 1 },
+      { name: "Mana Vault", count: 2 },
+      { name: "Sol Ring", count: 1 },
+      { name: "Mox Sapphire", count: 1 },
+      { name: "Psionic Blast", count: 4 },
+      { name: "Force Spike", count: 4 },
+      { name: "Counterspell", count: 4 },
+      { name: "Mana Drain", count: 1 },
+      { name: "Braingeyser", count: 1 },
+      { name: "Unstable Mutation", count: 4 },
+      { name: "Pendelhaven", count: 1 },
+      { name: "Strip Mine", count: 1 },
+      { name: "Mishra's Factory", count: 4 },
+      { name: "Island", count: 14 },
+    ],
+  },
+  {
+    id: "the-deck",
+    label: "The Deck",
+    name: "The Deck",
+    colors: ["white", "blue"],
+    deckList:
+      "Black Lotus / Chaos Orb / 2 Fellwar Stone / 3 Jayemdae Tome / Mox Emerald / Mox Jet / Mox Pearl / Mox Ruby / Mox Sapphire / Sol Ring / The Hive / Ancestral Recall / 4 Counterspell / 4 Disenchant / Mana Drain / 2 Force Spike / 4 Swords to Plowshares / Wrath of God / Braingeyser / Demonic Tutor / Disintegrate / Mind Twist / Recall / Regrowth / Time Walk / 2 Copy Artifact / Moat / 3 City of Brass / Library of Alexandria / 4 Mishra's Factory / Strip Mine / 4 Tundra / 3 Underground Sea / 3 Volcanic Island",
+    cards: [
+      { name: "Black Lotus", count: 1 },
+      { name: "Chaos Orb", count: 1 },
+      { name: "Fellwar Stone", count: 2 },
+      { name: "Jayemdae Tome", count: 3 },
+      { name: "Mox Emerald", count: 1 },
+      { name: "Mox Jet", count: 1 },
+      { name: "Mox Pearl", count: 1 },
+      { name: "Mox Ruby", count: 1 },
+      { name: "Mox Sapphire", count: 1 },
+      { name: "Sol Ring", count: 1 },
+      { name: "The Hive", count: 1 },
+      { name: "Ancestral Recall", count: 1 },
+      { name: "Counterspell", count: 4 },
+      { name: "Disenchant", count: 4 },
+      { name: "Mana Drain", count: 1 },
+      { name: "Force Spike", count: 2 },
+      { name: "Swords to Plowshares", count: 4 },
+      { name: "Wrath of God", count: 1 },
+      { name: "Braingeyser", count: 1 },
+      { name: "Demonic Tutor", count: 1 },
+      { name: "Disintegrate", count: 1 },
+      { name: "Mind Twist", count: 1 },
+      { name: "Recall", count: 1 },
+      { name: "Regrowth", count: 1 },
+      { name: "Time Walk", count: 1 },
+      { name: "Copy Artifact", count: 2 },
+      { name: "Moat", count: 1 },
+      { name: "City of Brass", count: 3 },
+      { name: "Library of Alexandria", count: 1 },
+      { name: "Mishra's Factory", count: 4 },
+      { name: "Strip Mine", count: 1 },
+      { name: "Tundra", count: 4 },
+      { name: "Underground Sea", count: 3 },
+      { name: "Volcanic Island", count: 3 },
+    ],
+  },
 ]);
 
 export const POLICIES = Object.freeze([
@@ -357,10 +444,10 @@ export const POLICIES = Object.freeze([
     label: "Self-Play Zero (SPZ)",
     name: "Self-Play Zero (SPZ)",
     description:
-      "Six-deck-era champion: a value net (256 hidden units, TD self-play) trained on the real old-school metagame over the 88-card pool, played with greedy rollout lookahead. Beats Handcoded Policy 71.5% on the six-deck field.",
+      "Eight-deck-era retrain running: the metagame grew to eight real decks over the 96-card pool (Blue Skies and The Deck joined), which reset the value-net schema. Until the new champion promotes, this seat falls back to the Handcoded Policy.",
     versionDate: "2026-08-06",
-    versionDateLabel: "Champion frozen",
-    lifecycle: "Self-play champion",
+    versionDateLabel: "Retrain started",
+    lifecycle: "Retraining",
   },
 ]);
 
@@ -418,7 +505,7 @@ export const EVOLUTION_PILOTS = Object.freeze([
 
 export const EVOLUTION_DEFAULTS = Object.freeze({
   generations: 3,
-  population: 6,
+  population: 8,
   games: 1,
   pilot: "handcrafted",
   seed: "424242",
@@ -427,7 +514,7 @@ export const EVOLUTION_DEFAULTS = Object.freeze({
 export const EVOLUTION_LIMITS = Object.freeze({
   seed: { min: 0, max: MAX_WEB_EVOLUTION_SEED },
   generations: { min: 1, max: 200 },
-  population: { min: 6, max: 32 },
+  population: { min: 8, max: 32 },
   games: { min: 1, max: 16 },
   retainedResults: MAX_EVOLUTION_RESULTS,
   savedDecks: MAX_SAVED_DECKS,
@@ -1255,7 +1342,10 @@ export function validateEvolutionResult(value, config) {
     value.deck.cardIds.length !== 40 ||
     !value.deck.cardIds.every(
       (id) =>
-        Number.isSafeInteger(id) && id >= 0 && id < CARD_NAMES.length,
+        Number.isSafeInteger(id) &&
+        id >= 0 &&
+        id < CARD_NAMES.length &&
+        !NON_DECK_CARD_IDS.has(id),
     ) ||
     !Array.isArray(value.deck.cards) ||
     value.deck.cards.length === 0
@@ -1274,6 +1364,7 @@ export function validateEvolutionResult(value, config) {
       !Number.isSafeInteger(card.id) ||
       card.id < 0 ||
       card.id >= CARD_NAMES.length ||
+      NON_DECK_CARD_IDS.has(card.id) ||
       typeof card.name !== "string" ||
       card.name !== CARD_NAMES[card.id] ||
       !Number.isSafeInteger(card.count) ||
@@ -1398,6 +1489,7 @@ export function validateEvolutionResult(value, config) {
         !Number.isSafeInteger(card.id) ||
         card.id < 0 ||
         card.id >= CARD_NAMES.length ||
+        NON_DECK_CARD_IDS.has(card.id) ||
         typeof card.name !== "string" ||
         card.name !== CARD_NAMES[card.id] ||
         !Number.isSafeInteger(card.count) ||

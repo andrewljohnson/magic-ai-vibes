@@ -118,7 +118,7 @@ async function json(response) {
   return { response, body };
 }
 
-test("serves the arena and publishes six-deck game metadata", async (t) => {
+test("serves the arena and publishes eight-deck game metadata", async (t) => {
   const { request } = await startTestServer(t);
 
   const page = await request("/");
@@ -135,7 +135,16 @@ test("serves the arena and publishes six-deck game metadata", async (t) => {
   assert.equal(response.status, 200);
   assert.deepEqual(
     body.decks.map(({ id }) => id),
-    ["rg-berserk", "atog", "br-midrange", "robots", "white-weenie", "uwr"],
+    [
+      "rg-berserk",
+      "atog",
+      "br-midrange",
+      "robots",
+      "white-weenie",
+      "uwr",
+      "blue-skies",
+      "the-deck",
+    ],
   );
   assert.match(
     body.decks.find(({ id }) => id === "uwr").deckList,
@@ -146,7 +155,7 @@ test("serves the arena and publishes six-deck game metadata", async (t) => {
     ["random", "monte-carlo", "deep-monte-carlo", "handcrafted", "spz"],
   );
   const spz = body.policies.find(({ id }) => id === "spz");
-  assert.match(spz?.description ?? "", /[Ss]ix-deck/);
+  assert.match(spz?.description ?? "", /[Ee]ight-deck/);
   assert.equal(body.defaults.bluffMode, false);
   assert.deepEqual(body.decisionKinds, [
     "priority",

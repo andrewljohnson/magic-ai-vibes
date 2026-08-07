@@ -255,7 +255,7 @@ function render() {
     // not get charts.
     const CURRENT_DECKS = new Set([
       "Lion-dib-bolt", "Robots", "White Weenie", "BR Midrange",
-      "RG Berserk", "Atog",
+      "RG Berserk", "Atog", "Blue Skies", "The Deck",
     ]);
     const deckNames = [...new Set(liftRows.flatMap(r =>
       Object.keys(r).filter(k => k.startsWith("lift_")).map(k => k.slice(5))))]

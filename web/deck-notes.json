@@ -117,5 +117,19 @@
    "night-d10-1",
    "night-d10-0"
   ]
+ },
+ "blue-skies": {
+  "deck": "Blue Skies",
+  "style": "Cheap evasive flyers (Falcons, Flying Men, Serendibs) under counter cover, with Unstable Mutation turning one-drops into 4/4s that race their own decay.",
+  "good": "Pending: the eight-deck-era retrain is running; scouting notes are re-earned from the new champion's replays after promotion.",
+  "mistakes": "Pending: the eight-deck-era retrain is running; scouting notes are re-earned from the new champion's replays after promotion.",
+  "replays": []
+ },
+ "the-deck": {
+  "deck": "The Deck",
+  "style": "Draw-go control: answers (Counterspell, Swords, Disenchant, Wrath of God) plus Jayemdae Tome card advantage until Factories and The Hive's Wasps close.",
+  "good": "Pending: the eight-deck-era retrain is running; scouting notes are re-earned from the new champion's replays after promotion.",
+  "mistakes": "Pending: the eight-deck-era retrain is running; scouting notes are re-earned from the new champion's replays after promotion.",
+  "replays": []
  }
 }

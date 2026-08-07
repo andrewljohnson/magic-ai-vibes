@@ -651,6 +651,17 @@ const CARD_RULES_TEXT: Record<string, string> = {
   "Ankh of Mishra":
     "Whenever a land enters the battlefield, Ankh of Mishra deals 2 damage to that land's controller.",
   "Relic Barrier": "Tap: Tap target artifact.",
+  "Zephyr Falcon": "Flying. A nimble 1/1 falcon.",
+  "Mahamoti Djinn": "Flying. A towering 5/6 djinn.",
+  "Jayemdae Tome": "{4}, Tap: Draw a card.",
+  "Mana Vault":
+    "Tap: Add {3}. Mana Vault doesn't untap during your untap step; you may pay {4} to untap it. At your upkeep, if it's tapped, it deals 1 damage to you.",
+  "Unstable Mutation":
+    "Enchant creature. It gets +3/+3. At the beginning of the upkeep of that creature's controller, put a -1/-1 counter on it.",
+  "Wrath of God": "Destroy all creatures.",
+  "The Hive":
+    "{5}, Tap: Create a 1/1 flying Wasp artifact creature token.",
+  Wasp: "A 1/1 flying artifact-creature token. It ceases to exist when it leaves play.",
 };
 
 function ManaCostPips({ card }: { card: Card }) {
