@@ -8416,12 +8416,36 @@ double Game::handcrafted_action_score(const PriorityAction& action,
     case PriorityActionKind::ActivateLibrary:
         return 4'200.0;
 
-    case PriorityActionKind::ActivateMishrasFactory:
+    case PriorityActionKind::ActivateMishrasFactory: {
         // Animate before combat when attacking is plausible.
-        return phase == TurnPhase::FirstMain &&
-                       state_.active_player == player
-                   ? 900.0
-                   : -200.0;
+        if (phase == TurnPhase::FirstMain &&
+            state_.active_player == player) {
+            return 900.0;
+        }
+        // Defensive animation: at the opponent's beginning of combat
+        // an animated Factory is a legal blocker. Worth it when they
+        // have ready attackers and our board is outnumbered.
+        if (state_.active_player != player &&
+            phase == TurnPhase::BeginCombat) {
+            int ready_attackers = 0;
+            for (const auto& creature : opponent_state.creatures) {
+                if (!creature.tapped && !creature.summoning_sick &&
+                    can_attack_through_moat(state_, creature)) {
+                    ++ready_attackers;
+                }
+            }
+            int untapped_blockers = 0;
+            for (const auto& creature : player_state.creatures) {
+                if (!creature.tapped) {
+                    ++untapped_blockers;
+                }
+            }
+            if (ready_attackers > untapped_blockers) {
+                return 700.0;
+            }
+        }
+        return -200.0;
+    }
 
     case PriorityActionKind::ActivateStripMine:
         if (!action.target.has_value() ||
