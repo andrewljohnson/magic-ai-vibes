@@ -41,6 +41,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_weenie_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::BlueSkies:
+        return blue_skies_deck();
+    case DeckId::TheDeck:
+        return the_deck();
     }
     throw std::out_of_range("unknown deck");
 }
@@ -58,6 +62,11 @@ void validate_exact_deck_cards(
             throw std::invalid_argument(
                 std::string(option_name) +
                 " contains an unknown card ID");
+        }
+        if (card_definition(card).is_token) {
+            throw std::invalid_argument(
+                std::string(option_name) +
+                " contains a token pseudo-card (not deck-buildable)");
         }
     }
 }
@@ -87,6 +96,10 @@ std::string_view deck_id_token(DeckId deck) {
         return "white-weenie";
     case DeckId::UWR:
         return "uwr";
+    case DeckId::BlueSkies:
+        return "blue-skies";
+    case DeckId::TheDeck:
+        return "the-deck";
     }
     throw std::out_of_range("unknown deck");
 }
@@ -245,6 +258,14 @@ std::string_view action_kind_name(PriorityActionKind kind) {
         return "activate_atog";
     case PriorityActionKind::ActivateRelicBarrier:
         return "activate_relic_barrier";
+    case PriorityActionKind::CastUnstableMutation:
+        return "cast_unstable_mutation";
+    case PriorityActionKind::ActivateManaVaultUntap:
+        return "activate_mana_vault_untap";
+    case PriorityActionKind::ActivateJayemdaeTome:
+        return "activate_jayemdae_tome";
+    case PriorityActionKind::ActivateTheHive:
+        return "activate_the_hive";
     }
     throw std::logic_error("unknown priority action");
 }
@@ -585,15 +606,24 @@ void write_creature(std::ostream& output,
            << (creature.summoning_sick ? "true" : "false")
            << ",\"damage\":" << creature.damage
            << ",\"power\":"
-           << definition.power + creature.temporary_power_bonus +
-                  creature.plus_counters +
-                  creature.static_power_bonus
+           << std::max(0,
+                       definition.power +
+                           creature.temporary_power_bonus +
+                           creature.plus_counters -
+                           creature.minus_counters +
+                           creature.static_power_bonus +
+                           3 * static_cast<int>(
+                                   creature.auras.size()))
            << ",\"toughness\":"
            << definition.toughness +
                   creature.temporary_toughness_bonus +
-                  creature.plus_counters +
-                  creature.static_toughness_bonus
-           << ",\"plusCounters\":" << creature.plus_counters;
+                  creature.plus_counters - creature.minus_counters +
+                  creature.static_toughness_bonus +
+                  3 * static_cast<int>(creature.auras.size())
+           << ",\"plusCounters\":" << creature.plus_counters
+           << ",\"minusCounters\":" << creature.minus_counters
+           << ",\"auras\":"
+           << static_cast<int>(creature.auras.size());
     if (creature.is_copy) {
         output << ",\"copyOf\":";
         write_card(output, creature.copy_of);
@@ -1488,6 +1518,12 @@ DeckId parse_deck_id(std::string_view value) {
     }
     if (value == "uwr" || value == "uwr-aggro") {
         return DeckId::UWR;
+    }
+    if (value == "blue-skies") {
+        return DeckId::BlueSkies;
+    }
+    if (value == "the-deck") {
+        return DeckId::TheDeck;
     }
     throw std::invalid_argument(
         "unknown deck: " + std::string(value));

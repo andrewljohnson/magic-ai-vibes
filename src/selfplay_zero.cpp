@@ -58,6 +58,35 @@ CardCountArray count_cards(const std::vector<CardId>& cards) {
     return counts;
 }
 
+// Attached-aura bonus (Unstable Mutation: +3/+3 each), mirrored from
+// the engine's creature stat arithmetic.
+int observed_aura_bonus(const CreaturePermanent& creature) {
+    int bonus = 0;
+    for (const auto& aura : creature.auras) {
+        if (aura.card == CardId::UnstableMutation) {
+            bonus += 3;
+        }
+    }
+    return bonus;
+}
+
+// Auras a player OWNS are physical cards wherever they sit attached —
+// including on the opponent's creatures — so hidden-pool arithmetic
+// must subtract them from that owner's decklist.
+void subtract_owned_auras(CardCountArray& counts,
+                          const PlayerObservation& observation,
+                          std::size_t owner) {
+    for (const auto& side : observation.players) {
+        for (const auto& creature : side.creatures) {
+            for (const auto& aura : creature.auras) {
+                if (aura.owner == owner) {
+                    subtract_card(counts, aura.card);
+                }
+            }
+        }
+    }
+}
+
 void append_counts(std::vector<float>& features,
                    const CardCountArray& counts) {
     for (const int count : counts) {
@@ -85,7 +114,10 @@ CardCountArray public_battlefield_counts(const PublicPlayerState& player) {
 
 void subtract_public_zones(CardCountArray& counts,
                            const PublicPlayerState& player) {
-    const CardCountArray battlefield = public_battlefield_counts(player);
+    CardCountArray battlefield = public_battlefield_counts(player);
+    // Tokens exist only in play; they never came from the deck and
+    // must not leave the hidden pools.
+    battlefield[static_cast<std::size_t>(CardId::WaspToken)] = 0;
     for (std::size_t index = 0; index < kCardCount; ++index) {
         counts[index] -= battlefield[index];
     }
@@ -132,15 +164,18 @@ void append_player_scalars(std::vector<float>& features,
     for (const auto& creature : player.creatures) {
         const auto& definition = card_definition(
             creature.is_copy ? creature.copy_of : creature.card);
-        const int creature_power = definition.power +
-                                   creature.temporary_power_bonus +
-                                   creature.plus_counters +
-                                   creature.static_power_bonus;
+        const int creature_power = std::max(
+            0, definition.power + creature.temporary_power_bonus +
+                   creature.plus_counters - creature.minus_counters +
+                   creature.static_power_bonus +
+                   observed_aura_bonus(creature));
         power += creature_power;
         toughness += definition.toughness +
                      creature.temporary_toughness_bonus +
-                     creature.plus_counters +
-                     creature.static_toughness_bonus;
+                     creature.plus_counters -
+                     creature.minus_counters +
+                     creature.static_toughness_bonus +
+                     observed_aura_bonus(creature);
         damage += creature.damage;
         bonus_power += creature.temporary_power_bonus;
         if (!creature.tapped) {
@@ -260,11 +295,13 @@ std::vector<float> spz_features_colors(
                 const auto& definition = card_definition(
                     creature.is_copy ? creature.copy_of
                                      : creature.card);
-                const int power =
-                    definition.power +
-                    creature.temporary_power_bonus +
-                    creature.plus_counters +
-                    creature.static_power_bonus;
+                const int power = std::max(
+                    0, definition.power +
+                           creature.temporary_power_bonus +
+                           creature.plus_counters -
+                           creature.minus_counters +
+                           creature.static_power_bonus +
+                           observed_aura_bonus(creature));
                 if (!creature.tapped) {
                     tally.untapped += power;
                     if (definition.flying) {
@@ -326,6 +363,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
     static const std::array<std::vector<CardId>, kSpzDeckCount> decks = {
         rg_berserk_deck(), atog_deck(),   br_midrange_deck(),
         robots_deck(),     white_weenie_deck(), uwr_deck(),
+        blue_skies_deck(), the_deck(),
     };
     return decks;
 }
@@ -333,7 +371,7 @@ const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks() {
 std::string_view spz_deck_name(std::size_t deck_index) {
     static constexpr std::array<std::string_view, kSpzDeckCount> names = {
         "RG Berserk", "Atog", "BR Midrange", "Robots",
-        "White Weenie", "Lion-dib-bolt",
+        "White Weenie", "Lion-dib-bolt", "Blue Skies", "The Deck",
     };
     return names.at(deck_index);
 }
@@ -395,6 +433,7 @@ std::vector<float> spz_features(
     // it can already account for.
     CardCountArray my_library = count_cards(original_decks[me]);
     subtract_public_zones(my_library, my_public);
+    subtract_owned_auras(my_library, observation, me);
     for (std::size_t index = 0; index < kCardCount; ++index) {
         my_library[index] -= my_hand[index] + my_stack_spells[index];
     }
@@ -402,6 +441,7 @@ std::vector<float> spz_features(
     // The opponent's unseen pool (hand plus library combined).
     CardCountArray opponent_unseen = count_cards(original_decks[opponent]);
     subtract_public_zones(opponent_unseen, opponent_public);
+    subtract_owned_auras(opponent_unseen, observation, opponent);
     for (std::size_t index = 0; index < kCardCount; ++index) {
         opponent_unseen[index] -= opponent_stack_spells[index];
     }
@@ -452,17 +492,22 @@ constexpr std::size_t kRaceFeatures = 10;
 int creature_current_power(const CreaturePermanent& creature) {
     const CardId face =
         creature.is_copy ? creature.copy_of : creature.card;
-    return card_definition(face).power +
-           creature.temporary_power_bonus + creature.plus_counters +
-           creature.static_power_bonus;
+    return std::max(
+        0, card_definition(face).power +
+               creature.temporary_power_bonus +
+               creature.plus_counters - creature.minus_counters +
+               creature.static_power_bonus +
+               observed_aura_bonus(creature));
 }
 
 int creature_current_toughness(const CreaturePermanent& creature) {
     const CardId face =
         creature.is_copy ? creature.copy_of : creature.card;
     return card_definition(face).toughness +
-           creature.temporary_toughness_bonus + creature.plus_counters +
-           creature.static_toughness_bonus;
+           creature.temporary_toughness_bonus +
+           creature.plus_counters - creature.minus_counters +
+           creature.static_toughness_bonus +
+           observed_aura_bonus(creature);
 }
 
 void append_creature_slots_range(std::vector<float>& features,
@@ -1620,12 +1665,12 @@ SpzNet load_spz_net(const std::string& path) {
 // Policy network
 
 std::size_t spz_action_feature_count() {
-    // kind one-hot (40 slots leave headroom past the current 36
+    // kind one-hot (48 slots leave headroom past the current 40
     // PriorityActionKinds) + card one-hot + target class
     // (none/self/opponent player, own/enemy creature) + target
     // creature card + countered spell card + chosen card (tutor/copy/
     // Regrowth choice) + x scale + source-permanent flag.
-    return 40 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
+    return 48 + kCardCount + 5 + kCardCount + kCardCount + kCardCount +
            1 + 1;
 }
 
@@ -1635,7 +1680,7 @@ std::vector<float> spz_action_features(const PriorityAction& action,
     std::vector<float> features(spz_action_feature_count(), 0.0f);
     std::size_t offset = 0;
     features[offset + static_cast<std::size_t>(action.kind)] = 1.0f;
-    offset += 40;
+    offset += 48;
     features[offset + static_cast<std::size_t>(action.card)] = 1.0f;
     offset += kCardCount;
     if (!action.target.has_value()) {
@@ -2326,6 +2371,11 @@ struct SpzAgent {
         case PriorityActionKind::ActivateRelicBarrier:
             // Tap or sacrifice costs only; no mana spent.
             return 0;
+        case PriorityActionKind::ActivateManaVaultUntap:
+        case PriorityActionKind::ActivateJayemdaeTome:
+            return 4;
+        case PriorityActionKind::ActivateTheHive:
+            return 5;
         default: {
             const ManaCost& cost = card_definition(action.card).cost;
             return cost.generic + cost.green + cost.red + cost.blue +
@@ -2443,6 +2493,8 @@ struct SpzAgent {
                     creature.attacked_this_turn ||
                 other->berserked_this_turn !=
                     creature.berserked_this_turn ||
+                other->minus_counters != creature.minus_counters ||
+                other->auras != creature.auras ||
                 other->copy_of != creature.copy_of ||
                 other->is_copy != creature.is_copy ||
                 other->exile_on_death_this_turn !=
@@ -2747,7 +2799,9 @@ struct SpzAgent {
                 other->tapped != creature.tapped ||
                 other->summoning_sick != creature.summoning_sick ||
                 other->damage != creature.damage ||
-                other->plus_counters != creature.plus_counters) {
+                other->plus_counters != creature.plus_counters ||
+                other->minus_counters != creature.minus_counters ||
+                other->auras != creature.auras) {
                 return false;
             }
             if (creature.temporary_power_bonus <

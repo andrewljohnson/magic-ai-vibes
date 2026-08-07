@@ -83,15 +83,26 @@ void write_board(std::ostream& out, const PlayerObservation& obs) {
             write_string(out, card_name(creature.is_copy
                                             ? creature.copy_of
                                             : creature.card));
+            int aura_bonus = 0;
+            for (const auto& aura : creature.auras) {
+                aura_bonus += aura.card == CardId::UnstableMutation
+                                  ? 3
+                                  : 0;
+            }
             out << ",\"power\":"
-                << definition.power + creature.temporary_power_bonus +
-                       creature.plus_counters +
-                       creature.static_power_bonus
+                << std::max(0,
+                            definition.power +
+                                creature.temporary_power_bonus +
+                                creature.plus_counters -
+                                creature.minus_counters +
+                                creature.static_power_bonus +
+                                aura_bonus)
                 << ",\"toughness\":"
                 << definition.toughness +
                        creature.temporary_toughness_bonus +
-                       creature.plus_counters +
-                       creature.static_toughness_bonus
+                       creature.plus_counters -
+                       creature.minus_counters +
+                       creature.static_toughness_bonus + aura_bonus
                 << ",\"damage\":" << creature.damage << ",\"tapped\":"
                 << (creature.tapped ? "true" : "false") << ",\"sick\":"
                 << (creature.summoning_sick ? "true" : "false") << '}';

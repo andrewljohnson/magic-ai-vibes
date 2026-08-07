@@ -3049,7 +3049,7 @@ TEST(monte_carlo_bot_runs_complete_random_continuations) {
 TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
     const old_school::DeckEvolutionConfig config = {
         .generations = 2,
-        .population = 6,
+        .population = 8,
         .repetitions_per_opponent = 1,
         .pilot =
             {
@@ -3062,11 +3062,11 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
 
     CHECK(first.generation_best_win_rates.size() == 2);
     CHECK(first.best.cards.size() == 40);
-    CHECK(first.best.by_opponent.size() == 6);
-    CHECK(first.best.total.games == 24);
+    CHECK(first.best.by_opponent.size() == 8);
+    CHECK(first.best.total.games == 32);
     CHECK(first.best.total.wins + first.best.total.losses +
               first.best.total.draws ==
-          24);
+          32);
     for (const auto& matchup : first.best.by_opponent) {
         CHECK(matchup.games == 4);
     }
@@ -3078,6 +3078,8 @@ TEST(deck_evolution_uses_the_metagame_card_pool_and_is_deterministic) {
              old_school::robots_deck(),
              old_school::white_weenie_deck(),
              old_school::uwr_deck(),
+             old_school::blue_skies_deck(),
+             old_school::the_deck(),
          }) {
         metagame_pool.insert(
             metagame_pool.end(), deck.begin(), deck.end());
@@ -6310,15 +6312,479 @@ TEST(taiga_pays_red_or_green_and_new_decks_have_the_right_sizes) {
 
     CHECK(rg_berserk_deck().size() == 60);
     CHECK(atog_deck().size() == 61);
-    CHECK(kDeckCount == 6);
+    CHECK(blue_skies_deck().size() == 60);
+    CHECK(the_deck().size() == 60);
+    CHECK(kDeckCount == 8);
     CHECK(deck_name(DeckId::RGBerserk) == "RG Berserk");
     CHECK(deck_name(DeckId::Atog) == "Atog");
-    // Every card of both decks resolves a definition (no enum gap).
-    for (const auto& deck : {rg_berserk_deck(), atog_deck()}) {
+    CHECK(deck_name(DeckId::BlueSkies) == "Blue Skies");
+    CHECK(deck_name(DeckId::TheDeck) == "The Deck");
+    // Every card of the decks resolves a definition (no enum gap).
+    for (const auto& deck : {rg_berserk_deck(), atog_deck(),
+                             blue_skies_deck(), the_deck()}) {
         for (const CardId card : deck) {
             CHECK(!card_definition(card).name.empty());
         }
     }
+}
+
+
+TEST(zephyr_falcon_and_mahamoti_djinn_are_castable_blue_flyers) {
+    using namespace old_school;
+    CHECK(kCardCount == 96);
+    const auto& falcon = card_definition(CardId::ZephyrFalcon);
+    CHECK(falcon.type == CardType::Creature);
+    CHECK(falcon.power == 1 && falcon.toughness == 1);
+    CHECK(falcon.flying);
+    CHECK(falcon.cost.generic == 1 && falcon.cost.blue == 1);
+    const auto& djinn = card_definition(CardId::MahamotiDjinn);
+    CHECK(djinn.type == CardType::Creature);
+    CHECK(djinn.power == 5 && djinn.toughness == 6);
+    CHECK(djinn.flying);
+    CHECK(djinn.cost.generic == 4 && djinn.cost.blue == 2);
+
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {CardId::ZephyrFalcon, CardId::MahamotiDjinn};
+    player.lands.assign(
+        6, LandPermanent{.card = CardId::Island, .tapped = false});
+    for (std::size_t index = 0; index < player.lands.size(); ++index) {
+        player.lands[index].id = 900 + index;
+    }
+    const auto actions = legal_priority_actions(state, 0, true);
+    CHECK(has_action(actions,
+                     PriorityAction::cast_creature(
+                         CardId::ZephyrFalcon)));
+    CHECK(has_action(actions,
+                     PriorityAction::cast_creature(
+                         CardId::MahamotiDjinn)));
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::cast_creature(CardId::MahamotiDjinn),
+        true));
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].card == CardId::MahamotiDjinn);
+    // A grounded bear cannot block the flying djinn.
+    state.players[1].creatures = {bear(950)};
+    player.creatures[0].summoning_sick = false;
+    GameState trial = state;
+    CHECK(!resolve_combat(trial, 0, {player.creatures[0].id},
+                          {{player.creatures[0].id, 950}}));
+}
+
+TEST(jayemdae_tome_draws_a_card_for_four_mana) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.artifacts = {
+        {.id = 901, .card = CardId::JayemdaeTome, .tapped = false},
+    };
+    player.library = {CardId::LightningBolt, CardId::Island};
+    player.lands.assign(
+        4, LandPermanent{.card = CardId::Plains, .tapped = false});
+    for (std::size_t index = 0; index < player.lands.size(); ++index) {
+        player.lands[index].id = 910 + index;
+    }
+    auto actions = legal_priority_actions(state, 0, false);
+    CHECK(has_action(actions,
+                     PriorityAction::activate_jayemdae_tome(901)));
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::activate_jayemdae_tome(901), false));
+    CHECK(player.artifacts[0].tapped);
+    resolve_top(state, 0);
+    // Pure draw: one card in hand, nothing discarded.
+    CHECK(player.hand.size() == 1);
+    CHECK(player.hand[0] == CardId::Island);
+    CHECK(player.graveyard.empty());
+    // Tapped: no second activation this turn.
+    for (auto& land : player.lands) {
+        land.tapped = false;
+    }
+    actions = legal_priority_actions(state, 0, false);
+    CHECK(!has_action(actions,
+                      PriorityAction::activate_jayemdae_tome(901)));
+}
+
+TEST(mana_vault_taps_for_three_stays_tapped_pings_and_untaps_paid) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.artifacts = {
+        {.id = 921, .card = CardId::ManaVault, .tapped = false},
+    };
+    // The vault alone covers a three-generic cost.
+    CHECK(can_pay(player, {.generic = 3}));
+    CHECK(pay_mana(player, {.generic = 3}));
+    CHECK(player.artifacts[0].tapped);
+
+    // Untap step skips the vault; the upkeep ping fires while tapped.
+    begin_turn(state, 0);
+    CHECK(player.artifacts[0].tapped);
+    CHECK(player.life == 19);
+
+    // Paid untap: {4} from other sources at any priority window.
+    player.lands.assign(
+        4, LandPermanent{.card = CardId::Island, .tapped = false});
+    for (std::size_t index = 0; index < player.lands.size(); ++index) {
+        player.lands[index].id = 930 + index;
+    }
+    auto actions = legal_priority_actions(state, 0, false);
+    CHECK(has_action(actions,
+                     PriorityAction::activate_mana_vault_untap(921)));
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::activate_mana_vault_untap(921),
+        false));
+    resolve_top(state, 0);
+    CHECK(!player.artifacts[0].tapped);
+    const bool all_lands_tapped = std::all_of(
+        player.lands.begin(), player.lands.end(),
+        [](const LandPermanent& land) { return land.tapped; });
+    CHECK(all_lands_tapped);
+
+    // Untapped vault: no ping and no untap action offered.
+    begin_turn(state, 0);
+    CHECK(player.life == 19);
+    actions = legal_priority_actions(state, 0, false);
+    CHECK(!has_action(actions,
+                      PriorityAction::activate_mana_vault_untap(921)));
+}
+
+TEST(unstable_mutation_pumps_then_decays_the_creature_to_death) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.hand = {CardId::UnstableMutation};
+    player.lands = {
+        {.card = CardId::Island, .tapped = false, .id = 941},
+    };
+    player.creatures = {
+        {.id = 942,
+         .card = CardId::FlyingMen,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const auto actions = legal_priority_actions(state, 0, true);
+    CHECK(has_action(
+        actions, PriorityAction::cast_unstable_mutation(
+                     Target::creature_target(0, 942))));
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_unstable_mutation(
+            Target::creature_target(0, 942)),
+        true));
+    resolve_top(state, 0);
+    // Attached: +3/+3 on the 1/1, card conserved on the creature.
+    CHECK(player.creatures.size() == 1);
+    CHECK(player.creatures[0].auras.size() == 1);
+    CHECK(player.creatures[0].auras[0].card ==
+          CardId::UnstableMutation);
+    CHECK(player.creatures[0].auras[0].owner == 0);
+    CHECK(player.graveyard.empty());
+    const auto scores_state = state;
+    (void)scores_state;
+
+    // Upkeeps 1-3: 4/4 -> 3/3 -> 2/2 -> 1/1, still alive.
+    for (int upkeep = 1; upkeep <= 3; ++upkeep) {
+        begin_turn(state, 0);
+        CHECK(player.creatures.size() == 1);
+        CHECK(player.creatures[0].minus_counters == upkeep);
+    }
+    // Upkeep 4: 0/0 — state-based death; the aura falls to its
+    // owner's graveyard alongside the creature card.
+    begin_turn(state, 0);
+    CHECK(player.creatures.empty());
+    CHECK(count_card(player.graveyard, CardId::FlyingMen) == 1);
+    CHECK(count_card(player.graveyard, CardId::UnstableMutation) == 1);
+}
+
+TEST(unstable_mutation_across_the_table_returns_to_caster_graveyard) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& caster = state.players[0];
+    auto& enemy = state.players[1];
+    caster.hand = {CardId::UnstableMutation};
+    caster.lands = {
+        {.card = CardId::Island, .tapped = false, .id = 951},
+    };
+    enemy.creatures = {
+        {.id = 952,
+         .card = CardId::ScrybSprites,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    CHECK(apply_priority_action(
+        state, 0,
+        PriorityAction::cast_unstable_mutation(
+            Target::creature_target(1, 952)),
+        true));
+    resolve_top(state, 0);
+    CHECK(enemy.creatures[0].auras.size() == 1);
+    CHECK(enemy.creatures[0].auras[0].owner == 0);
+    // The decay runs at the CREATURE CONTROLLER's upkeep.
+    for (int upkeep = 0; upkeep < 3; ++upkeep) {
+        begin_turn(state, 1);
+    }
+    CHECK(enemy.creatures.size() == 1);
+    begin_turn(state, 1);
+    CHECK(enemy.creatures.empty());
+    // Creature card to its owner; the aura card to ITS owner.
+    CHECK(count_card(enemy.graveyard, CardId::ScrybSprites) == 1);
+    CHECK(count_card(enemy.graveyard, CardId::UnstableMutation) == 0);
+    CHECK(count_card(caster.graveyard, CardId::UnstableMutation) == 1);
+}
+
+TEST(unstable_mutation_and_tokens_conserve_through_determinization) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    std::array<std::vector<CardId>, 2> decks;
+    decks[0].assign(9, CardId::Island);
+    decks[0].push_back(CardId::UnstableMutation);
+    decks[1].assign(9, CardId::Mountain);
+    decks[1].push_back(CardId::GrizzlyBears);
+
+    auto& caster = state.players[0];
+    auto& enemy = state.players[1];
+    caster.lands = {
+        {.card = CardId::Island, .tapped = false, .id = 961},
+    };
+    caster.library.assign(8, CardId::Island);
+    enemy.library.assign(9, CardId::Mountain);
+    enemy.creatures = {
+        {.id = 962,
+         .card = CardId::GrizzlyBears,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    enemy.creatures[0].auras = {
+        {.card = CardId::UnstableMutation, .owner = 0},
+    };
+    // A Wasp token on the caster's side is NOT part of any deck.
+    caster.creatures = {
+        {.id = 963,
+         .card = CardId::WaspToken,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    const GameState sampled =
+        sample_determinization(state, decks, 0, 4242);
+    CHECK(sampled.players[1].creatures[0].auras.size() == 1);
+    CHECK(sampled.players[0].creatures[0].card == CardId::WaspToken);
+    CHECK(sampled.players[0].library.size() == 8);
+}
+
+TEST(wrath_of_god_destroys_every_creature_with_all_side_effects) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 1;
+    auto& enemy = state.players[0];
+    auto& caster = state.players[1];
+    // The board: a Su-Chi (rebate), an animated Factory (land card
+    // fighting as a creature), a Wasp token, and a bear wearing the
+    // caster's Unstable Mutation.
+    enemy.creatures = {
+        {.id = 971,
+         .card = CardId::SuChi,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 972,
+         .card = CardId::MishrasFactory,
+         .tapped = false,
+         .summoning_sick = false},
+        {.id = 973,
+         .card = CardId::WaspToken,
+         .tapped = false,
+         .summoning_sick = false},
+        bear(974),
+    };
+    enemy.creatures[3].auras = {
+        {.card = CardId::UnstableMutation, .owner = 1},
+    };
+    caster.creatures = {bear(975)};
+    caster.hand = {CardId::WrathOfGod};
+    caster.lands = {
+        {.card = CardId::Plains, .tapped = false, .id = 976},
+        {.card = CardId::Plains, .tapped = false, .id = 977},
+        {.card = CardId::Tundra, .tapped = false, .id = 978},
+        {.card = CardId::Island, .tapped = false, .id = 979},
+    };
+    const auto actions = legal_priority_actions(state, 1, true);
+    CHECK(has_action(actions,
+                     PriorityAction::cast_sorcery(CardId::WrathOfGod)));
+    CHECK(apply_priority_action(
+        state, 1, PriorityAction::cast_sorcery(CardId::WrathOfGod),
+        true));
+    resolve_top(state, 1);
+    CHECK(enemy.creatures.empty());
+    CHECK(caster.creatures.empty());
+    // Su-Chi rebates {4} to its controller.
+    CHECK(enemy.mana_pool.generic == 4);
+    // The animated Factory's land card is in the graveyard.
+    CHECK(count_card(enemy.graveyard, CardId::MishrasFactory) == 1);
+    CHECK(count_card(enemy.graveyard, CardId::SuChi) == 1);
+    CHECK(count_card(enemy.graveyard, CardId::GrizzlyBears) == 1);
+    // The token ceased: no graveyard entry anywhere.
+    CHECK(count_card(enemy.graveyard, CardId::WaspToken) == 0);
+    CHECK(count_card(caster.graveyard, CardId::WaspToken) == 0);
+    // The aura fell to its owner (the caster), the Wrath too.
+    CHECK(count_card(caster.graveyard, CardId::UnstableMutation) == 1);
+    CHECK(count_card(caster.graveyard, CardId::GrizzlyBears) == 1);
+    CHECK(count_card(caster.graveyard, CardId::WrathOfGod) == 1);
+}
+
+TEST(the_hive_makes_wasps_that_fly_cease_and_cannot_block_pixies) {
+    using namespace old_school;
+    GameState state;
+    state.active_player = 0;
+    auto& player = state.players[0];
+    player.artifacts = {
+        {.id = 981, .card = CardId::TheHive, .tapped = false},
+    };
+    player.lands.assign(
+        5, LandPermanent{.card = CardId::Island, .tapped = false});
+    for (std::size_t index = 0; index < player.lands.size(); ++index) {
+        player.lands[index].id = 985 + index;
+    }
+    auto actions = legal_priority_actions(state, 0, false);
+    CHECK(has_action(actions, PriorityAction::activate_the_hive(981)));
+    CHECK(apply_priority_action(
+        state, 0, PriorityAction::activate_the_hive(981), false));
+    CHECK(player.artifacts[0].tapped);
+    resolve_top(state, 0);
+    CHECK(player.creatures.size() == 1);
+    const auto& wasp = player.creatures[0];
+    CHECK(wasp.card == CardId::WaspToken);
+    CHECK(wasp.summoning_sick);
+    CHECK(card_definition(wasp.card).flying);
+    CHECK(card_definition(wasp.card).is_token);
+
+    // The Wasp is an artifact creature: it cannot block Argothian
+    // Pixies (falls out of the pixies rule automatically).
+    state.players[1].creatures = {
+        {.id = 991,
+         .card = CardId::ArgothianPixies,
+         .tapped = false,
+         .summoning_sick = false},
+    };
+    {
+        GameState trial = state;
+        trial.active_player = 1;
+        trial.players[0].creatures[0].summoning_sick = false;
+        CHECK(!resolve_combat(trial, 1, {991}, {{991, wasp.id}}));
+        // A plain block against a bear would be legal.
+        trial.players[1].creatures[0].card = CardId::GrizzlyBears;
+        CHECK(resolve_combat(trial, 1, {991}, {{991, wasp.id}}));
+    }
+
+    // Copy Artifact may copy the Wasp: the copy is the physical Copy
+    // Artifact card acting as a Wasp.
+    auto& opponent = state.players[1];
+    opponent.hand = {CardId::CopyArtifact};
+    opponent.lands = {
+        {.card = CardId::Island, .tapped = false, .id = 992},
+        {.card = CardId::Island, .tapped = false, .id = 993},
+    };
+    state.active_player = 1;
+    const auto copy_actions = legal_priority_actions(state, 1, true);
+    CHECK(has_action(copy_actions,
+                     PriorityAction::cast_copy_artifact(0, wasp.id)));
+    CHECK(apply_priority_action(
+        state, 1, PriorityAction::cast_copy_artifact(0, wasp.id),
+        true));
+    resolve_top(state, 1);
+    // Alongside the pixies already on that side.
+    CHECK(opponent.creatures.size() == 2);
+    CHECK(opponent.creatures[1].card == CardId::CopyArtifact);
+    CHECK(opponent.creatures[1].is_copy);
+    CHECK(opponent.creatures[1].copy_of == CardId::WaspToken);
+
+    // A dead token ceases: no graveyard entry.
+    state.players[0].creatures[0].damage = 5;
+    GameState killed = state;
+    // Bolt the wasp directly through the damage path.
+    killed.players[0].creatures[0].damage = 0;
+    killed.stack.push_back({
+        .id = killed.next_stack_object_id++,
+        .card = CardId::LightningBolt,
+        .controller = 1,
+        .target = Target::creature_target(0, wasp.id),
+    });
+    killed.players[1].graveyard.clear();
+    resolve_top(killed, 1);
+    CHECK(killed.players[0].creatures.empty());
+    CHECK(count_card(killed.players[0].graveyard,
+                     CardId::WaspToken) == 0);
+}
+
+TEST(blue_skies_and_the_deck_match_the_user_lists_exactly) {
+    using namespace old_school;
+    const auto skies = blue_skies_deck();
+    CHECK(skies.size() == 60);
+    CHECK(count_card(skies, CardId::SerendibEfreet) == 4);
+    CHECK(count_card(skies, CardId::ZephyrFalcon) == 4);
+    CHECK(count_card(skies, CardId::FlyingMen) == 4);
+    CHECK(count_card(skies, CardId::AirElemental) == 2);
+    CHECK(count_card(skies, CardId::MahamotiDjinn) == 1);
+    CHECK(count_card(skies, CardId::JayemdaeTome) == 2);
+    CHECK(count_card(skies, CardId::ChaosOrb) == 1);
+    CHECK(count_card(skies, CardId::ManaVault) == 2);
+    CHECK(count_card(skies, CardId::SolRing) == 1);
+    CHECK(count_card(skies, CardId::MoxSapphire) == 1);
+    CHECK(count_card(skies, CardId::PsionicBlast) == 4);
+    CHECK(count_card(skies, CardId::ForceSpike) == 4);
+    CHECK(count_card(skies, CardId::Counterspell) == 4);
+    CHECK(count_card(skies, CardId::ManaDrain) == 1);
+    CHECK(count_card(skies, CardId::Braingeyser) == 1);
+    CHECK(count_card(skies, CardId::UnstableMutation) == 4);
+    CHECK(count_card(skies, CardId::Pendelhaven) == 1);
+    CHECK(count_card(skies, CardId::StripMine) == 1);
+    CHECK(count_card(skies, CardId::MishrasFactory) == 4);
+    CHECK(count_card(skies, CardId::Island) == 14);
+
+    const auto control = the_deck();
+    CHECK(control.size() == 60);
+    CHECK(count_card(control, CardId::BlackLotus) == 1);
+    CHECK(count_card(control, CardId::ChaosOrb) == 1);
+    CHECK(count_card(control, CardId::FellwarStone) == 2);
+    CHECK(count_card(control, CardId::JayemdaeTome) == 3);
+    CHECK(count_card(control, CardId::MoxEmerald) == 1);
+    CHECK(count_card(control, CardId::MoxJet) == 1);
+    CHECK(count_card(control, CardId::MoxPearl) == 1);
+    CHECK(count_card(control, CardId::MoxRuby) == 1);
+    CHECK(count_card(control, CardId::MoxSapphire) == 1);
+    CHECK(count_card(control, CardId::SolRing) == 1);
+    CHECK(count_card(control, CardId::TheHive) == 1);
+    CHECK(count_card(control, CardId::AncestralRecall) == 1);
+    CHECK(count_card(control, CardId::Counterspell) == 4);
+    CHECK(count_card(control, CardId::Disenchant) == 4);
+    CHECK(count_card(control, CardId::ManaDrain) == 1);
+    CHECK(count_card(control, CardId::ForceSpike) == 2);
+    CHECK(count_card(control, CardId::SwordsToPlowshares) == 4);
+    CHECK(count_card(control, CardId::WrathOfGod) == 1);
+    CHECK(count_card(control, CardId::Braingeyser) == 1);
+    CHECK(count_card(control, CardId::DemonicTutor) == 1);
+    CHECK(count_card(control, CardId::Disintegrate) == 1);
+    CHECK(count_card(control, CardId::MindTwist) == 1);
+    CHECK(count_card(control, CardId::Recall) == 1);
+    CHECK(count_card(control, CardId::Regrowth) == 1);
+    CHECK(count_card(control, CardId::TimeWalk) == 1);
+    CHECK(count_card(control, CardId::CopyArtifact) == 2);
+    CHECK(count_card(control, CardId::Moat) == 1);
+    CHECK(count_card(control, CardId::CityOfBrass) == 3);
+    CHECK(count_card(control, CardId::LibraryOfAlexandria) == 1);
+    CHECK(count_card(control, CardId::MishrasFactory) == 4);
+    CHECK(count_card(control, CardId::StripMine) == 1);
+    CHECK(count_card(control, CardId::Tundra) == 4);
+    CHECK(count_card(control, CardId::UndergroundSea) == 3);
+    CHECK(count_card(control, CardId::VolcanicIsland) == 3);
+    // Neither deck (nor any deck) may contain the token pseudo-card.
+    CHECK(count_card(skies, CardId::WaspToken) == 0);
+    CHECK(count_card(control, CardId::WaspToken) == 0);
 }
 
 int main() {

@@ -105,10 +105,22 @@ enum class CardId : std::uint8_t {
     Atog,
     AnkhOfMishra,
     RelicBarrier,
+    ZephyrFalcon,
+    MahamotiDjinn,
+    JayemdaeTome,
+    ManaVault,
+    UnstableMutation,
+    WrathOfGod,
+    TheHive,
+    // Pseudo-card: the 1/1 flying Wasp artifact-creature TOKEN made by
+    // The Hive. Tokens exist only in play (never deck-buildable, never
+    // in a hand/library/graveyard) and are excluded from physical-card
+    // conservation; when a token would leave play it ceases to exist.
+    WaspToken,
 };
 
 inline constexpr std::size_t kCardCount =
-    static_cast<std::size_t>(CardId::RelicBarrier) + 1;
+    static_cast<std::size_t>(CardId::WaspToken) + 1;
 
 enum class CardType : std::uint8_t {
     Land,
@@ -143,6 +155,9 @@ struct CardDefinition {
     int cannot_block_power_at_least = 0;
     // Vigilant creatures do not tap when attacking.
     bool vigilance = false;
+    // Token pseudo-cards (the Wasp) are excluded from deck building and
+    // from physical-card conservation; they cease when leaving play.
+    bool is_token = false;
 };
 
 const CardDefinition& card_definition(CardId card);
@@ -153,6 +168,8 @@ std::vector<CardId> br_midrange_deck();
 std::vector<CardId> robots_deck();
 std::vector<CardId> white_weenie_deck();
 std::vector<CardId> uwr_deck();
+std::vector<CardId> blue_skies_deck();
+std::vector<CardId> the_deck();
 
 using PermanentId = std::uint64_t;
 
@@ -173,6 +190,17 @@ struct LandPermanent {
     bool entered_this_turn = false;
 
     bool operator==(const LandPermanent&) const = default;
+};
+
+// A creature aura physically attached to a creature (Unstable
+// Mutation). The card is conserved: it sits here while attached and
+// goes to its OWNER's graveyard when the enchanted creature leaves
+// play (the owner may differ from the creature's controller).
+struct AttachedAura {
+    CardId card = CardId::UnstableMutation;
+    std::uint8_t owner = 0;
+
+    bool operator==(const AttachedAura&) const = default;
 };
 
 struct CreaturePermanent {
@@ -208,6 +236,13 @@ struct CreaturePermanent {
     // Set when Berserk resolves on this creature this turn: if it
     // also attacked, it is destroyed at cleanup.
     bool berserked_this_turn = false;
+    // Permanent -1/-1 counters (Unstable Mutation's decay). They
+    // subtract from current power (floored at zero) and toughness;
+    // current toughness <= 0 is a state-based death.
+    int minus_counters = 0;
+    // Attached creature auras (Unstable Mutation: +3/+3 and an upkeep
+    // -1/-1 counter). Each entry is a conserved physical card.
+    std::vector<AttachedAura> auras;
 
     bool operator==(const CreaturePermanent&) const = default;
 };
@@ -359,6 +394,10 @@ enum class PriorityActionKind : std::uint8_t {
     ActivatePendelhaven,
     ActivateAtog,
     ActivateRelicBarrier,
+    CastUnstableMutation,
+    ActivateManaVaultUntap,
+    ActivateJayemdaeTome,
+    ActivateTheHive,
 };
 
 // One explicit mana float: tap this permanent for the given face
@@ -462,6 +501,18 @@ struct PriorityAction {
     static PriorityAction activate_relic_barrier(PermanentId barrier,
                                                  std::size_t owner,
                                                  PermanentId artifact);
+    // Unstable Mutation: aura on any creature (either side): +3/+3
+    // and a -1/-1 counter at each upkeep of the creature's controller.
+    static PriorityAction cast_unstable_mutation(
+        Target creature_target);
+    // Mana Vault: pay {4} to untap it (it never untaps on its own).
+    static PriorityAction activate_mana_vault_untap(
+        PermanentId vault);
+    // Jayemdae Tome: {4}, T: draw a card.
+    static PriorityAction activate_jayemdae_tome(PermanentId tome);
+    // The Hive: {5}, T: create a 1/1 flying Wasp artifact-creature
+    // token.
+    static PriorityAction activate_the_hive(PermanentId hive);
 
     bool operator==(const PriorityAction&) const = default;
 };
@@ -979,9 +1030,11 @@ enum class DeckId : std::uint8_t {
     Robots,
     WhiteWeenie,
     UWR,
+    BlueSkies,
+    TheDeck,
 };
 
-inline constexpr std::size_t kDeckCount = 6;
+inline constexpr std::size_t kDeckCount = 8;
 inline constexpr std::size_t kDistinctDeckPairingCount =
     kDeckCount * (kDeckCount - 1) / 2;
 

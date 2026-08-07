@@ -85,6 +85,7 @@ std::vector<std::size_t> parse_deck_list(const std::string& value) {
     static constexpr std::array<std::string_view, kSpzDeckCount> kIds = {
         "rg-berserk", "atog", "br-midrange",
         "robots", "white-weenie", "uwr",
+        "blue-skies", "the-deck",
     };
     std::vector<std::size_t> result;
     std::stringstream stream(value);

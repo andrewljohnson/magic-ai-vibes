@@ -122,6 +122,8 @@ int main(int argc, char** argv) {
         {"robots", robots_deck()},
         {"white-weenie", white_weenie_deck()},
         {"uwr", uwr_deck()},
+        {"blue-skies", blue_skies_deck()},
+        {"the-deck", the_deck()},
     };
     // Persisted evolved decks join the matrix: data/*.deck holds forty
     // whitespace-separated card ids; the filename stem is the deck name.

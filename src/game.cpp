@@ -690,9 +690,77 @@ constexpr std::array<CardDefinition, kCardCount> kCardDefinitions = {{
      0,
      0,
      false},
+    {CardId::ZephyrFalcon,
+     "Zephyr Falcon",
+     CardType::Creature,
+     {.generic = 1, .blue = 1},
+     1,
+     1,
+     0,
+     true},
+    {CardId::MahamotiDjinn,
+     "Mahamoti Djinn",
+     CardType::Creature,
+     {.generic = 4, .blue = 2},
+     5,
+     6,
+     0,
+     true},
+    {CardId::JayemdaeTome,
+     "Jayemdae Tome",
+     CardType::Artifact,
+     {.generic = 4},
+     0,
+     0,
+     0,
+     false},
+    {CardId::ManaVault,
+     "Mana Vault",
+     CardType::Artifact,
+     {.generic = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::UnstableMutation,
+     "Unstable Mutation",
+     CardType::Enchantment,
+     {.blue = 1},
+     0,
+     0,
+     0,
+     false},
+    {CardId::WrathOfGod,
+     "Wrath of God",
+     CardType::Sorcery,
+     {.generic = 2, .white = 2},
+     0,
+     0,
+     0,
+     false},
+    {CardId::TheHive,
+     "The Hive",
+     CardType::Artifact,
+     {.generic = 5},
+     0,
+     0,
+     0,
+     false},
+    // Token pseudo-card: never in a deck, hand, library or graveyard.
+    {CardId::WaspToken,
+     "Wasp",
+     CardType::Creature,
+     {},
+     1,
+     1,
+     0,
+     true,
+     0,
+     false,
+     true},
 }};
 
-constexpr std::array<CardId, 30> kCreatureCards = {
+constexpr std::array<CardId, 32> kCreatureCards = {
     CardId::GrizzlyBears,
     CardId::IronrootTreefolk,
     CardId::FireElemental,
@@ -723,18 +791,21 @@ constexpr std::array<CardId, 30> kCreatureCards = {
     CardId::ArgothianPixies,
     CardId::ErhnamDjinn,
     CardId::Atog,
+    CardId::ZephyrFalcon,
+    CardId::MahamotiDjinn,
 };
 
-constexpr std::array<CardId, 6> kSorceryCards = {
+constexpr std::array<CardId, 7> kSorceryCards = {
     CardId::Tsunami,
     CardId::TimeWalk,
     CardId::Channel,
     CardId::WheelOfFortune,
     CardId::Armageddon,
     CardId::Timetwister,
+    CardId::WrathOfGod,
 };
 
-constexpr std::array<CardId, 14> kArtifactCards = {
+constexpr std::array<CardId, 17> kArtifactCards = {
     CardId::Millstone,
     CardId::MoxSapphire,
     CardId::SolRing,
@@ -749,6 +820,9 @@ constexpr std::array<CardId, 14> kArtifactCards = {
     CardId::JalumTome,
     CardId::AnkhOfMishra,
     CardId::RelicBarrier,
+    CardId::JayemdaeTome,
+    CardId::ManaVault,
+    CardId::TheHive,
 };
 
 constexpr std::array<CardId, 3> kEnchantmentCards = {
@@ -826,8 +900,20 @@ CardCounts card_counts(const std::vector<CardId>& cards) {
     return counts;
 }
 
+// Tokens (the Wasp) are pseudo-cards that exist only in play: they are
+// excluded from every physical-card conservation computation.
+bool is_token(CardId card) {
+    return card_definition(card).is_token;
+}
+
+// Accounts for `player`'s physical cards visible in public zones,
+// including auras this player OWNS that sit attached to creatures on
+// EITHER side of the battlefield (Unstable Mutation on an opposing
+// creature is still the caster's card).
 void subtract_public_cards(CardCounts& remaining,
-                           const PlayerState& player) {
+                           const GameState& state,
+                           std::size_t player_index) {
+    const PlayerState& player = state.players[player_index];
     for (const CardId card : player.graveyard) {
         subtract_card(remaining, card);
     }
@@ -838,13 +924,24 @@ void subtract_public_cards(CardCounts& remaining,
         subtract_card(remaining, land.card);
     }
     for (const auto& creature : player.creatures) {
-        subtract_card(remaining, creature.card);
+        if (!is_token(creature.card)) {
+            subtract_card(remaining, creature.card);
+        }
     }
     for (const auto& artifact : player.artifacts) {
         subtract_card(remaining, artifact.card);
     }
     for (const CardId card : player.enchantments) {
         subtract_card(remaining, card);
+    }
+    for (const auto& side : state.players) {
+        for (const auto& creature : side.creatures) {
+            for (const auto& aura : creature.auras) {
+                if (aura.owner == player_index) {
+                    subtract_card(remaining, aura.card);
+                }
+            }
+        }
     }
 }
 
@@ -877,13 +974,26 @@ CardCounts physical_card_counts(const GameState& state,
         add_card(counts, land.card);
     }
     for (const auto& creature : player_state.creatures) {
-        add_card(counts, creature.card);
+        if (!is_token(creature.card)) {
+            add_card(counts, creature.card);
+        }
     }
     for (const auto& artifact : player_state.artifacts) {
         add_card(counts, artifact.card);
     }
     for (const CardId card : player_state.enchantments) {
         add_card(counts, card);
+    }
+    // Auras owned by this player are conserved wherever they sit
+    // attached, including on the opponent's creatures.
+    for (const auto& side : state.players) {
+        for (const auto& creature : side.creatures) {
+            for (const auto& aura : creature.auras) {
+                if (aura.owner == player) {
+                    add_card(counts, aura.card);
+                }
+            }
+        }
     }
     for (const auto& object : state.stack) {
         if (object.controller == player &&
@@ -968,6 +1078,8 @@ ManaCost artifact_mana(CardId card) {
         return {.black = 1};
     case CardId::FellwarStone:
         return {.generic = 1};
+    case CardId::ManaVault:
+        return {.generic = 3};
     default:
         return {};
     }
@@ -1011,7 +1123,8 @@ CardId land_face(const LandPermanent& land) {
 // legal Copy Artifact subjects). The animated Factory qualifies.
 bool is_artifact_creature(CardId card) {
     return card == CardId::SuChi || card == CardId::Triskelion ||
-           card == CardId::MishrasFactory;
+           card == CardId::MishrasFactory ||
+           card == CardId::WaspToken;
 }
 
 // Type-line fact: lands whose printed type line includes Swamp - the
@@ -1220,6 +1333,12 @@ ManaPaymentPlan plan_mana_payment(const PlayerState& player,
             if (face == CardId::FellwarStone) {
                 // Any-color: as flexible as it gets, spend last.
                 return 100;
+            }
+            if (face == CardId::ManaVault) {
+                // Once tapped it stays tapped and pings each upkeep
+                // until its controller pays {4}: burst mana, spent
+                // after the free rocks, before the any-color stone.
+                return 90;
             }
             return mana.green * (1 + rock_demand[0] * 4) +
                    mana.red * (1 + rock_demand[1] * 4) +
@@ -1886,16 +2005,34 @@ const CreaturePermanent* find_creature(
     return position == player.creatures.end() ? nullptr : &*position;
 }
 
+// Attached-aura static bonus (Unstable Mutation: +3/+3 each). Power
+// and toughness share the same value for every current aura.
+int aura_bonus(const CreaturePermanent& creature) {
+    int bonus = 0;
+    for (const auto& aura : creature.auras) {
+        if (aura.card == CardId::UnstableMutation) {
+            bonus += 3;
+        }
+    }
+    return bonus;
+}
+
 int creature_power(const CreaturePermanent& creature) {
-    return card_definition(creature_face(creature)).power +
-           creature.temporary_power_bonus + creature.plus_counters +
-           creature.static_power_bonus;
+    const int power =
+        card_definition(creature_face(creature)).power +
+        creature.temporary_power_bonus + creature.plus_counters -
+        creature.minus_counters + creature.static_power_bonus +
+        aura_bonus(creature);
+    // Floor rule: -1/-1 counters can take power to zero, never below.
+    return std::max(0, power);
 }
 
 int creature_toughness(const CreaturePermanent& creature) {
+    // No floor: current toughness <= 0 is a state-based death.
     return card_definition(creature_face(creature)).toughness +
            creature.temporary_toughness_bonus +
-           creature.plus_counters + creature.static_toughness_bonus;
+           creature.plus_counters - creature.minus_counters +
+           creature.static_toughness_bonus + aura_bonus(creature);
 }
 
 // All static battlefield buffs, recomputed after every resolution so
@@ -2035,15 +2172,32 @@ std::vector<PermanentId> legal_attackers_for_blocker(
     return legal_attackers;
 }
 
-// Uniform creature-destruction path (Chaos Orb, Berserk's end-of-turn
-// clause): the Su-Chi death rebate applies, the physical card goes to
-// its owner's graveyard.
-void destroy_creature_at(PlayerState& player, std::size_t index) {
-    const auto& creature = player.creatures[index];
+// A creature leaving the battlefield (death, exile, reversion to a
+// land) sends every attached aura to its OWNER's graveyard: the
+// physical Unstable Mutation card is conserved even across the table.
+void release_attached_auras(GameState& state,
+                            CreaturePermanent& creature) {
+    for (const auto& aura : creature.auras) {
+        state.players[aura.owner].graveyard.push_back(aura.card);
+    }
+    creature.auras.clear();
+}
+
+// Uniform creature-destruction path (Chaos Orb, Wrath of God,
+// Berserk's end-of-turn clause): the Su-Chi death rebate applies,
+// attached auras fall to their owners' graveyards, the physical card
+// goes to its owner's graveyard — and a token simply ceases to exist.
+void destroy_creature_at(GameState& state, std::size_t controller,
+                         std::size_t index) {
+    auto& player = state.players[controller];
+    auto& creature = player.creatures[index];
     if (creature_face(creature) == CardId::SuChi) {
         player.mana_pool.generic += 4;
     }
-    player.graveyard.push_back(creature.card);
+    release_attached_auras(state, creature);
+    if (!is_token(creature.card)) {
+        player.graveyard.push_back(creature.card);
+    }
     player.creatures.erase(
         player.creatures.begin() +
         static_cast<std::ptrdiff_t>(index));
@@ -2065,7 +2219,9 @@ void trigger_ankh_land_entry(GameState& state,
     state.players[land_controller].life -= 2 * ankhs;
 }
 
-void remove_dead_creatures(PlayerState& player) {
+void remove_dead_creatures(GameState& state,
+                           std::size_t player_index) {
+    auto& player = state.players[player_index];
     auto creature = player.creatures.begin();
     while (creature != player.creatures.end()) {
         if (creature->damage >= creature_toughness(*creature)) {
@@ -2076,11 +2232,14 @@ void remove_dead_creatures(PlayerState& player) {
                 !creature->exile_on_death_this_turn) {
                 player.mana_pool.generic += 4;
             }
-            auto& destination =
-                creature->exile_on_death_this_turn
-                    ? player.exile
-                    : player.graveyard;
-            destination.push_back(creature->card);
+            release_attached_auras(state, *creature);
+            if (!is_token(creature->card)) {
+                auto& destination =
+                    creature->exile_on_death_this_turn
+                        ? player.exile
+                        : player.graveyard;
+                destination.push_back(creature->card);
+            }
             creature = player.creatures.erase(creature);
         } else {
             ++creature;
@@ -2179,6 +2338,22 @@ double handcrafted_card_value(CardId card) {
         return 700.0;
     case CardId::RelicBarrier:
         return 400.0;
+    case CardId::ZephyrFalcon:
+        return 450.0;
+    case CardId::MahamotiDjinn:
+        return 1'350.0;
+    case CardId::JayemdaeTome:
+        return 650.0;
+    case CardId::ManaVault:
+        return 900.0;
+    case CardId::UnstableMutation:
+        return 550.0;
+    case CardId::WrathOfGod:
+        return 1'400.0;
+    case CardId::TheHive:
+        return 800.0;
+    case CardId::WaspToken:
+        return 200.0;
     case CardId::Forest:
     case CardId::Mountain:
     case CardId::Island:
@@ -2425,6 +2600,70 @@ std::vector<CardId> atog_deck() {
     return deck;
 }
 
+std::vector<CardId> blue_skies_deck() {
+    std::vector<CardId> deck;
+    deck.insert(deck.end(), 4, CardId::SerendibEfreet);
+    deck.insert(deck.end(), 4, CardId::ZephyrFalcon);
+    deck.insert(deck.end(), 4, CardId::FlyingMen);
+    deck.insert(deck.end(), 2, CardId::AirElemental);
+    deck.push_back(CardId::MahamotiDjinn);
+    deck.insert(deck.end(), 2, CardId::JayemdaeTome);
+    deck.push_back(CardId::ChaosOrb);
+    deck.insert(deck.end(), 2, CardId::ManaVault);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::MoxSapphire);
+    deck.insert(deck.end(), 4, CardId::PsionicBlast);
+    deck.insert(deck.end(), 4, CardId::ForceSpike);
+    deck.insert(deck.end(), 4, CardId::Counterspell);
+    deck.push_back(CardId::ManaDrain);
+    deck.push_back(CardId::Braingeyser);
+    deck.insert(deck.end(), 4, CardId::UnstableMutation);
+    deck.push_back(CardId::Pendelhaven);
+    deck.push_back(CardId::StripMine);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.insert(deck.end(), 14, CardId::Island);
+    return deck;
+}
+
+std::vector<CardId> the_deck() {
+    std::vector<CardId> deck;
+    deck.push_back(CardId::BlackLotus);
+    deck.push_back(CardId::ChaosOrb);
+    deck.insert(deck.end(), 2, CardId::FellwarStone);
+    deck.insert(deck.end(), 3, CardId::JayemdaeTome);
+    deck.push_back(CardId::MoxEmerald);
+    deck.push_back(CardId::MoxJet);
+    deck.push_back(CardId::MoxPearl);
+    deck.push_back(CardId::MoxRuby);
+    deck.push_back(CardId::MoxSapphire);
+    deck.push_back(CardId::SolRing);
+    deck.push_back(CardId::TheHive);
+    deck.push_back(CardId::AncestralRecall);
+    deck.insert(deck.end(), 4, CardId::Counterspell);
+    deck.insert(deck.end(), 4, CardId::Disenchant);
+    deck.push_back(CardId::ManaDrain);
+    deck.insert(deck.end(), 2, CardId::ForceSpike);
+    deck.insert(deck.end(), 4, CardId::SwordsToPlowshares);
+    deck.push_back(CardId::WrathOfGod);
+    deck.push_back(CardId::Braingeyser);
+    deck.push_back(CardId::DemonicTutor);
+    deck.push_back(CardId::Disintegrate);
+    deck.push_back(CardId::MindTwist);
+    deck.push_back(CardId::Recall);
+    deck.push_back(CardId::Regrowth);
+    deck.push_back(CardId::TimeWalk);
+    deck.insert(deck.end(), 2, CardId::CopyArtifact);
+    deck.push_back(CardId::Moat);
+    deck.insert(deck.end(), 3, CardId::CityOfBrass);
+    deck.push_back(CardId::LibraryOfAlexandria);
+    deck.insert(deck.end(), 4, CardId::MishrasFactory);
+    deck.push_back(CardId::StripMine);
+    deck.insert(deck.end(), 4, CardId::Tundra);
+    deck.insert(deck.end(), 3, CardId::UndergroundSea);
+    deck.insert(deck.end(), 3, CardId::VolcanicIsland);
+    return deck;
+}
+
 std::vector<CardId> robots_deck() {
     std::vector<CardId> deck;
     deck.insert(deck.end(), 4, CardId::SuChi);
@@ -2536,7 +2775,7 @@ GameState sample_determinization(
     for (std::size_t player = 0; player < state.players.size();
          ++player) {
         CardCounts remaining = card_counts(original_decks[player]);
-        subtract_public_cards(remaining, state.players[player]);
+        subtract_public_cards(remaining, state, player);
         for (const auto& object : state.stack) {
             if (object.controller == player &&
                 object.kind == StackObjectKind::Spell) {
@@ -2878,6 +3117,33 @@ PriorityAction PriorityAction::activate_relic_barrier(
     return action;
 }
 
+PriorityAction PriorityAction::cast_unstable_mutation(
+    Target creature_target) {
+    return {.kind = PriorityActionKind::CastUnstableMutation,
+            .card = CardId::UnstableMutation,
+            .target = creature_target};
+}
+
+PriorityAction PriorityAction::activate_mana_vault_untap(
+    PermanentId vault) {
+    return {.kind = PriorityActionKind::ActivateManaVaultUntap,
+            .card = CardId::ManaVault,
+            .source_permanent = vault};
+}
+
+PriorityAction PriorityAction::activate_jayemdae_tome(
+    PermanentId tome) {
+    return {.kind = PriorityActionKind::ActivateJayemdaeTome,
+            .card = CardId::JayemdaeTome,
+            .source_permanent = tome};
+}
+
+PriorityAction PriorityAction::activate_the_hive(PermanentId hive) {
+    return {.kind = PriorityActionKind::ActivateTheHive,
+            .card = CardId::TheHive,
+            .source_permanent = hive};
+}
+
 PriorityAction PriorityAction::tap_land_for_mana(PermanentId land,
                                                  int color_index) {
     PriorityAction action{
@@ -3076,6 +3342,24 @@ legal_priority_actions(const GameState& state, std::size_t player,
                     seen.push_back(card);
                     actions.push_back(
                         PriorityAction::cast_regrowth(card));
+                }
+            }
+        }
+        // Unstable Mutation: an aura on any creature, either side
+        // (shrinking an opposing creature through the -1/-1 decay is
+        // a legitimate line, so cross-table targets are enumerated).
+        const auto& mutation =
+            card_definition(CardId::UnstableMutation);
+        if (has_card(player_state.hand, CardId::UnstableMutation) &&
+            can_pay_memo(mutation.cost)) {
+            for (std::size_t controller = 0;
+                 controller < state.players.size(); ++controller) {
+                for (const auto& creature :
+                     state.players[controller].creatures) {
+                    actions.push_back(
+                        PriorityAction::cast_unstable_mutation(
+                            Target::creature_target(controller,
+                                                    creature.id)));
                 }
             }
         }
@@ -3421,6 +3705,37 @@ legal_priority_actions(const GameState& state, std::size_t player,
                 !tome.tapped && !player_state.hand.empty()) {
                 actions.push_back(
                     PriorityAction::activate_jalum_tome(tome.id));
+            }
+        }
+    }
+    // Jayemdae Tome: {4}, T: draw a card (no discard).
+    if (can_pay_memo(ManaCost{.generic = 4})) {
+        for (const auto& tome : player_state.artifacts) {
+            if (artifact_face(tome) == CardId::JayemdaeTome &&
+                !tome.tapped) {
+                actions.push_back(
+                    PriorityAction::activate_jayemdae_tome(tome.id));
+            }
+        }
+        // Mana Vault never untaps on its own; its controller may pay
+        // {4} at any priority to untap it (the vault itself is tapped
+        // and cannot help pay).
+        for (const auto& vault : player_state.artifacts) {
+            if (artifact_face(vault) == CardId::ManaVault &&
+                vault.tapped) {
+                actions.push_back(
+                    PriorityAction::activate_mana_vault_untap(
+                        vault.id));
+            }
+        }
+    }
+    // The Hive: {5}, T: create a 1/1 flying Wasp token.
+    if (can_pay_memo(ManaCost{.generic = 5})) {
+        for (const auto& hive : player_state.artifacts) {
+            if (artifact_face(hive) == CardId::TheHive &&
+                !hive.tapped) {
+                actions.push_back(
+                    PriorityAction::activate_the_hive(hive.id));
             }
         }
     }
@@ -4248,6 +4563,93 @@ bool apply_priority_action(GameState& state, std::size_t player,
         return true;
     }
 
+    case PriorityActionKind::CastUnstableMutation: {
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return false;
+        }
+        const auto& definition =
+            card_definition(CardId::UnstableMutation);
+        if (!pay_mana(player_state, definition.cost) ||
+            !remove_card(player_state.hand,
+                         CardId::UnstableMutation)) {
+            return false;
+        }
+        state.stack.push_back({
+            .id = state.next_stack_object_id++,
+            .card = CardId::UnstableMutation,
+            .controller = player,
+            .target = action.target,
+            .spell_target = std::nullopt,
+        });
+        ++state.stats[player].spells_cast;
+        return true;
+    }
+
+    case PriorityActionKind::ActivateManaVaultUntap: {
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        auto* vault =
+            find_artifact(player_state, *action.source_permanent);
+        if (vault == nullptr || !vault->tapped ||
+            artifact_face(*vault) != CardId::ManaVault ||
+            !pay_mana(player_state, ManaCost{.generic = 4})) {
+            return false;
+        }
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::ManaVault,
+            .controller = player,
+            .target = Target::creature_target(
+                player, *action.source_permanent),
+        });
+        return true;
+    }
+
+    case PriorityActionKind::ActivateJayemdaeTome: {
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        auto* tome =
+            find_artifact(player_state, *action.source_permanent);
+        if (tome == nullptr || tome->tapped ||
+            artifact_face(*tome) != CardId::JayemdaeTome ||
+            !pay_mana(player_state, ManaCost{.generic = 4})) {
+            return false;
+        }
+        tome->tapped = true;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::JayemdaeTome,
+            .controller = player,
+        });
+        return true;
+    }
+
+    case PriorityActionKind::ActivateTheHive: {
+        if (!action.source_permanent.has_value()) {
+            return false;
+        }
+        auto* hive =
+            find_artifact(player_state, *action.source_permanent);
+        if (hive == nullptr || hive->tapped ||
+            artifact_face(*hive) != CardId::TheHive ||
+            !pay_mana(player_state, ManaCost{.generic = 5})) {
+            return false;
+        }
+        hive->tapped = true;
+        state.stack.push_back({
+            .kind = StackObjectKind::ActivatedAbility,
+            .id = state.next_stack_object_id++,
+            .card = CardId::TheHive,
+            .controller = player,
+        });
+        return true;
+    }
+
     case PriorityActionKind::TapLandForMana: {
         if (!action.source_permanent.has_value()) {
             return false;
@@ -4460,7 +4862,7 @@ bool resolve_top_of_stack_inner(
                 return true;  // fizzles
             }
             creature->damage += 1;
-            remove_dead_creatures(owner);
+            remove_dead_creatures(state, spell.target->player);
             return true;
         }
         if (spell.card == CardId::ChaosOrb) {
@@ -4499,7 +4901,8 @@ bool resolve_top_of_stack_inner(
                     continue;
                 }
                 // Destruction is a death: Su-Chi's rebate applies.
-                destroy_creature_at(owner, index);
+                destroy_creature_at(state, spell.target->player,
+                                    index);
                 return true;
             }
             for (std::size_t index = 0;
@@ -4586,6 +4989,41 @@ bool resolve_top_of_stack_inner(
             }
             return true;  // absent target: fizzles
         }
+        if (spell.card == CardId::ManaVault) {
+            // Paid untap: {4} was spent at activation.
+            if (!spell.target.has_value() ||
+                !spell.target->creature.has_value()) {
+                return false;
+            }
+            auto* vault = find_artifact(
+                state.players[spell.controller],
+                *spell.target->creature);
+            if (vault != nullptr) {
+                vault->tapped = false;
+            }
+            return true;  // vault already gone: fizzles
+        }
+        if (spell.card == CardId::JayemdaeTome) {
+            auto& owner = state.players[spell.controller];
+            if (owner.library.empty()) {
+                state.failed_draw[spell.controller] = true;
+            } else {
+                owner.hand.push_back(owner.library.back());
+                owner.library.pop_back();
+                ++state.stats[spell.controller].cards_drawn;
+            }
+            return true;
+        }
+        if (spell.card == CardId::TheHive) {
+            // A 1/1 flying Wasp artifact-creature token enters play.
+            state.players[spell.controller].creatures.push_back(
+                {.id = state.next_permanent_id++,
+                 .card = CardId::WaspToken,
+                 .tapped = false,
+                 .summoning_sick = true,
+                 .damage = 0});
+            return true;
+        }
         if (spell.card == CardId::StripMine) {
             if (!spell.target.has_value() ||
                 !spell.target->creature.has_value()) {
@@ -4606,10 +5044,11 @@ bool resolve_top_of_stack_inner(
             // Animated lands are still lands while they fight.
             for (std::size_t index = 0;
                  index < owner.creatures.size(); ++index) {
-                const auto& creature = owner.creatures[index];
+                auto& creature = owner.creatures[index];
                 if (creature.id == *spell.target->creature &&
                     card_definition(creature_face(creature)).type ==
                         CardType::Land) {
+                    release_attached_auras(state, creature);
                     owner.graveyard.push_back(creature.card);
                     owner.creatures.erase(
                         owner.creatures.begin() +
@@ -4643,6 +5082,30 @@ bool resolve_top_of_stack_inner(
         return true;
     }
 
+    if (spell.card == CardId::UnstableMutation) {
+        // An aura: it attaches to its target creature (either side)
+        // as a conserved physical card. +3/+3 flows from the
+        // attachment; the -1/-1 decay lands at each upkeep of the
+        // creature's controller.
+        if (!spell.target.has_value() ||
+            !spell.target->creature.has_value()) {
+            return false;
+        }
+        auto* creature = find_creature(
+            state.players[spell.target->player],
+            *spell.target->creature);
+        if (creature == nullptr) {
+            // Target left play: the spell fizzles to its owner's
+            // graveyard.
+            controller.graveyard.push_back(spell.card);
+            return true;
+        }
+        creature->auras.push_back(
+            {.card = CardId::UnstableMutation,
+             .owner = static_cast<std::uint8_t>(spell.controller)});
+        return true;
+    }
+
     if (definition.type == CardType::Enchantment &&
         spell.card != CardId::CopyArtifact) {
         controller.enchantments.push_back(spell.card);
@@ -4657,7 +5120,7 @@ bool resolve_top_of_stack_inner(
                     state.players[target.player], *target.creature);
                 if (creature != nullptr) {
                     creature->damage += definition.effect_damage;
-                    remove_dead_creatures(state.players[target.player]);
+                    remove_dead_creatures(state, target.player);
                 }
             } else {
                 state.players[target.player].life -=
@@ -4720,8 +5183,7 @@ bool resolve_top_of_stack_inner(
                         creature->exile_on_death_this_turn = true;
                     }
                     creature->damage += spell.x_value;
-                    remove_dead_creatures(
-                        state.players[target.player]);
+                    remove_dead_creatures(state, target.player);
                 }
             } else {
                 state.players[target.player].life -= spell.x_value;
@@ -4856,7 +5318,7 @@ bool resolve_top_of_stack_inner(
             return true;  // fizzles
         }
         creature->damage += 4;
-        remove_dead_creatures(owner);
+        remove_dead_creatures(state, spell.target->player);
         return true;
     }
 
@@ -4873,7 +5335,11 @@ bool resolve_top_of_stack_inner(
             return true;  // fizzles
         }
         owner.life += creature_power(*creature);
-        owner.exile.push_back(creature->card);
+        release_attached_auras(state, *creature);
+        // A token would-be-exiled simply ceases to exist.
+        if (!is_token(creature->card)) {
+            owner.exile.push_back(creature->card);
+        }
         owner.creatures.erase(
             std::find_if(owner.creatures.begin(),
                          owner.creatures.end(),
@@ -5126,6 +5592,24 @@ bool resolve_top_of_stack_inner(
         return true;  // fizzles
     }
 
+    if (spell.card == CardId::WrathOfGod) {
+        // Destroy ALL creatures (no regeneration exists in this
+        // pool). The uniform destruction path handles the rest: a
+        // Su-Chi face rebates {4}, an animated Factory's physical
+        // land card goes to the graveyard, tokens cease, and every
+        // attached aura falls to its owner's graveyard.
+        for (std::size_t side = 0; side < state.players.size();
+             ++side) {
+            for (std::size_t index =
+                     state.players[side].creatures.size();
+                 index-- > 0;) {
+                destroy_creature_at(state, side, index);
+            }
+        }
+        controller.graveyard.push_back(spell.card);
+        return true;
+    }
+
     if (spell.card == CardId::Armageddon) {
         for (auto& player_side : state.players) {
             for (const auto& land : player_side.lands) {
@@ -5138,6 +5622,8 @@ bool resolve_top_of_stack_inner(
                 if (card_definition(creature_face(
                         player_side.creatures[index]))
                         .type == CardType::Land) {
+                    release_attached_auras(
+                        state, player_side.creatures[index]);
                     player_side.graveyard.push_back(
                         player_side.creatures[index].card);
                     player_side.creatures.erase(
@@ -6050,8 +6536,8 @@ bool resolve_combat(
         }
     }
 
-    remove_dead_creatures(state.players[attacking_player]);
-    remove_dead_creatures(state.players[defending_player]);
+    remove_dead_creatures(state, attacking_player);
+    remove_dead_creatures(state, defending_player);
     return true;
 }
 
@@ -6067,6 +6553,7 @@ bool default_mulligan_choice(const std::vector<CardId>& hand) {
             card == CardId::MoxRuby || card == CardId::MoxEmerald ||
             card == CardId::MoxJet || card == CardId::FellwarStone ||
             card == CardId::SolRing || card == CardId::BlackLotus ||
+            card == CardId::ManaVault ||
             card == CardId::LlanowarElves) {
             ++sources;
         }
@@ -6099,7 +6586,8 @@ bool handcrafted_mulligan_choice(const std::vector<CardId>& hand,
             card == CardId::MoxSapphire || card == CardId::MoxPearl ||
             card == CardId::MoxRuby || card == CardId::MoxEmerald ||
             card == CardId::MoxJet || card == CardId::FellwarStone ||
-            card == CardId::SolRing || card == CardId::BlackLotus) {
+            card == CardId::SolRing || card == CardId::BlackLotus ||
+            card == CardId::ManaVault) {
             ++sources;
         }
     }
@@ -6166,7 +6654,33 @@ void begin_turn(GameState& state, std::size_t player) {
         creature.summoning_sick = false;
     }
     for (auto& artifact : player_state.artifacts) {
+        // Mana Vault does not untap during its controller's untap
+        // step; while it stays tapped its controller takes 1 at
+        // upkeep. The paid untap ({4}) is a priority action.
+        if (artifact_face(artifact) == CardId::ManaVault) {
+            if (artifact.tapped) {
+                player_state.life -= 1;
+            }
+            continue;
+        }
         artifact.tapped = false;
+    }
+    // Unstable Mutation: at the beginning of the upkeep of the
+    // enchanted creature's controller, each attached mutation puts a
+    // -1/-1 counter on that creature. The counters are permanent;
+    // current toughness <= 0 is a state-based death (the aura then
+    // falls to its owner's graveyard).
+    bool mutated = false;
+    for (auto& creature : player_state.creatures) {
+        for (const auto& aura : creature.auras) {
+            if (aura.card == CardId::UnstableMutation) {
+                creature.minus_counters += 1;
+                mutated = true;
+            }
+        }
+    }
+    if (mutated) {
+        remove_dead_creatures(state, player);
     }
 }
 
@@ -6237,7 +6751,8 @@ std::vector<CardId> cleanup_turn(
 
     // Cleanup discards precede the removal of damage and until-end-of-turn
     // effects.
-    for (auto& player : state.players) {
+    for (std::size_t side = 0; side < state.players.size(); ++side) {
+        auto& player = state.players[side];
         player.mana_pool = {};
         player.channel_active = false;
         // Berserk's destroy clause resolves before the other
@@ -6250,7 +6765,7 @@ std::vector<CardId> cleanup_turn(
              index-- > 0;) {
             if (player.creatures[index].berserked_this_turn &&
                 player.creatures[index].attacked_this_turn) {
-                destroy_creature_at(player, index);
+                destroy_creature_at(state, side, index);
             }
         }
         player.mana_pool = {};
@@ -6258,6 +6773,11 @@ std::vector<CardId> cleanup_turn(
              index-- > 0;) {
             if (creature_face(player.creatures[index]) ==
                 CardId::MishrasFactory) {
+                // The reverting land is no longer a legal aura
+                // subject: attached auras fall to their owners'
+                // graveyards (counters do not survive reversion).
+                release_attached_auras(state,
+                                       player.creatures[index]);
                 LandPermanent reverted{
                     .card = player.creatures[index].card,
                     .tapped = player.creatures[index].tapped,
@@ -7295,6 +7815,44 @@ double Game::handcrafted_action_score(const PriorityAction& action,
         }
         return -400.0;
     }
+    case PriorityActionKind::CastUnstableMutation: {
+        // +3/+3 now for a permanent decay: best on one's own evasive
+        // creature that converts the pump straight into face damage.
+        // Shrinking an opposing creature through the counters is a
+        // three-upkeep plan beyond the rules bot's horizon: keep the
+        // valuation sane (never buff their board) without banning it.
+        if (!action.target.has_value() ||
+            !action.target->creature.has_value()) {
+            return -10'000.0;
+        }
+        if (action.target->player != player) {
+            return -300.0;
+        }
+        const auto* target = find_creature(
+            state_.players[player], *action.target->creature);
+        if (target == nullptr) {
+            return -10'000.0;
+        }
+        const bool evasive =
+            card_definition(creature_face(*target)).flying;
+        if (evasive) {
+            return 1'050.0 +
+                   60.0 *
+                       static_cast<double>(creature_power(*target));
+        }
+        return 250.0;
+    }
+    case PriorityActionKind::ActivateManaVaultUntap:
+        // Stop the upkeep drain with end-of-turn idle mana; never
+        // preempt a real first-main cast for it.
+        return phase == TurnPhase::SecondMain ? 200.0 : -150.0;
+    case PriorityActionKind::ActivateJayemdaeTome:
+        // A pure draw with idle mana: slightly above Jalum's
+        // draw-then-discard filtering.
+        return 400.0;
+    case PriorityActionKind::ActivateTheHive:
+        // A 1/1 flying chump or clock every turn once mana is spare.
+        return 450.0;
     case PriorityActionKind::CastManaDrain:
         return 2'700.0;
     case PriorityActionKind::CastMindTwist:
@@ -7460,6 +8018,30 @@ double Game::handcrafted_action_score(const PriorityAction& action,
                             rocks(opponent_state)) +
                    60.0 * (board_power(player_state) -
                            board_power(opponent_state));
+        }
+        if (action.card == CardId::WrathOfGod) {
+            // Timing by board deficit: a destroy-all is worth casting
+            // when the opponent's creatures (attack power plus card
+            // quality) clearly outweigh ours; from parity or ahead it
+            // is value destruction.
+            double own_value = 0.0;
+            double opponent_value = 0.0;
+            int own_power = 0;
+            int opponent_power = 0;
+            for (const auto& creature : player_state.creatures) {
+                own_value += handcrafted_card_value(
+                    creature_face(creature));
+                own_power += creature_power(creature);
+            }
+            for (const auto& creature : opponent_state.creatures) {
+                opponent_value += handcrafted_card_value(
+                    creature_face(creature));
+                opponent_power += creature_power(creature);
+            }
+            return -600.0 +
+                   130.0 * static_cast<double>(opponent_power -
+                                               own_power) +
+                   0.35 * (opponent_value - own_value);
         }
         if (action.card == CardId::WheelOfFortune ||
             action.card == CardId::Timetwister) {
@@ -8651,6 +9233,10 @@ std::vector<CardId> deck_cards(DeckId deck) {
         return white_weenie_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::BlueSkies:
+        return blue_skies_deck();
+    case DeckId::TheDeck:
+        return the_deck();
     }
     throw std::out_of_range("unknown deck ID");
 }
@@ -8677,6 +9263,10 @@ std::string_view deck_name(DeckId deck) {
         return "White Weenie";
     case DeckId::UWR:
         return "Lion-dib-bolt";
+    case DeckId::BlueSkies:
+        return "Blue Skies";
+    case DeckId::TheDeck:
+        return "The Deck";
     }
     return "Unknown";
 }
@@ -8742,6 +9332,26 @@ std::string_view deck_list(DeckId deck) {
                "3 City of Brass / 2 Island / Library of Alexandria / "
                "4 Mishra's Factory / Strip Mine / Underground Sea / "
                "4 Volcanic Island";
+    case DeckId::BlueSkies:
+        return "4 Serendib Efreet / 4 Zephyr Falcon / 4 Flying Men / "
+               "2 Air Elemental / Mahamoti Djinn / 2 Jayemdae Tome / "
+               "Chaos Orb / 2 Mana Vault / Sol Ring / Mox Sapphire / "
+               "4 Psionic Blast / 4 Force Spike / 4 Counterspell / "
+               "Mana Drain / Braingeyser / 4 Unstable Mutation / "
+               "Pendelhaven / Strip Mine / 4 Mishra's Factory / "
+               "14 Island";
+    case DeckId::TheDeck:
+        return "Black Lotus / Chaos Orb / 2 Fellwar Stone / "
+               "3 Jayemdae Tome / Mox Emerald / Mox Jet / Mox Pearl / "
+               "Mox Ruby / Mox Sapphire / Sol Ring / The Hive / "
+               "Ancestral Recall / 4 Counterspell / 4 Disenchant / "
+               "Mana Drain / 2 Force Spike / "
+               "4 Swords to Plowshares / Wrath of God / Braingeyser / "
+               "Demonic Tutor / Disintegrate / Mind Twist / Recall / "
+               "Regrowth / Time Walk / 2 Copy Artifact / Moat / "
+               "3 City of Brass / Library of Alexandria / "
+               "4 Mishra's Factory / Strip Mine / 4 Tundra / "
+               "3 Underground Sea / 3 Volcanic Island";
     }
     return "Unknown";
 }
@@ -8960,6 +9570,8 @@ DeckEvolutionSummary evolve_deck(DeckEvolutionConfig config,
         deck_cards(DeckId::Robots),
         deck_cards(DeckId::WhiteWeenie),
         deck_cards(DeckId::UWR),
+        deck_cards(DeckId::BlueSkies),
+        deck_cards(DeckId::TheDeck),
     };
     std::vector<CardId> card_pool;
     std::array<bool, kCardCount> seen_cards{};

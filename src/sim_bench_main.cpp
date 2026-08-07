@@ -46,13 +46,15 @@ std::uint64_t hash_result(std::uint64_t hash, const GameResult& result) {
 }
 
 std::vector<CardId> deck_for(std::size_t index) {
-    switch (index % 6) {
+    switch (index % 8) {
     case 0: return rg_berserk_deck();
     case 1: return atog_deck();
     case 2: return br_midrange_deck();
     case 3: return robots_deck();
     case 4: return white_weenie_deck();
-    default: return uwr_deck();
+    case 5: return uwr_deck();
+    case 6: return blue_skies_deck();
+    default: return the_deck();
     }
 }
 
@@ -120,12 +122,12 @@ int main(int argc, char** argv) {
         std::uint64_t hash = 0x00debeefULL;
         for (unsigned seed = 0; seed < 120; ++seed) {
             hash = hash_result(
-                hash, play_bot_game(BotKind::Random, seed % 6, seed));
+                hash, play_bot_game(BotKind::Random, seed % 8, seed));
         }
         for (unsigned seed = 0; seed < 60; ++seed) {
             hash = hash_result(
                 hash,
-                play_bot_game(BotKind::Handcrafted, seed % 6, seed));
+                play_bot_game(BotKind::Handcrafted, seed % 8, seed));
         }
         for (unsigned seed = 0; seed < 8; ++seed) {
             hash = hash_result(hash, play_spz_game(net, seed, seed));
@@ -138,7 +140,7 @@ int main(int argc, char** argv) {
         {
             const auto start = std::chrono::steady_clock::now();
             for (unsigned seed = 0; seed < 400; ++seed) {
-                play_bot_game(BotKind::Random, seed % 6, seed);
+                play_bot_game(BotKind::Random, seed % 8, seed);
             }
             const double elapsed = seconds_since(start);
             std::printf("random   %7.1f games/s (%.2fs)\n",
@@ -147,7 +149,7 @@ int main(int argc, char** argv) {
         {
             const auto start = std::chrono::steady_clock::now();
             for (unsigned seed = 0; seed < 200; ++seed) {
-                play_bot_game(BotKind::Handcrafted, seed % 6, seed);
+                play_bot_game(BotKind::Handcrafted, seed % 8, seed);
             }
             const double elapsed = seconds_since(start);
             std::printf("handcraf %7.1f games/s (%.2fs)\n",

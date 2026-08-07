@@ -22,7 +22,7 @@
 
 namespace old_school::selfplay_zero {
 
-inline constexpr std::size_t kSpzDeckCount = 6;
+inline constexpr std::size_t kSpzDeckCount = 8;
 
 // The metagame environment, in canonical order.
 const std::array<std::vector<CardId>, kSpzDeckCount>& spz_decks();
@@ -391,7 +391,7 @@ HumanController make_spz_controller(
 // Deterministic, card-agnostic self-play schedule. Consecutive coordinates
 // cycle through every ordered deck pairing, and consecutive repetitions of a
 // pairing alternate play/draw. A game count divisible by
-// 2 * kSpzDeckCount * kSpzDeckCount (72 with six decks) is therefore
+// 2 * kSpzDeckCount * kSpzDeckCount (128 with eight decks) is therefore
 // exactly balanced by ordered deck pairing, physical game seat, and
 // play/draw in every iteration. Mirror training has no challenger/baseline
 // policy seat; randomized league activation and snapshot-seat assignment are

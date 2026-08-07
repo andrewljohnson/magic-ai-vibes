@@ -288,6 +288,17 @@ std::string action_name(const PlayerObservation& observation,
                                           .has_value()
                                   ? *action.target->creature
                                   : 0);
+    case PriorityActionKind::CastUnstableMutation:
+        return "Cast Unstable Mutation -> " +
+               (action.target.has_value()
+                    ? target_name(observation, *action.target)
+                    : std::string("(no target)"));
+    case PriorityActionKind::ActivateManaVaultUntap:
+        return "Mana Vault: pay {4} to untap";
+    case PriorityActionKind::ActivateJayemdaeTome:
+        return "Activate Jayemdae Tome";
+    case PriorityActionKind::ActivateTheHive:
+        return "The Hive: create a Wasp";
     case PriorityActionKind::ActivateRelicBarrier:
         return "Relic Barrier: tap artifact #" +
                std::to_string(action.target.has_value() &&
@@ -1505,6 +1516,10 @@ std::vector<CardId> interactive_deck(DeckId deck) {
         return white_weenie_deck();
     case DeckId::UWR:
         return uwr_deck();
+    case DeckId::BlueSkies:
+        return blue_skies_deck();
+    case DeckId::TheDeck:
+        return the_deck();
     }
     throw std::out_of_range("unknown interactive deck");
 }
