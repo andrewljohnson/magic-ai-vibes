@@ -84,13 +84,17 @@ def eval_budget(depth, max_eval):
 def make_fork(make_game, history, game=None):
     """A callable producing copies of the live game state.
 
-    Prefers the binding's `clone_game()` (engine >= 0.3). The fallback,
-    for older bindings, rebuilds `Game(same args, same seed)` and replays
+    Prefers the binding's `clone()` (engine >= 0.5, upstream PR #5; the
+    pre-merge spelling `clone_game` is also accepted). The fallback, for
+    older bindings, rebuilds `Game(same args, same seed)` and replays
     the recorded action indices -- exact, because the engine is
     deterministic.
     """
-    if game is not None and hasattr(game, "clone_game"):
-        return game.clone_game
+    if game is not None:
+        if hasattr(game, "clone"):
+            return game.clone
+        if hasattr(game, "clone_game"):
+            return game.clone_game
 
     def fork():
         copy = make_game()

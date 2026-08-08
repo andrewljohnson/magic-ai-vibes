@@ -356,7 +356,9 @@ def check_d_replay_fidelity():
             while game.result() is None and len(history) < 240:
                 if len(history) in (40, 120, 200):
                     copies = [make_fork(make_game, history)()]
-                    if hasattr(game, "clone_game"):
+                    if hasattr(game, "clone"):
+                        copies.append(game.clone())
+                    elif hasattr(game, "clone_game"):
                         copies.append(game.clone_game())
                     for copy in copies:
                         for seat in ("p1", "p2"):

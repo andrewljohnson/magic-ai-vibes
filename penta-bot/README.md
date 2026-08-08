@@ -7,10 +7,17 @@ open-source deterministic engine for Eternal Central Old School 93/94 Magic.
 Nothing here shares weights with our C++ bot -- different rules, simulator,
 and card pool -- only the recipe.
 
-Pinned versions: penta commit `c206ab3` (upstream `origin/main`,
-"Integrate formats with bot protocol v2"), **`engine_version 0.3.0`,
-`protocol_version 2`**, built with the repo's pinned Rust toolchain
-(rust-toolchain.toml) from a pristine checkout. The built binding is
+Pinned versions: penta commit `feb3355` (upstream `origin/main`,
+"Add an enters-the-battlefield hook, and Augur of Bolas on it"),
+**`engine_version 0.5.0`, `protocol_version 2`**, built with the repo's
+pinned Rust toolchain (rust-toolchain.toml, 1.97.1) from a scratch
+worktree of `origin/main`. This pin includes the merged clone API
+(upstream PR #5, merge `6809d9a`): `game.clone()` forks a live game --
+built-in opponent state included -- into an independent copy, measured at
+~4 us per clone at depth 120 (vs 0.62 ms for the old
+replay-reconstruction), verified byte-identical and independent by
+checks.py D1 and the repin smoke. The previous pin (`c206ab3`, engine
+0.3.0) is kept as `penta.so.engine-0.3.0.bak`. The built binding is
 **vendored here as `penta-bot/penta.so`** and `extractor.import_penta()`
 prefers that pinned copy; the fallback is the clone at
 `~/proj/penta/bindings/penta-py` (override with `PENTA_PY_DIR`). Both
@@ -32,10 +39,14 @@ Protocol v2 adaptation notes (from protocol 0):
   `legalActions[].index`) are unchanged in v2; new fields (`format`,
   `activeTurn`, `lastSeenHand`, `presentedPartId`, object IDs) are
   ignored by the extractor.
-- Afterstate copies use the binding's `clone_game()` when present
-  (upstream clone-api work, unmerged at pin time); on this pin the
-  deterministic replay-reconstruction fallback is active, verified exact
-  by checks.py D1 in both external and opponent modes.
+- Afterstate copies use the binding's `clone()` (engine >= 0.5; the
+  pre-merge spelling `clone_game` is still accepted, and the
+  deterministic replay-reconstruction fallback remains for older
+  bindings) -- verified exact by checks.py D1 in both external and
+  opponent modes.
+- The 0.5.0 catalog lists 244 definitions across formats; 128 are legal
+  in Old School 93/94, so the 675-feature layout is unchanged and 0.3.0
+  nets remain shape-compatible.
 
 ## Throughput measurements (M1-class laptop, single thread unless noted)
 
