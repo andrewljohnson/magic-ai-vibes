@@ -450,6 +450,40 @@ def check_d_terminal_outcomes():
 
 # ---------------------------------------------------------------- E -----
 
+def check_g_capped_games_dropped():
+    """Games that hit the decision cap have no ground-truth outcome and
+    must contribute zero training samples: 0.5-flooding from capped
+    passing loops (the longest games, hence the most samples) flattened
+    the value net in both curve collapses."""
+    net = Net(EX.size, hidden=8, seed=9)
+    old_cap = trainer.MAX_DECISIONS
+    trainer.MAX_DECISIONS = 30  # force caps
+    try:
+        capped = 0
+        bad = 0
+        for seed in range(700, 706):
+            rng = random.Random(seed)
+            rows, targets, stats = trainer.play_selfplay_game(
+                net, EX, penta, "Sligh", "The Deck", seed, 0.1, rng,
+                max_eval=8)
+            if stats["result"] == "cap":
+                capped += 1
+                if len(rows) or len(targets):
+                    bad += 1
+            rng = random.Random(seed)
+            rows, targets, stats = trainer.play_handcrafted_game(
+                net, EX, penta, "Sligh", "The Deck", seed, 0.1, rng,
+                max_eval=8, learner_seat="p1")
+            if stats["result"] == "cap":
+                capped += 1
+                if len(rows) or len(targets):
+                    bad += 1
+    finally:
+        trainer.MAX_DECISIONS = old_cap
+    check("G1 capped games contribute no samples",
+          capped > 0 and bad == 0, f"{bad}/{capped} capped games leaked data")
+
+
 def check_f_seat_pair_dealiasing():
     """Deck-pair rotation has an even period, so `number % 2` would give
     each ordered pair the SAME learner seat forever. learner_seat_for must
@@ -508,6 +542,8 @@ def main():
     check_e_replay_ring()
     print("F. league scheduling")
     check_f_seat_pair_dealiasing()
+    print("G. capped-game exclusion")
+    check_g_capped_games_dropped()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -61,7 +61,12 @@ TD_LAMBDA = 1.0
 # Total probability that a game seats a frozen snapshot (when any are
 # given), split evenly across the --league-frozen nets.
 LEAGUE_FROZEN_FRACTION = 0.25
-# Games that have not ended by here are passing-loop junk; score as a draw.
+# Games that have not ended by here are passing-loop junk. They produce NO
+# training samples: scoring them 0.5 (as earlier versions did) let a losing
+# seat prefer stalling to the cap over fighting, and capped games -- being
+# the longest -- flooded up to ~70% of the replay with 0.5 targets,
+# flattening the value net (both 2026-08 curve collapses, lambda 0.9 and
+# 1.0, shared this). True engine draws still score 0.5.
 MAX_DECISIONS = 600
 
 
@@ -193,18 +198,20 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
             traj[seat][1].append(value)
 
     result = game.result()  # None if the cap was hit
+    stats = {"decisions": len(history), "result": result or "cap"}
+    if result is None:
+        # Capped passing-loop game: no ground-truth outcome, no samples
+        # (see MAX_DECISIONS).
+        return (np.empty((0, extractor.size), dtype=np.float32),
+                np.empty(0, dtype=np.float32), stats)
     rows, targets = [], []
     for seat in ("p1", "p2"):
         feats, values = traj[seat]
         if not feats:
             continue
-        if result is None or result == "draw":
-            z = 0.5
-        else:
-            z = 1.0 if result == seat else 0.0
+        z = 0.5 if result == "draw" else (1.0 if result == seat else 0.0)
         rows.append(np.stack(feats))
         targets.append(td_targets(values, z, lam))
-    stats = {"decisions": len(history), "result": result or "cap"}
     if rows:
         return np.concatenate(rows), np.concatenate(targets), stats
     return (np.empty((0, extractor.size), dtype=np.float32),
@@ -241,13 +248,11 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
     result = game.result()  # None if the cap was hit
     stats = {"decisions": len(history), "result": result or "cap"}
-    if not feats_list:
+    if result is None or not feats_list:
+        # Capped: no ground-truth outcome, no samples (see MAX_DECISIONS).
         return (np.empty((0, extractor.size), dtype=np.float32),
                 np.empty(0, dtype=np.float32), stats)
-    if result is None or result == "draw":
-        z = 0.5
-    else:
-        z = 1.0 if result == learner_seat else 0.0
+    z = 0.5 if result == "draw" else (1.0 if result == learner_seat else 0.0)
     return np.stack(feats_list), td_targets(values, z, lam), stats
 
 
