@@ -108,58 +108,100 @@ through the bindings; with that, rollout search ports directly.
   (`--td-lambda 1.0`)** -- see the collapse post-mortem below.
 - `gate.py` -- greedy (epsilon 0) evaluation vs `handcrafted` and `random`,
   alternating seats, rotating deck pairs, fixed seeds, Wilson 95% LCB.
-- `checks.py` -- 26 standalone audit checks against the live engine: seat/
+- `checks.py` -- 27 standalone audit checks against the live engine: seat/
   perspective labels (recorded rows must be the learner's own view with its
   own outcome, in mirror, frozen-league, and handcrafted-league games), TD
   target recursion, candidate-sampling uniformity, afterstate/fork
-  exactness, replay-ring arithmetic, league seat scheduling. Run
-  `python3 checks.py` after any trainer change.
+  exactness, replay-ring arithmetic, league seat scheduling, capped-game
+  exclusion. Run `python3 checks.py` after any trainer change.
 
 ## Collapse post-mortem (2026-08 audit)
 
 Two league-guarded curve runs collapsed (handcrafted gate 16.5% -> 5%,
 then 17.5% -> 5.8%). A full audit (checks.py) cleared every labeling
 hypothesis -- no seat inversion, no TD off-by-one, no sampling prefix
-bias, no wrong-perspective afterstates, no ring bug. The defect was
-quantitative: **per-decision TD lambda 0.9 on penta trajectories of
-40-130 recorded decisions per seat leaves 55-78% of targets with under
-5% outcome weight**, so the net mostly regressed toward its own previous
-values; BCE fell while strength collapsed. The C++ SPZ recipe this port
-mirrors defaults to lambda 1.0 (and its champion line trains on hard
-undiscounted outcomes); its shorter effective trajectories made 0.9
-viable there. Fixes: `--td-lambda` defaults to 1.0 (pure outcome
-targets); frozen-league games record both seats (true outcome-labeled
-data, learner-net bootstraps); league learner seats de-aliased from the
-deck-pair rotation (both had even periods, so each ordered pair always
-seated the learner on the same side).
+bias, no wrong-perspective afterstates, no ring bug. Two compounding
+data defects were found and fixed instead:
 
-## Training config (smoke run)
+1. **Outcome-starved TD targets.** Per-decision TD lambda 0.9 on penta
+   trajectories of 40-130 recorded decisions per seat leaves 55-78% of
+   targets with under 5% outcome weight, so the net mostly regressed
+   toward its own previous values; BCE fell while strength collapsed.
+   The C++ SPZ recipe this port mirrors defaults to lambda 1.0 (its
+   champion line trains on hard undiscounted outcomes), and its shorter
+   effective trajectories are what made 0.9 viable there. Fix:
+   `--td-lambda` defaults to 1.0 (pure outcome targets). Alone this was
+   NOT sufficient: a lambda-1.0 curve still slid 14.2% -> 16.7% -> 8.3%
+   -> 5.8% with random degrading to 71.7%.
+2. **0.5-flooding from capped passing loops.** Games that hit the
+   600-decision cap were scored 0.5 for BOTH seats' full trajectories. A
+   losing seat prefers 0.5 to 0, so policies learned to stall to the cap
+   (30-49 of 64 games per round; average length toward 550), and capped
+   games -- the longest, hence the most samples -- flooded ~70% of the
+   replay with 0.5 targets, flattening the value net. Both collapsed
+   recipes shared this. Fix: capped games contribute no samples (true
+   engine draws still score 0.5).
+
+Secondary fixes from the same audit: frozen-league games record both
+seats (true outcome-labeled data, learner-net bootstraps); league
+learner seats de-aliased from the deck-pair rotation (both had even
+periods, so each ordered pair always seated the learner on the same
+side); upstream engine faults mid-game (0.3.0's handcrafted policy can
+return no action; reproduced at seed 1003095, Counterburn vs The Deck)
+drop that game instead of crashing the run, and gate.py scores such
+stuck games 0.5.
+
+## Training config (smoke run, v2 stack)
 
 3000 self-play games, decks Sligh / White Weenie / The Deck / Counterburn
 (all ordered non-mirror pairs, rotated), hidden 64, lr 0.01, batch 256,
-momentum 0.9, TD lambda 0.9, epsilon 0.25 -> 0.03 linear, replay capacity
-150k, max 16 afterstates evaluated per decision (8/4 past depth 200/400),
-8 worker processes. Weights: `penta_net.npz` (engine/protocol version
-pinned in the file's metadata).
+momentum 0.9, td-lambda 1.0 (hard outcome targets), epsilon 0.25 -> 0.03
+linear, replay capacity 150k, max 16 afterstates evaluated per decision
+(8/4 past depth 200/400), 8 worker processes, capped games dropped.
+Weights: `penta_net.npz` (engine/protocol version in the metadata).
 
-## Gate results (200 games each, alternating seats, fixed seeds)
+## Gate results (fresh v2 smoke net, 120 games each, fixed seeds)
 
-Greedy afterstate policy (epsilon 0), weights `penta_net.npz` (3000 games),
-seeds 5000000+, deck pairs rotating over the four training decks:
+Greedy afterstate policy (epsilon 0), engine 0.3.0 / protocol 2, seeds
+5000000+, deck pairs rotating over the four training decks:
 
 | opponent | result | win rate | Wilson 95% LCB |
 | --- | --- | --- | --- |
-| `random` | 171 W / 2 D / 27 L | **86.0%** | 80.0% |
-| `handcrafted` | 33 W / 0 D / 167 L | **16.5%** | 12.0% |
+| `random` | 92 W / 0 D / 28 L | **76.7%** | 68.3% |
+| `handcrafted` | 19 W / 0 D / 101 L | **15.8%** | 10.4% |
 
-Beating random decisively: met. Beating handcrafted was not expected from a
-3000-game smoke run and did not happen -- 16.5% is the honest number (for
-scale, their scripted `first_bot.py` heuristic wins ~73% vs handcrafted in
-its own Sligh-vs-The-Deck harness). Training loss over the run: BCE
-0.692 -> 0.603 at a sustained ~3.5 games/s across 8 workers (~14 min of
-self-play). The win-vs-random trend was still rising steeply at the end
-(56% at a 384-game checkpoint, ~96% on a 24-game spot check at 1600 games),
-so this is nowhere near converged.
+For scale, the protocol-0 smoke with 0.5-flooded targets gated 7.1% vs
+handcrafted on the same seeds -- dropping capped games doubled the smoke
+strength on its own.
+
+## Validation curve (2026-08-07, all fixes, engine 0.3.0 / protocol 2)
+
+League mechanics per curve.sh: 15% of games vs the built-in handcrafted
+bot, ~25% vs the previous chunk's frozen snapshot, epsilon 0.10 -> 0.08,
+2000 games per chunk, 60-game random + 120-game handcrafted gates on
+fixed seeds between chunks, promotion of `penta_net.npz` only on a new
+best handcrafted gate.
+
+| cumulative games | vs random | vs handcrafted |
+| --- | --- | --- |
+| 3000 (smoke baseline) | 83.3% | 15.8% (promoted) |
+| 5000 (chunk 1) | 80.0% | 9.2% |
+| 7000 (chunk 2) | 79.2% | 10.0% |
+| 9000 (chunk 3) | 81.7% | 8.8% |
+| 11000 (chunk 4) | **93.3%** | **17.5%** (promoted, new best) |
+| 13000 (chunk 5) | 90.0% | 15.0% |
+
+Reading: no collapse. Every earlier curve slid monotonically to ~5-6% by
+9000-11000 games with the random gate degrading in step (16.5 -> 5.0,
+17.5 -> 5.8, and 14.2 -> 5.8 at lambda 1.0 alone). With capped games
+excluded the line dips while the warm-started league chunks re-fill the
+empty replay ring at the lower league epsilon (9.2 / 10.0 / 8.8, within
+the 120-game gates' noise), then RECOVERS ABOVE the smoke baseline --
+17.5% at 11000 games with random at its run-best 93.3% -- and holds
+(15.0% at 13000). The gate-guarded deliverable `penta_net.npz` is the
+ckpt-11000 net (17.5%, LCB 11.7%). The transient dip is worth chasing
+next: persist the replay ring across chunk restarts, or ramp per-round
+training steps with ring fill.
 
 ## Honest assessment: what a full port needs
 
