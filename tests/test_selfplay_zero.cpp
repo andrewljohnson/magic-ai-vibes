@@ -1273,6 +1273,91 @@ SPZ_TEST(value_batch_is_bitwise_stable_across_batch_sizes) {
     }
 }
 
+SPZ_TEST(counterfactual_ranking_moves_ordering_the_right_way) {
+    // A dominance pair must push the preferred row's value above the
+    // other row's, whichever way a fresh net happens to order them.
+    for (const std::size_t hidden2 : {std::size_t{0}, std::size_t{8}}) {
+        SpzNet net(12, 8, 90210, hidden2);
+        std::vector<float> row_a(12), row_b(12);
+        for (std::size_t index = 0; index < 12; ++index) {
+            row_a[index] =
+                static_cast<float>((index * 5U) % 11U) / 11.0f;
+            row_b[index] =
+                static_cast<float>((index * 3U + 4U) % 11U) / 11.0f;
+        }
+        // Train toward the ordering the fresh net gets WRONG, so the
+        // test proves the update moves the ordering, not that the
+        // initialization already agreed.
+        const bool a_low = net.value(row_a) < net.value(row_b);
+        const std::vector<float>& preferred = a_low ? row_a : row_b;
+        const std::vector<float>& other = a_low ? row_b : row_a;
+        const std::vector<SpzNet::CounterfactualPair> pairs = {
+            {&preferred, &other, false}};
+        const double first_loss =
+            net.train_counterfactual_batch(pairs, 0.05);
+        double last_loss = first_loss;
+        for (int step = 0; step < 400; ++step) {
+            last_loss = net.train_counterfactual_batch(pairs, 0.05);
+        }
+        expect(net.value(preferred) > net.value(other),
+               "dominance training flips a wrong initial ordering");
+        expect(last_loss < first_loss,
+               "counterfactual ranking loss decreases");
+    }
+}
+
+SPZ_TEST(counterfactual_neutral_pair_pulls_values_together) {
+    SpzNet net(12, 8, 777001);
+    std::vector<float> row_a(12), row_b(12);
+    for (std::size_t index = 0; index < 12; ++index) {
+        row_a[index] = static_cast<float>((index * 7U) % 13U) / 13.0f;
+        row_b[index] =
+            static_cast<float>((index * 9U + 2U) % 13U) / 13.0f;
+    }
+    const std::vector<SpzNet::CounterfactualPair> pairs = {
+        {&row_a, &row_b, true}};
+    for (int step = 0; step < 600; ++step) {
+        net.train_counterfactual_batch(pairs, 0.05);
+    }
+    expect(std::fabs(net.value(row_a) - net.value(row_b)) < 0.02,
+           "neutral pair training bounds the value difference");
+}
+
+SPZ_TEST(training_with_counterfactual_targets_records_and_logs) {
+    const std::string telemetry_path =
+        "build/test-counterfactual-telemetry.jsonl";
+    {
+        std::ofstream clear(telemetry_path, std::ios::trunc);
+    }
+    SpzTrainConfig config;
+    config.iterations = 1;
+    config.games_per_iteration = 4;
+    config.hidden = 8;
+    config.seed = 424242;
+    config.max_turns = 30;
+    config.training_worlds = 1;
+    config.threads = 2;
+    config.counterfactual_fraction = 1.0;
+    config.counterfactual_loss_weight = 0.5;
+    config.telemetry_path = telemetry_path;
+    const auto output = train_spz(config);
+    expect(output.value != nullptr, "training produces a value net");
+    std::ifstream telemetry(telemetry_path);
+    std::stringstream contents;
+    contents << telemetry.rdbuf();
+    const std::string line = contents.str();
+    expect(line.find("\"counterfactual_loss\":") != std::string::npos,
+           "telemetry line carries the counterfactual loss key");
+    const std::string pairs_key = "\"counterfactual_pairs\":";
+    const std::size_t at = line.find(pairs_key);
+    expect(at != std::string::npos,
+           "telemetry line carries the counterfactual pair count");
+    const std::size_t pairs_recorded =
+        std::stoul(line.substr(at + pairs_key.size()));
+    expect(pairs_recorded > 0,
+           "self-play recording emits counterfactual pairs");
+}
+
 }  // namespace
 
 int main() {

@@ -110,6 +110,25 @@ class SpzNet {
                        const std::vector<float>& targets,
                        double learning_rate);
 
+    // Counterfactual dominance pair: two feature rows of the same state
+    // under a rules-derived zone transform, so the value ordering is
+    // known a priori (a deployed free permanent >= holding it; holding
+    // a card >= discarding it). Dominance pairs pay logistic ranking
+    // loss on the pre-sigmoid logit difference until `preferred` clears
+    // `other` by a margin; `neutral` pairs (an inert graveyard pad) pay
+    // symmetric loss whenever the two logits leave a small band.
+    struct CounterfactualPair {
+        const std::vector<float>* preferred = nullptr;
+        const std::vector<float>* other = nullptr;
+        bool neutral = false;
+    };
+    // One SGD-with-momentum step on the auxiliary pairwise ranking
+    // loss. An add-on beside train_batch (TD targets stay primary);
+    // returns the mean pre-update loss of the batch.
+    double train_counterfactual_batch(
+        const std::vector<CounterfactualPair>& pairs,
+        double learning_rate);
+
     void save(std::ostream& out) const;
     static SpzNet load(std::istream& in);
 
@@ -316,6 +335,12 @@ struct SpzPolicyConfig {
     // advantage head's training data). Guardrail prunes still steer play;
     // pruned actions are scored for the record only.
     bool record_advantage = false;
+    // Fraction of recorded states that also emit counterfactual
+    // dominance pairs (free-permanent deploy / discard / neutral
+    // graveyard pad transforms) for the value net's auxiliary ranking
+    // loss. Recording control only — decisions never read it, and a
+    // dedicated RNG stream keeps play identical with it on or off.
+    double counterfactual_fraction = 0.0;
     // Rules-only prune of real-root priority actions that are strictly
     // dominated by Pass (identical settled state, strictly more of the
     // actor's resources consumed) — e.g. an X=0 Braingeyser. No card
@@ -345,9 +370,19 @@ struct SpzAdvantageSample {
     std::vector<float> deltas;
 };
 
+// One counterfactual transform pair recorded during self-play: feature
+// rows for two variants of one recorded state whose value ordering is
+// rules-derived (see SpzNet::CounterfactualPair for the loss contract).
+struct SpzCounterfactualPair {
+    std::vector<float> preferred;
+    std::vector<float> other;
+    bool neutral = false;
+};
+
 struct SpzRecorder {
     std::vector<std::vector<float>> feature_rows;
     std::vector<SpzAdvantageSample> advantage_samples;
+    std::vector<SpzCounterfactualPair> counterfactual_pairs;
     // Turn number of each recorded row, aligned with feature_rows; lets
     // training discount targets per state rather than per game.
     std::vector<std::size_t> feature_turns;
@@ -476,6 +511,16 @@ struct SpzTrainConfig {
     std::shared_ptr<const SpzNet> initial_net;
     // When false the value net stays frozen (advantage-only training).
     bool train_value = true;
+    // Counterfactual dominance-pair targets: this fraction of recorded
+    // states also emits rules-derived transform pairs (deploying a free
+    // permanent >= holding it, holding a card >= discarding it, an
+    // inert own-graveyard pad ~ neutral). The value net then takes
+    // `counterfactual_loss_weight * value_steps` auxiliary pairwise
+    // ranking steps per iteration on a replay of those pairs — an
+    // add-on beside the TD targets, never a label replacement. Zero on
+    // either field disables the machinery entirely.
+    double counterfactual_fraction = 0.15;
+    double counterfactual_loss_weight = 0.1;
     // Train the advantage head on recorded paired deltas.
     bool train_advantage = false;
     double advantage_learning_rate = 0.002;

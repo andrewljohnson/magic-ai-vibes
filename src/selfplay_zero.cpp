@@ -14,6 +14,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <ostream>
 #include <random>
 #include <sstream>
@@ -1551,6 +1552,169 @@ double SpzNet::train_batch(
     return total_loss * batch_scale;
 }
 
+double SpzNet::train_counterfactual_batch(
+    const std::vector<CounterfactualPair>& pairs,
+    double learning_rate) {
+    if (pairs.empty()) {
+        return 0.0;
+    }
+    // Margins are in logit space (near v = 0.5 a logit gap of x is a
+    // probability gap of about x/4). The dominance margin keeps pushing
+    // until the preferred variant clears the decision-time tie band —
+    // the measured defect was a free-permanent deploy priced inside it;
+    // the neutral band matches the probe's +/-0.005 noise band.
+    constexpr double kDominanceMargin = 0.1;
+    constexpr double kNeutralBand = 0.02;
+    // Parameter/gradient layout matches the momentum buffer for both
+    // architectures: [W1, b1] then (stacked only) [W2, b2], then
+    // [w_out, b_out].
+    const std::size_t w1 = hidden_ * inputs_;
+    const std::size_t off_b1 = w1;
+    const std::size_t off_w2 = off_b1 + hidden_;
+    const std::size_t off_b2 = off_w2 + hidden2_ * hidden_;
+    const std::size_t off_wo = off_b2 + hidden2_;
+    const std::size_t output_units = hidden2_ > 0 ? hidden2_ : hidden_;
+    const std::size_t off_bo = off_wo + output_units;
+    std::vector<double> gradient(off_bo + 1, 0.0);
+    struct Trace {
+        std::vector<double> first;
+        std::vector<double> second;
+    };
+    const auto forward = [&](const std::vector<float>& row,
+                             Trace& trace) {
+        if (row.size() != inputs_) {
+            throw std::invalid_argument("SpzNet feature size mismatch");
+        }
+        trace.first.resize(hidden_);
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            double activation = hidden_bias_[unit];
+            const double* weights = hidden_weights_.data() +
+                                    unit * inputs_;
+            for (std::size_t input = 0; input < inputs_; ++input) {
+                activation += weights[input] * row[input];
+            }
+            trace.first[unit] = std::tanh(activation);
+        }
+        double output = output_bias_;
+        if (hidden2_ > 0) {
+            trace.second.resize(hidden2_);
+            for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+                double activation = hidden2_bias_[unit];
+                const double* weights = hidden2_weights_.data() +
+                                        unit * hidden_;
+                for (std::size_t prev = 0; prev < hidden_; ++prev) {
+                    activation += weights[prev] * trace.first[prev];
+                }
+                trace.second[unit] = std::tanh(activation);
+                output += output_weights_[unit] * trace.second[unit];
+            }
+        } else {
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                output += output_weights_[unit] * trace.first[unit];
+            }
+        }
+        return output;
+    };
+    const auto backward = [&](const std::vector<float>& row,
+                              const Trace& trace,
+                              double output_delta) {
+        gradient[off_bo] += output_delta;
+        if (hidden2_ > 0) {
+            std::vector<double> first_delta(hidden_, 0.0);
+            for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+                gradient[off_wo + unit] +=
+                    output_delta * trace.second[unit];
+                const double second_delta =
+                    output_delta * output_weights_[unit] *
+                    (1.0 - trace.second[unit] * trace.second[unit]);
+                gradient[off_b2 + unit] += second_delta;
+                double* row_gradient =
+                    gradient.data() + off_w2 + unit * hidden_;
+                const double* weights = hidden2_weights_.data() +
+                                        unit * hidden_;
+                for (std::size_t prev = 0; prev < hidden_; ++prev) {
+                    row_gradient[prev] +=
+                        second_delta * trace.first[prev];
+                    first_delta[prev] += second_delta * weights[prev];
+                }
+            }
+            for (std::size_t unit = 0; unit < hidden_; ++unit) {
+                const double delta =
+                    first_delta[unit] *
+                    (1.0 - trace.first[unit] * trace.first[unit]);
+                gradient[off_b1 + unit] += delta;
+                double* row_gradient = gradient.data() + unit * inputs_;
+                for (std::size_t input = 0; input < inputs_; ++input) {
+                    row_gradient[input] += delta * row[input];
+                }
+            }
+            return;
+        }
+        for (std::size_t unit = 0; unit < hidden_; ++unit) {
+            gradient[off_wo + unit] +=
+                output_delta * trace.first[unit];
+            const double hidden_delta =
+                output_delta * output_weights_[unit] *
+                (1.0 - trace.first[unit] * trace.first[unit]);
+            gradient[off_b1 + unit] += hidden_delta;
+            double* row_gradient = gradient.data() + unit * inputs_;
+            for (std::size_t input = 0; input < inputs_; ++input) {
+                row_gradient[input] += hidden_delta * row[input];
+            }
+        }
+    };
+    const auto softplus = [](double x) {
+        return x > 30.0 ? x : std::log1p(std::exp(x));
+    };
+    double total_loss = 0.0;
+    Trace preferred_trace;
+    Trace other_trace;
+    for (const CounterfactualPair& pair : pairs) {
+        const double preferred_logit =
+            forward(*pair.preferred, preferred_trace);
+        const double other_logit = forward(*pair.other, other_trace);
+        const double difference = preferred_logit - other_logit;
+        double difference_gradient = 0.0;  // dLoss / dDifference
+        if (pair.neutral) {
+            total_loss += softplus(difference - kNeutralBand) +
+                          softplus(-difference - kNeutralBand);
+            difference_gradient = sigmoid(difference - kNeutralBand) -
+                                  sigmoid(-difference - kNeutralBand);
+        } else {
+            total_loss += softplus(kDominanceMargin - difference);
+            difference_gradient =
+                -sigmoid(kDominanceMargin - difference);
+        }
+        backward(*pair.preferred, preferred_trace, difference_gradient);
+        backward(*pair.other, other_trace, -difference_gradient);
+    }
+    const double batch_scale = 1.0 / static_cast<double>(pairs.size());
+    constexpr double kMomentum = 0.9;
+    const auto apply = [&](std::size_t offset, double* parameter) {
+        momentum_[offset] = kMomentum * momentum_[offset] -
+                            learning_rate * gradient[offset] *
+                                batch_scale;
+        *parameter += momentum_[offset];
+    };
+    for (std::size_t index = 0; index < w1; ++index) {
+        apply(index, &hidden_weights_[index]);
+    }
+    for (std::size_t unit = 0; unit < hidden_; ++unit) {
+        apply(off_b1 + unit, &hidden_bias_[unit]);
+    }
+    for (std::size_t index = 0; index < hidden2_ * hidden_; ++index) {
+        apply(off_w2 + index, &hidden2_weights_[index]);
+    }
+    for (std::size_t unit = 0; unit < hidden2_; ++unit) {
+        apply(off_b2 + unit, &hidden2_bias_[unit]);
+    }
+    for (std::size_t unit = 0; unit < output_units; ++unit) {
+        apply(off_wo + unit, &output_weights_[unit]);
+    }
+    apply(off_bo, &output_bias_);
+    return total_loss * batch_scale;
+}
+
 void SpzNet::save(std::ostream& out) const {
     if (hidden2_ > 0) {
         out << "spz-net-v2\n"
@@ -2284,6 +2448,28 @@ SpzAdvantageNet load_spz_advantage_net(const std::string& path) {
 
 namespace {
 
+// A maximally inert card for the neutral graveyard-pad counterfactual:
+// a basic the deck actually runs, falling back to any land in the
+// decklist so basic-free decks (robots) stay covered. Mirrors the
+// value-bias probe's pad choice.
+std::optional<CardId> counterfactual_pad_land(
+    const std::vector<CardId>& deck) {
+    constexpr std::array<CardId, 5> kBasics = {
+        CardId::Forest, CardId::Mountain, CardId::Island, CardId::Plains,
+        CardId::Swamp};
+    for (const CardId basic : kBasics) {
+        if (std::find(deck.begin(), deck.end(), basic) != deck.end()) {
+            return basic;
+        }
+    }
+    for (const CardId card : deck) {
+        if (card_definition(card).type == CardType::Land) {
+            return card;
+        }
+    }
+    return std::nullopt;
+}
+
 struct SpzAgent {
     std::shared_ptr<const SpzNet> net;
     std::shared_ptr<const SpzPolicyNet> policy_net;
@@ -2293,6 +2479,10 @@ struct SpzAgent {
     SpzPolicyConfig config;
     SpzRecorder* recorder = nullptr;
     std::mt19937_64 rng;
+    // Dedicated stream for counterfactual-pair sampling so recording
+    // never perturbs the decision RNG: games are bit-identical with the
+    // recording on or off.
+    std::mt19937_64 counterfactual_rng;
 
     SpzAgent(std::shared_ptr<const SpzNet> shared_net,
              const std::array<std::vector<CardId>, 2>& original_decks,
@@ -2307,7 +2497,9 @@ struct SpzAgent {
           seat(player_seat),
           config(policy),
           recorder(sample_recorder),
-          rng(mix_seed(policy.seed, player_seat)) {}
+          rng(mix_seed(policy.seed, player_seat)),
+          counterfactual_rng(
+              mix_seed(policy.seed, 0xCF00 + player_seat)) {}
 
     bool explore() {
         if (config.epsilon <= 0.0) {
@@ -3945,6 +4137,113 @@ struct SpzAgent {
             recorder->feature_rows.push_back(spz_features_for(
                 net->input_count(), observation, decks, phase));
             recorder->feature_turns.push_back(observation.turn_number);
+            maybe_record_counterfactuals(observation, phase,
+                                         recorder->feature_rows.back());
+        }
+    }
+
+    // Counterfactual dominance pairs (rules-derived, card-agnostic):
+    // for a sampled fraction of recorded states, emit transform
+    // variants whose value ordering is known a priori, exactly like the
+    // value-bias probe's transforms. The transforms only feed the
+    // feature extractor — they never resolve rules — so the
+    // conservation-violating graveyard pad is a legitimate
+    // feature-space constraint, not a reachable game state.
+    void maybe_record_counterfactuals(
+        const PlayerObservation& observation, TurnPhase phase,
+        const std::vector<float>& base_row) {
+        if (config.counterfactual_fraction <= 0.0) {
+            return;
+        }
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        if (unit(counterfactual_rng) >= config.counterfactual_fraction) {
+            return;
+        }
+        const std::size_t self = observation.observer;
+        const auto features_of =
+            [&](const PlayerObservation& variant) {
+                return spz_features_for(net->input_count(), variant,
+                                        decks, phase);
+            };
+        // DEPLOY: a zero-cost artifact in hand that this state could
+        // legally put onto the battlefield (own main phase, empty
+        // stack) must not be valued below holding it.
+        const bool deploy_window =
+            (phase == TurnPhase::FirstMain ||
+             phase == TurnPhase::SecondMain) &&
+            observation.active_player == self &&
+            observation.stack.empty();
+        if (deploy_window) {
+            std::vector<std::size_t> free_artifacts;
+            for (std::size_t at = 0; at < observation.hand.size();
+                 ++at) {
+                const CardDefinition& card =
+                    card_definition(observation.hand[at]);
+                if (card.type == CardType::Artifact &&
+                    card.cost == ManaCost{}) {
+                    free_artifacts.push_back(at);
+                }
+            }
+            if (!free_artifacts.empty()) {
+                std::uniform_int_distribution<std::size_t> pick(
+                    0, free_artifacts.size() - 1);
+                const std::size_t at =
+                    free_artifacts[pick(counterfactual_rng)];
+                PlayerObservation variant = observation;
+                PublicPlayerState& me = variant.players[self];
+                PermanentId next_id = 1;
+                for (const PublicPlayerState& player :
+                     variant.players) {
+                    for (const auto& land : player.lands) {
+                        next_id = std::max(next_id, land.id + 1);
+                    }
+                    for (const auto& creature : player.creatures) {
+                        next_id = std::max(next_id, creature.id + 1);
+                    }
+                    for (const auto& artifact : player.artifacts) {
+                        next_id = std::max(next_id, artifact.id + 1);
+                    }
+                }
+                me.artifacts.push_back(ArtifactPermanent{
+                    .id = next_id,
+                    .card = variant.hand[at],
+                    .tapped = false,
+                });
+                variant.hand.erase(
+                    variant.hand.begin() +
+                    static_cast<std::ptrdiff_t>(at));
+                if (me.hand_size > 0) {
+                    me.hand_size -= 1;
+                }
+                recorder->counterfactual_pairs.push_back(
+                    {features_of(variant), base_row, false});
+            }
+        }
+        // DISCARD: moving a random hand card to the graveyard must not
+        // be valued above keeping it.
+        if (!observation.hand.empty()) {
+            std::uniform_int_distribution<std::size_t> pick(
+                0, observation.hand.size() - 1);
+            const std::size_t at = pick(counterfactual_rng);
+            PlayerObservation variant = observation;
+            PublicPlayerState& me = variant.players[self];
+            me.graveyard.push_back(variant.hand[at]);
+            variant.hand.erase(variant.hand.begin() +
+                               static_cast<std::ptrdiff_t>(at));
+            if (me.hand_size > 0) {
+                me.hand_size -= 1;
+            }
+            recorder->counterfactual_pairs.push_back(
+                {base_row, features_of(variant), false});
+        }
+        // NEUTRAL-PAD: a conjured own-basic in the graveyard should be
+        // worth about nothing either way (the deck-conditional
+        // graveyard-credit pocket is exactly this delta going positive).
+        if (const auto land = counterfactual_pad_land(decks[self])) {
+            PlayerObservation variant = observation;
+            variant.players[self].graveyard.push_back(*land);
+            recorder->counterfactual_pairs.push_back(
+                {base_row, features_of(variant), true});
         }
     }
 
@@ -5749,6 +6048,14 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
     std::vector<SpzSample> replay;
     replay.reserve(std::min<std::size_t>(config.replay_capacity, 1 << 20));
     std::size_t replay_cursor = 0;
+    // Counterfactual dominance pairs live in their own small replay;
+    // whether any are recorded at all is gated below on the loss weight.
+    constexpr std::size_t kCounterfactualReplayCapacity = 30000;
+    const bool counterfactual_enabled =
+        config.train_value && config.counterfactual_fraction > 0.0 &&
+        config.counterfactual_loss_weight > 0.0;
+    std::vector<SpzCounterfactualPair> counterfactual_replay;
+    std::size_t counterfactual_cursor = 0;
     std::mt19937_64 trainer_rng(mix_seed(config.seed, 0xABCDEF));
     std::vector<std::shared_ptr<const SpzNet>> league_pool;
 
@@ -5907,6 +6214,10 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                     policy.record_advantage =
                         config.train_advantage &&
                         !champion_seat[seat] && record_seat[seat];
+                    policy.counterfactual_fraction =
+                        counterfactual_enabled && record_seat[seat]
+                            ? config.counterfactual_fraction
+                            : 0.0;
                     if (config.ismcts && !champion_seat[seat]) {
                         policy.search = SpzPolicyConfig::Search::Ismcts;
                         policy.ismcts_iterations =
@@ -6049,6 +6360,30 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                                             config.policy_replay_capacity;
                         }
                         new_policy_samples += 1;
+                    }
+                }
+            }
+        }
+
+        std::size_t new_counterfactual_pairs = 0;
+        if (counterfactual_enabled) {
+            for (GameRecord& record : records) {
+                for (auto& seat_recorder : record.recorders) {
+                    for (auto& pair :
+                         seat_recorder.counterfactual_pairs) {
+                        if (counterfactual_replay.size() <
+                            kCounterfactualReplayCapacity) {
+                            counterfactual_replay.push_back(
+                                std::move(pair));
+                        } else {
+                            counterfactual_replay
+                                [counterfactual_cursor] =
+                                    std::move(pair);
+                            counterfactual_cursor =
+                                (counterfactual_cursor + 1) %
+                                kCounterfactualReplayCapacity;
+                        }
+                        new_counterfactual_pairs += 1;
                     }
                 }
             }
@@ -6223,6 +6558,38 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
             mean_loss /= static_cast<double>(steps);
         }
 
+        // Auxiliary counterfactual ranking pass: a small, configurable
+        // share of the value net's gradient steps, taken on the
+        // dominance-pair replay. TD targets above stay primary.
+        double counterfactual_loss = 0.0;
+        std::size_t counterfactual_steps = 0;
+        if (counterfactual_enabled && !counterfactual_replay.empty() &&
+            new_counterfactual_pairs > 0 && steps > 0) {
+            const std::size_t batch =
+                std::max<std::size_t>(1, config.batch_size);
+            counterfactual_steps = std::max<std::size_t>(
+                1, static_cast<std::size_t>(
+                       config.counterfactual_loss_weight *
+                           static_cast<double>(steps) +
+                       0.5));
+            std::uniform_int_distribution<std::size_t> pick(
+                0, counterfactual_replay.size() - 1);
+            std::vector<SpzNet::CounterfactualPair> batch_pairs(batch);
+            for (std::size_t step = 0; step < counterfactual_steps;
+                 ++step) {
+                for (std::size_t slot = 0; slot < batch; ++slot) {
+                    const SpzCounterfactualPair& pair =
+                        counterfactual_replay[pick(trainer_rng)];
+                    batch_pairs[slot] = {&pair.preferred, &pair.other,
+                                         pair.neutral};
+                }
+                counterfactual_loss += net->train_counterfactual_batch(
+                    batch_pairs, config.learning_rate);
+            }
+            counterfactual_loss /=
+                static_cast<double>(counterfactual_steps);
+        }
+
         double policy_loss = 0.0;
         if (policy_net != nullptr && !policy_replay.empty() &&
             new_policy_samples > 0) {
@@ -6267,6 +6634,8 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                  << " replay "
                  << replay.size() << " steps " << steps << " loss "
                  << std::setprecision(4) << mean_loss
+                 << " cf-pairs " << new_counterfactual_pairs
+                 << " cf-loss " << counterfactual_loss
                  << " policy-samples " << new_policy_samples
                  << " policy-loss " << std::setprecision(4)
                  << policy_loss << " mull-rate "
@@ -6490,7 +6859,12 @@ SpzTrainOutput train_spz(const SpzTrainConfig& config) {
                           << loss_floor << ",\"advantage_loss\":"
                           << advantage_loss
                           << ",\"advantage_rank_loss\":"
-                          << advantage_rank_loss << ",\"policy_loss\":"
+                          << advantage_rank_loss
+                          << ",\"counterfactual_loss\":"
+                          << counterfactual_loss
+                          << ",\"counterfactual_pairs\":"
+                          << new_counterfactual_pairs
+                          << ",\"policy_loss\":"
                           << policy_loss << ",\"mulligan_rate\":"
                           << (config.games_per_iteration == 0
                                   ? 0.0

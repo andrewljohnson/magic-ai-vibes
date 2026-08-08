@@ -21,6 +21,7 @@ using namespace old_school::selfplay_zero;
         << "  selfplay-zero train --out PATH [--iterations N] [--games N]\n"
         << "      [--hidden N] [--seed N] [--threads N] [--max-turns N]\n"
         << "      [--worlds N] [--lr X] [--eps-start X] [--eps-final X]\n"
+        << "      [--counterfactual-fraction X] [--counterfactual-weight X]\n"
         << "  selfplay-zero benchmark --model PATH [--reps N] [--seed N]\n"
         << "      [--threads N] [--worlds N] [--max-turns N] [--rollout]\n"
         << "      [--cycles N] [--top-k N] [--ismcts] [--sims N]\n"
@@ -61,6 +62,9 @@ struct Arguments {
     bool hard_targets = false;
     double gamma = 1.0;
     double td_lambda = 1.0;
+    // Negative = keep the SpzTrainConfig defaults.
+    double counterfactual_fraction = -1.0;
+    double counterfactual_weight = -1.0;
     std::uint64_t seed = 20260729;
     std::size_t threads = 1;
     std::size_t max_turns = 0;  // 0 selects the per-command default.
@@ -186,6 +190,10 @@ Arguments parse_arguments(int argc, char** argv) {
             arguments.hard_targets = true;
         } else if (flag == "--td-lambda") {
             arguments.td_lambda = std::stod(next());
+        } else if (flag == "--counterfactual-fraction") {
+            arguments.counterfactual_fraction = std::stod(next());
+        } else if (flag == "--counterfactual-weight") {
+            arguments.counterfactual_weight = std::stod(next());
         } else if (flag == "--gamma") {
             arguments.gamma = std::stod(next());
         } else if (flag == "--hidden") {
@@ -255,6 +263,14 @@ int run_train(const Arguments& raw_arguments) {
     config.discounted_targets = !arguments.hard_targets;
     config.gamma = arguments.gamma;
     config.td_lambda = arguments.td_lambda;
+    if (arguments.counterfactual_fraction >= 0.0) {
+        config.counterfactual_fraction =
+            arguments.counterfactual_fraction;
+    }
+    if (arguments.counterfactual_weight >= 0.0) {
+        config.counterfactual_loss_weight =
+            arguments.counterfactual_weight;
+    }
     config.seed = arguments.seed;
     config.threads = arguments.threads;
     config.learning_rate = arguments.learning_rate;
