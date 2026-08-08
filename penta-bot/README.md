@@ -203,6 +203,98 @@ ckpt-11000 net (17.5%, LCB 11.7%). The transient dip is worth chasing
 next: persist the replay ring across chunk restarts, or ramp per-round
 training steps with ring fill.
 
+## Second collapse + forensic probe (2026-08-07, post-audit)
+
+The audit's fixes validated (previous section), but the CONTINUATION run
+collapsed again: 15.0 -> 13.3 -> 10.0 -> 3.3 vs handcrafted over chunks
+at 3000-9000 games, vs-random sagging 83 -> 74. The one issue the audit
+had flagged but not fixed was the driver: **every warm-started chunk
+begins with an EMPTY replay ring** (trainer state was not persisted), so
+each chunk's first rounds take ~27 full-LR momentum-SGD steps on a tiny
+fresh buffer (~4k samples), repeatedly shocking the net. Each restart is
+a coin flip (the validation run's dip-and-recover vs this run's slide).
+
+`probe.py` (new) diffs two nets behaviorally and calibration-wise: 100
+fixed-seed games vs handcrafted each, action-type distribution at
+contested decisions, feature-level value transforms on 300 mid-game
+observations, and a 10-bin calibration curve. Healthy (`penta_net.npz`,
+the 17.5% ckpt-11000) vs collapsed (this run's ckpt-9000, 3.3%):
+
+| metric | healthy | collapsed |
+| --- | --- | --- |
+| attacks declared /game | 1.39 | **0.00** |
+| attack-opportunity take-rate | 100% | **0%** |
+| lands played /game | 3.00 | 1.71 |
+| spells cast /game | 4.21 | 3.01 |
+| final life (own / opp) | -0.2 / 14.1 | -1.0 / 17.0 |
+| mean value @ game start | 0.34 | 0.43 |
+| mean value in eventually-LOST states | 0.18 | 0.25 |
+| calibration bins 0.4-0.7 -> realized win | .23/.32/.41 (rising) | .18/.17/.16 (flat/inverted) |
+| discard-a-card value delta | -0.025 | -0.029 (intact) |
+| hand-size sweep slope | +0.101 | +0.087 (intact) |
+
+The story: the collapse is NOT a feature-level sign flip -- the collapsed
+net still knows cards are good (discard hurts, more hand is better) --
+it is a mis-ranking of afterstates. The collapsed net never declares an
+attacker (it always picks FinishDeclaringAttackers when attacking is on
+offer), under-deploys lands/spells, and its value surface is optimistic
+about passive losing states (start-of-game value drifts to 0.43, lost
+states to 0.25, calibration flat-to-inverted through the 0.4-0.7 range).
+Against handcrafted the entire win rate comes from racing; a net that
+never attacks decays to ~3% (occasional opponent deck-outs/burn).
+
+Fixes shipped:
+
+1. **Replay-ring + momentum persistence.** `trainer.py --ring PATH`
+   loads the ring at start (when the file exists) and saves it (live
+   samples, insertion order, plus SGD momentum velocities) at exit;
+   curve.sh threads `penta_ring.npz` through every chunk (fresh runs
+   delete it first; `KEEP_RING=1` continues one). Chunk 2+ now trains
+   against a full-size replay from update 0.
+2. **Learning-rate warmup.** `--lr-warmup N` (curve.sh: 200) ramps the
+   LR linearly over the first N SGD updates of a chunk, softening the
+   residual warm-start shock (chunk 1 of a fresh run still starts on a
+   small buffer).
+3. curve.sh accepts `START_NET` / `START_TOTAL` to launch a curve from
+   any checkpoint with non-overlapping seed ranges.
+
+Side finding: the collapsed run's baseline step had silently overwritten
+the 17.5% ckpt-11000 deliverable with the 15.0% ckpt-13000 (curve.sh
+re-points `penta_net.npz` at its own starting baseline); the validation
+run below re-promoted the deliverable to a 17.5% net, so the artifact is
+whole again, but note that a fresh curve run demotes a better previous
+deliverable by design.
+
+Validation (4 chunks from the healthy 15.0% deliverable, ring persisted,
+lr-warmup 200, fresh seeds from 1015000; chunk 1 of a fresh run
+necessarily still starts on an empty ring):
+
+| cumulative games | vs random | vs handcrafted | ring at start |
+| --- | --- | --- | --- |
+| 15000 (healthy start, re-gate) | 90.0% | 15.0% | -- |
+| 17000 | 78.3% | 5.8% | empty (run start) |
+| 19000 | 81.7% | 7.5% | resumed 110k + momentum |
+| 21000 | 85.0% | **17.5%** (promoted) | resumed 150k + momentum |
+| 23000 | 80.0% | 5.0% | resumed 150k + momentum |
+
+**Verdict: the ring fix is real but NOT sufficient -- still no stable
+curve.** The empty-ring chunk shocked the net as predicted (15.0 ->
+5.8), the ring-resumed chunks recovered to tie the all-time best (7.5 ->
+17.5, promoted), and then a fully ring-resumed, full-buffer,
+momentum-carried chunk fell straight back to 5.0. Chunk-to-chunk swings
+of +-12 points survive every fix. Across all five curve configurations
+tried (lambda 0.9; lambda 1.0 alone; capped-exclusion + league;
+validation rerun of same; + ring/warmup), continued 1-ply training past
+the 3000-game smoke point has never produced a sustained gain -- the
+gate-guarded promotion is what preserves the wins individual chunks
+stumble into (17.5% twice). The passivity equilibrium the probe exposed
+(stalling policies -> capped games dropped -> replay dominated by
+passive handcrafted-league losses -> attack values erode) appears
+intrinsic to 1-ply afterstate self-play at this scale. The structural
+fix is the one already on the roadmap: rollout search once the upstream
+clone API merges (the lever that pushed the C++ SPZ bot past
+Handcrafted), not more 1-ply chunks.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->

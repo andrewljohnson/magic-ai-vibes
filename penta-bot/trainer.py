@@ -45,6 +45,7 @@ Usage:
 
 import argparse
 import json
+import os
 import random
 import time
 from multiprocessing import Pool
@@ -337,6 +338,48 @@ def league_roll(seed, handcrafted_fraction, n_frozen):
     return "mirror", -1
 
 
+def save_ring(path, replay_X, replay_y, size, cursor, capacity, net):
+    """Persist the live replay samples (oldest-first) plus the optimizer's
+    momentum state beside the net, so a warm-started chunk does not begin
+    on an EMPTY ring (the early updates of every chunk otherwise train
+    hard on a small fresh buffer -- the post-audit collapse driver)."""
+    if size < capacity:
+        order = np.arange(size)
+    else:  # cursor is the oldest slot once the ring has wrapped
+        order = np.concatenate([np.arange(cursor, capacity),
+                                np.arange(cursor)])
+    np.savez_compressed(
+        path, X=replay_X[order], y=replay_y[order],
+        vel_w1=net._vel[0], vel_b1=net._vel[1], vel_w2=net._vel[2],
+        vel_b2=np.float64(net._vel[3]))
+    print(f"ring: saved {size} samples + momentum -> {path}", flush=True)
+
+
+def load_ring(path, replay_X, replay_y, capacity, net):
+    """Restore a persisted ring (newest samples win if it exceeds
+    capacity) and the momentum state. Returns (size, cursor)."""
+    data = np.load(path, allow_pickle=False)
+    X, y = data["X"], data["y"]
+    if X.shape[1] != replay_X.shape[1]:
+        print(f"ring: {path} has {X.shape[1]} features, expected "
+              f"{replay_X.shape[1]}; starting empty", flush=True)
+        return 0, 0
+    if len(X) > capacity:
+        X, y = X[-capacity:], y[-capacity:]
+    size = len(X)
+    replay_X[:size] = X
+    replay_y[:size] = y
+    if all(k in data for k in ("vel_w1", "vel_b1", "vel_w2", "vel_b2")) \
+            and data["vel_w1"].shape == net._vel[0].shape:
+        net._vel = [data["vel_w1"], data["vel_b1"], data["vel_w2"],
+                    float(data["vel_b2"])]
+        momentum = " + momentum"
+    else:
+        momentum = ""
+    print(f"ring: resumed {size} samples{momentum} from {path}", flush=True)
+    return size, size % capacity
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--games", type=int, default=3000)
@@ -356,6 +399,15 @@ def main():
     parser.add_argument("--out", default="penta_net.npz")
     parser.add_argument("--init", default="",
                         help="warm-start weights (.npz) to continue from")
+    parser.add_argument("--ring", default="", metavar="PATH",
+                        help="replay-ring persistence file (.npz): loaded "
+                             "at start when it exists, saved at exit, so "
+                             "warm-started chunks do not begin on an empty "
+                             "ring (also carries SGD momentum state)")
+    parser.add_argument("--lr-warmup", type=int, default=0, metavar="N",
+                        help="linear learning-rate warmup over the first N "
+                             "SGD updates (softens the fresh-small-buffer "
+                             "shock of a warm-started chunk)")
     parser.add_argument("--league-frozen", action="append", default=[],
                         metavar="PATH",
                         help="frozen snapshot net for league games "
@@ -385,7 +437,11 @@ def main():
     replay_y = np.empty(args.replay_capacity, dtype=np.float32)
     replay_size = 0
     replay_cursor = 0
+    if args.ring and os.path.exists(args.ring):
+        replay_size, replay_cursor = load_ring(
+            args.ring, replay_X, replay_y, args.replay_capacity, net)
     train_rng = np.random.default_rng(7)
+    updates_done = 0
 
     played = 0
     t_start = time.time()
@@ -434,9 +490,13 @@ def main():
             steps = max(1, 2 * new // args.batch)
             losses = []
             for _ in range(steps):
+                lr = args.lr
+                if args.lr_warmup > 0:
+                    lr *= min(1.0, (updates_done + 1) / args.lr_warmup)
                 pick = train_rng.integers(0, replay_size, size=args.batch)
                 losses.append(net.train_batch(
-                    replay_X[pick], replay_y[pick], args.lr))
+                    replay_X[pick], replay_y[pick], lr))
+                updates_done += 1
             net.save(args.out,
                      engine_version=extractor.engine_version,
                      protocol_version=extractor.protocol_version,
@@ -451,6 +511,9 @@ def main():
                 print(f"      dropped game (engine error): {error}",
                       flush=True)
 
+    if args.ring:
+        save_ring(args.ring, replay_X, replay_y, replay_size, replay_cursor,
+                  args.replay_capacity, net)
     print(f"done: {played} games -> {args.out}")
 
 
