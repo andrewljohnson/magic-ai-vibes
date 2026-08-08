@@ -24,8 +24,9 @@ import numpy as np
 import trainer
 from extractor import Extractor, import_penta
 from net import Net
-from trainer import (afterstate_rows, choose, eval_budget, make_fork,
-                     td_targets)
+from trainer import (DEFAULT_SEARCH, afterstate_rows, aggression_prior,
+                     choose, eval_budget, make_fork, playout_boundary,
+                     playout_value, td_targets)
 
 penta = import_penta()
 EX = Extractor()
@@ -128,15 +129,22 @@ def check_a_handcrafted_labels():
             if result not in ("cap", "draw") and result != learner_seat:
                 losses += 1
                 # Learner lost. In opponent mode the final recorded
-                # afterstate includes the opponent's killing response, so
-                # own life must have gone below the opponent's (usually
-                # <= 0) in the learner's own perspective.
+                # afterstate usually includes the opponent's killing
+                # response, so own life should be below the opponent's in
+                # the learner's own perspective. NOT an invariant -- a
+                # burn kill from above the opponent's life total (seen:
+                # The Deck Fireballing a 9-life learner past its last
+                # contested decision, engine 0.5.0 seed 209) is a real
+                # loss with own > opp -- but a wrong-perspective bug
+                # would flip essentially ALL lost games, so a small
+                # minority of exceptions passes.
                 if rows[-1][OWN_LIFE] > rows[-1][OPP_LIFE]:
                     bad_persp += 1
     check("A4 handcrafted-league terminal target == learner outcome",
           bad_z == 0, f"{bad_z}/{played} wrong z")
-    check("A5 handcrafted-league lost games end with own life below opp's",
-          losses > 0 and bad_persp == 0,
+    check("A5 handcrafted-league lost games mostly end with own life below "
+          "opp's",
+          losses > 0 and bad_persp <= max(1, losses // 5),
           f"{bad_persp}/{losses} lost games recorded winner-perspective rows")
 
 
@@ -525,6 +533,113 @@ def check_e_replay_ring():
           set(pick.tolist()) == set(range(capacity)))
 
 
+# ---------------------------------------------------------------- H -----
+
+def check_h_aggression_prior():
+    """Exploration prior ordering: land > biggest castable > attack-declare
+    > uniform rest (first_bot-shaped)."""
+    defs_by_power = sorted(EX.card_power.items(), key=lambda kv: kv[1])
+    small_def, small_p = defs_by_power[0]
+    big_def, big_p = defs_by_power[-1]
+    rng = random.Random(0)
+    land = {"index": 0, "type": "PlayLand"}
+    cast_small = {"index": 1, "type": "CastSpell", "card": small_def}
+    cast_big = {"index": 2, "type": "CastSpell", "card": big_def}
+    attack = {"index": 3, "type": "DeclareAttacker"}
+    finish = {"index": 4, "type": "FinishDeclaringAttackers"}
+    quiet = {"index": 5, "type": "PassPriority"}
+    check("H1 prior prefers land over everything",
+          all(aggression_prior([quiet, cast_big, attack, land], EX,
+                               rng)["index"] == 0 for _ in range(20)))
+    check("H2 prior casts the biggest castable spell",
+          big_p > small_p and all(
+              aggression_prior([quiet, cast_small, cast_big, finish], EX,
+                               rng)["index"] == 2 for _ in range(20)),
+          f"powers {small_p} vs {big_p}")
+    check("H3 prior declares attackers over quiet options",
+          all(aggression_prior([finish, quiet, attack], EX, rng)["index"] == 3
+              for _ in range(20)))
+    seen = {aggression_prior([finish, quiet], EX, rng)["index"]
+            for _ in range(200)}
+    check("H4 prior falls back to a uniform draw", seen == {4, 5}, f"{seen}")
+
+
+def check_h_playout_boundary():
+    """Boundary predicate: the deciding seat's next turn start."""
+    def obs(turn, active, pregame=False):
+        return {"turn": turn, "activeSeat": active, "pregame": pregame}
+    ok = (not playout_boundary(obs(3, "p1"), "p1", 3, False)  # same turn
+          and not playout_boundary(obs(4, "p2"), "p1", 3, False)  # opp turn
+          and playout_boundary(obs(5, "p1"), "p1", 3, False)  # next turn
+          and not playout_boundary(obs(1, "p1", True), "p1", 1, True)  # mull
+          and playout_boundary(obs(1, "p1"), "p1", 1, True)  # first turn
+          and not playout_boundary(obs(2, "p2"), "p2", 3, False))  # earlier
+    check("H5 playout boundary is the seat's next turn start", ok)
+
+
+def check_h_playout_and_search():
+    """playout_value scores terminals exactly, is deterministic for a
+    fixed rng, and stays in [0, 1]; searched choose takes an immediate
+    winning terminal candidate when one exists."""
+    net = Net(EX.size, hidden=8, seed=11)
+    game, history, make_game = rand_game_to_depth(33, 60)
+    if game is None:
+        check("H6 playout determinism", False, "no usable state")
+        return
+    obs = json.loads(game.observe())
+    seat = obs["seat"]
+    action = obs["legalActions"][0]
+    vals = []
+    for _ in range(2):
+        after = game.clone()
+        after.act(action["index"])
+        vals.append(playout_value(
+            after, seat, net, EX, random.Random(5), obs.get("turn", 0),
+            False, DEFAULT_SEARCH))
+    check("H6 playout value is deterministic and bounded",
+          vals[0] == vals[1] and 0.0 <= vals[0] <= 1.0, f"{vals}")
+
+    # A state with a winning terminal candidate: search must take it.
+    found = 0
+    taken = 0
+    for seed in range(600, 660):
+        def make_game():
+            return penta.Game("Sligh", "The Deck", opponent="random",
+                              seed=seed)
+        game = make_game()
+        rng = random.Random(seed)
+        history = []
+        while game.result() is None and len(history) < 400:
+            obs = json.loads(game.observe())
+            acts = obs["legalActions"]
+            winning = None
+            if len(acts) > 1:
+                rows, terms = afterstate_rows(
+                    make_fork(make_game, history, game), obs["seat"],
+                    acts[:8], EX)
+                for a, t in zip(acts[:8], terms):
+                    if t == 1.0:
+                        winning = a["index"]
+                        break
+            if winning is not None:
+                found += 1
+                index, _, value = choose(
+                    make_fork(make_game, history, game), obs, net, EX,
+                    random.Random(1), epsilon=0.0, max_eval=8,
+                    depth=len(history), search=DEFAULT_SEARCH)
+                copy = make_fork(make_game, history, game)()
+                copy.act(index)
+                taken += copy.result() == obs["seat"] and value == 1.0
+                break
+            idx = rng.choice(acts)["index"]
+            game.act(idx)
+            history.append(idx)
+        if found:
+            break
+    check("H7 search takes an immediate winning candidate",
+          found > 0 and taken == found, f"{taken}/{found}")
+
+
 def main():
     print("A. seat/perspective labels")
     check_a_observe_default_seat()
@@ -546,6 +661,10 @@ def main():
     check_f_seat_pair_dealiasing()
     print("G. capped-game exclusion")
     check_g_capped_games_dropped()
+    print("H. rollout search + aggression prior")
+    check_h_aggression_prior()
+    check_h_playout_boundary()
+    check_h_playout_and_search()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

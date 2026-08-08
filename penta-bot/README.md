@@ -95,6 +95,77 @@ reconstruction is ~0.5 ms, so 100 playouts * their prefixes would dominate.
 The right fix is a one-line upstream `fn clone(&self)` on `BotGame` exposed
 through the bindings; with that, rollout search ports directly.
 
+**Update (engine 0.5.0 repin): the clone merged (upstream PR #5), and the
+rollout search is ported.** `game.clone()` costs ~4 us at depth 120, so
+the 1-ply policy jumped from 0.72 to ~11.7 games/s/process on its own,
+and the search layer below became affordable.
+
+## Rollout search (the C++ recipe, ported)
+
+Rollout lookahead was the lever that pushed our C++ SPZ bot past
+Handcrafted (+12-15 points, cured passivity/drift); penta's 1-ply
+collapse post-mortems (below) show why this engine needs it even more:
+penta's decision granularity means an attack-declare afterstate shows
+the tapped attacker (the cost) but never the blocks and damage (the
+consequence), so a 1-ply net can literally never see why attacking pays.
+
+Per greedy decision (`trainer.choose`, `--search-topk 0` disables):
+
+1. **Myopic screen**: every legal action (up to `--max-eval`) is played
+   on a clone and the afterstate is scored by the net, as before.
+2. **Top-k playouts**: the best `--search-topk` (default 4) candidates
+   each get `--playouts` (default 1) PLAYOUTS on fresh clones: both
+   seats play greedy 1-ply with the same net (epsilon 0, up to
+   `--playout-max-eval` candidates per step) until the deciding seat's
+   NEXT TURN START (penta turns alternate seats, so this plays through
+   blockers, damage, and the opponent's full response turn) or a
+   `--playout-budget` (default 120) decision cap; the boundary
+   observation is scored by the net from the deciding seat's
+   perspective, terminal results score exactly. The engine and greedy
+   policy are deterministic, so extra playouts (2+) add
+   `--playout-epsilon` uniform noise to decorrelate.
+3. Argmax over the refined top-k (myopic and playout values are not on
+   one scale, so non-top-k candidates cannot win).
+
+**HONESTY CAVEAT: clones carry the true hidden state** (both libraries
+and the opponent's hand), so playout outcomes leak information the
+deciding seat could not see. That is acceptable for TRAINING /
+self-improvement -- both seats are us -- but evaluation vs the scripted
+bots inherits the leak through the search policy, so gate numbers here
+are flagged accordingly; upstream issue #11 tracks determinized clones
+for honest search-time evaluation. Gates are still run and reported
+(the scripted opponents cannot be exploited deliberately by a value
+net, so the leak's practical edge is bounded), with this caveat.
+
+Measured cost (M1-class laptop, one process, trained 64-hidden net,
+shared with a 6-thread C++ benchmark):
+
+| policy | games/s/process | ms/decision |
+| --- | --- | --- |
+| 1-ply (search off), clone forks | 11.7 | 0.15 |
+| search topk4, budget 120, playout-max-eval 8 | 0.32 | 6.4 |
+| search topk2, budget 120, playout-max-eval 8 | 0.49 | 4.1 |
+| search topk4, budget 60 | 0.32 | 6.5 |
+
+Budget 60 saves nothing over 120 because the turn-start boundary almost
+always arrives first (~25-50 decisions). Defaults ship at topk 4 /
+1 playout / budget 120 / playout-max-eval 8: ~2 games/s aggregate
+across 6-8 workers, i.e. a 3000-game smoke in well under an hour even
+on a shared machine.
+
+## Aggression prior (exploration)
+
+Epsilon-exploration no longer draws uniformly: a `--prior-frac`
+(default 0.5) slice of exploration draws follows a first_bot-shaped
+ordering -- play a land, else cast the biggest castable thing, else
+declare an attacker, else uniform -- with the rest kept uniform so every
+action retains support (checks C3/H4). This is a credited adaptation of
+the action ordering in penta's `examples/python/first_bot.py` (lacker,
+Apache-2.0; their 40-line heuristic beats their handcrafted bot 73%).
+Uniform exploration was the second half of the passivity trap: aggression
+never entered the replay data, so the value net had no attack
+consequences to learn from even when they would have scored well.
+
 ## Files
 
 - `extractor.py` -- observation JSON -> 675-dim float32 vector: 128
@@ -109,22 +180,27 @@ through the bindings; with that, rollout search ports directly.
 - `net.py` -- numpy mirror of our C++ `SpzNet`: one tanh hidden layer,
   sigmoid output, binary cross-entropy, minibatch SGD with momentum 0.9,
   uniform(+-1/sqrt(fan_in)) init, save/load as `.npz`. No torch.
-- `trainer.py` -- **epsilon-greedy over 1-ply afterstates** (copies via the
-  binding's `clone_game()` when present, else deterministic replay
-  reconstruction), targets computed backward over each seat's recorded
-  afterstate values with the terminal 0/1 (0.5 draw/cap) outcome, replay
-  ring buffer, multiprocessing across seeds (8 workers, one `Game` per
-  task). Forced single-action decisions are played without evaluation or
-  recording. **Targets default to pure undiscounted outcomes
-  (`--td-lambda 1.0`)** -- see the collapse post-mortem below.
+- `trainer.py` -- **epsilon-greedy ROLLOUT SEARCH over afterstates**
+  (myopic 1-ply screen, then top-k playouts to the deciding seat's next
+  turn start; `--search-topk 0` restores plain 1-ply; copies via the
+  binding's `clone()`, else deterministic replay reconstruction), with a
+  first_bot-shaped aggression prior on exploration draws. Targets
+  computed backward over each seat's recorded afterstate values with the
+  terminal 0/1 (0.5 draw/cap) outcome, replay ring buffer,
+  multiprocessing across seeds (one `Game` per task). Forced
+  single-action decisions are played without evaluation or recording.
+  **Targets default to pure undiscounted outcomes (`--td-lambda 1.0`)**
+  -- see the collapse post-mortem below.
 - `gate.py` -- greedy (epsilon 0) evaluation vs `handcrafted` and `random`,
   alternating seats, rotating deck pairs, fixed seeds, Wilson 95% LCB.
-- `checks.py` -- 27 standalone audit checks against the live engine: seat/
+- `checks.py` -- 34 standalone audit checks against the live engine: seat/
   perspective labels (recorded rows must be the learner's own view with its
   own outcome, in mirror, frozen-league, and handcrafted-league games), TD
   target recursion, candidate-sampling uniformity, afterstate/fork
   exactness, replay-ring arithmetic, league seat scheduling, capped-game
-  exclusion. Run `python3 checks.py` after any trainer change.
+  exclusion, aggression-prior ordering, playout boundary/determinism, and
+  search taking immediate wins. Run `python3 checks.py` after any trainer
+  change.
 
 ## Collapse post-mortem (2026-08 audit)
 

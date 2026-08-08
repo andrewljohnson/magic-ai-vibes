@@ -2,12 +2,32 @@
 
 What is shipped (see README.md for the feasibility numbers behind this):
 
-- Decision policy: epsilon-greedy over 1-ply AFTERSTATES. Copies of the
-  live game come from the binding's `clone_game()` (engine >= 0.3);
-  where the binding lacks it, the deterministic fallback reconstructs by
-  `Game(same decks/seed)` + replaying the action history. Each candidate
-  action is played on such a copy and the resulting observation (from the
-  acting seat) is scored by the value net; greedy picks the argmax.
+- Decision policy: epsilon-greedy ROLLOUT SEARCH over afterstates (the
+  C++ SPZ recipe's decision-time lookahead, ported now that the engine
+  exposes `game.clone()`). Each greedy decision first screens all legal
+  actions with the 1-ply afterstate value (candidate action played on a
+  clone, resulting observation scored by the net), then takes the top-k
+  by that myopic score and runs a PLAYOUT from each: both seats play
+  greedy 1-ply with the same net (epsilon 0) until the deciding seat's
+  next turn start or a decision budget, and the boundary observation is
+  scored by the net from the deciding seat's perspective. The playout
+  plays THROUGH blocks and combat damage, so attack-declare afterstates
+  finally show their consequence instead of only their cost -- the
+  passivity driver of every 1-ply collapse. --search-topk 0 restores the
+  plain 1-ply policy.
+- HONESTY: clones carry the TRUE hidden state (both libraries, the
+  opponent's hand), so playout outcomes leak information the deciding
+  seat could not see. That is acceptable for TRAINING/self-improvement
+  (both seats are us), but evaluation gates vs the scripted bots carry
+  the same leak through the search policy; upstream issue #11 tracks
+  determinized clones for honest search-time evaluation.
+- Exploration: with probability epsilon the move is an exploration draw;
+  a --prior-frac slice of those follows a first_bot-shaped AGGRESSION
+  PRIOR (play a land, else cast the biggest thing, else declare an
+  attacker, else uniform -- adapted from penta's
+  examples/python/first_bot.py, Apache-2.0), the rest stay uniform so
+  every action keeps support. Uniform-only exploration never put
+  aggression into the replay data.
 - Learning: TD(lambda), gamma=1, on each seat's trajectory of chosen
   afterstate values: the last recorded state's target is the 0/1(/0.5)
   outcome z, and going backward
@@ -48,6 +68,7 @@ import json
 import os
 import random
 import time
+from collections import namedtuple
 from multiprocessing import Pool
 
 import numpy as np
@@ -56,6 +77,24 @@ from extractor import Extractor, import_penta
 from net import Net
 
 DECKS = ("Sligh", "White Weenie", "The Deck", "Counterburn")
+
+# Rollout-search knobs (see the module docstring; --search-topk 0 turns
+# the whole layer off and restores the 1-ply afterstate policy):
+#   top_k            candidates surviving the myopic screen into playouts
+#   playouts         playouts per candidate (the engine and the greedy
+#                    stand-in policy are deterministic, so playouts past
+#                    the first act with playout_epsilon-uniform noise to
+#                    decorrelate; 1 keeps the playout pure greedy)
+#   budget           max penta-decisions per playout (forced included)
+#   playout_max_eval max candidates the in-playout greedy 1-ply evaluates
+#   playout_epsilon  uniform-noise rate for playouts 2..n
+SearchConfig = namedtuple(
+    "SearchConfig", "top_k playouts budget playout_max_eval playout_epsilon")
+DEFAULT_SEARCH = SearchConfig(top_k=4, playouts=1, budget=120,
+                              playout_max_eval=8, playout_epsilon=0.10)
+# Fraction of exploration draws that follow the aggression prior instead
+# of the uniform draw (the rest keep full support over legal actions).
+PRIOR_FRACTION = 0.5
 # 1.0 = pure outcome targets (see module docstring for the collapse
 # post-mortem); override with --td-lambda.
 TD_LAMBDA = 1.0
@@ -105,30 +144,139 @@ def make_fork(make_game, history, game=None):
     return fork
 
 
-def afterstate_rows(fork, seat, actions, extractor):
+def afterstate_rows(fork, seat, actions, extractor, keep_copies=False):
     """Play each candidate on a forked copy; return feature rows and
-    terminal outcomes (None where the game continues)."""
-    rows, terminals = [], []
+    terminal outcomes (None where the game continues). With keep_copies
+    the afterstate game copies come back too (for rollout playouts)."""
+    rows, terminals, copies = [], [], []
     for action in actions:
         copy = fork()
         copy.act(action["index"])
         result = copy.result()
         obs_after = json.loads(copy.observe(seat))
         rows.append(extractor.features(obs_after))
+        copies.append(copy)
         if result is None:
             terminals.append(None)
         elif result == "draw":
             terminals.append(0.5)
         else:
             terminals.append(1.0 if result == seat else 0.0)
+    if keep_copies:
+        return rows, terminals, copies
     return rows, terminals
 
 
-def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth):
-    """Epsilon-greedy afterstate choice.
+def aggression_prior(actions, extractor, rng):
+    """First_bot-shaped exploration draw: play a land, else cast the
+    biggest thing castable, else declare an attacker, else uniform.
+
+    A credited adaptation of the action ORDERING in penta's
+    examples/python/first_bot.py (lacker, Apache-2.0) -- that trivial
+    heuristic beats the handcrafted bot 73% while uniform-explored 1-ply
+    nets collapsed to passivity, so exploration draws from its shape put
+    lands, threats, and above all ATTACKS into the replay data."""
+    by_type = {}
+    for action in actions:
+        by_type.setdefault(action["type"], []).append(action)
+    if "PlayLand" in by_type:
+        return rng.choice(by_type["PlayLand"])
+    if "CastSpell" in by_type:
+        power = extractor.card_power
+        return max(by_type["CastSpell"],
+                   key=lambda a: power.get(a.get("card"), 0))
+    if "DeclareAttacker" in by_type:
+        return rng.choice(by_type["DeclareAttacker"])
+    return rng.choice(actions)
+
+
+def playout_boundary(obs, seat, turn0, was_pregame):
+    """True at the first decision of the deciding seat's NEXT turn: penta
+    turns alternate seats (turn 1 = p1, turn 2 = p2, ...), so this is the
+    first non-pregame decision where `seat` is active on a later turn (or
+    on any turn at all when the playout started in the mulligan phase)."""
+    if obs.get("pregame"):
+        return False
+    if obs.get("activeSeat") != seat:
+        return False
+    return was_pregame or obs.get("turn", 0) > turn0
+
+
+def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
+                  search, epsilon=0.0):
+    """Greedy playout from an afterstate copy, scored for `seat`.
+
+    Both seats play greedy 1-ply with the same net (the stand-in policy)
+    until the deciding seat's next turn start (playout_boundary) or
+    `search.budget` penta-decisions, whichever comes first; the boundary
+    observation is scored by the net from `seat`'s perspective, and a
+    terminal result inside the playout returns the exact outcome. The
+    playout runs THROUGH blocks and combat damage, which is the point:
+    attack declarations are finally priced by their consequence.
+
+    HONESTY: `copy` is a true-state clone -- both libraries and the
+    opponent's hand are real, so the playout outcome leaks hidden
+    information. Fine for training (self-improvement, both seats are us);
+    flagged for evaluation -- gates vs the scripted bots inherit the leak
+    through the search policy. Upstream issue #11 tracks determinized
+    clones for honest search-time evaluation.
+    """
+    for _ in range(search.budget):
+        result = copy.result()
+        if result is not None:
+            if result == "draw":
+                return 0.5
+            return 1.0 if result == seat else 0.0
+        obs = json.loads(copy.observe())
+        if playout_boundary(obs, seat, turn0, was_pregame):
+            break
+        actions = obs["legalActions"]
+        if len(actions) == 1:
+            copy.act(actions[0]["index"])
+            continue
+        if epsilon > 0.0 and rng.random() < epsilon:
+            copy.act(rng.choice(actions)["index"])
+            continue
+        acting = obs["seat"]
+        if len(actions) > search.playout_max_eval:
+            actions = rng.sample(actions, search.playout_max_eval)
+        # Greedy 1-ply step: clone-per-candidate afterstates, keep the
+        # best candidate's copy as the next playout state (saves re-acting).
+        pending_rows, pending_copies = [], []
+        fixed = []  # (score, copy) for terminal candidates
+        for action in actions:
+            after = copy.clone()
+            after.act(action["index"])
+            result = after.result()
+            if result is None:
+                pending_rows.append(
+                    extractor.features(json.loads(after.observe(acting))))
+                pending_copies.append(after)
+            elif result == "draw":
+                fixed.append((0.5, after))
+            else:
+                fixed.append((1.0 if result == acting else 0.0, after))
+        scored = list(fixed)
+        if pending_rows:
+            values = net.value_batch(np.stack(pending_rows))
+            scored.extend(zip(values, pending_copies))
+        copy = max(scored, key=lambda pair: pair[0])[1]
+    result = copy.result()
+    if result is not None:
+        if result == "draw":
+            return 0.5
+        return 1.0 if result == seat else 0.0
+    return net.value(extractor.features(json.loads(copy.observe(seat))))
+
+
+def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
+           search=None, prior_frac=PRIOR_FRACTION):
+    """Epsilon-greedy rollout-search choice (1-ply when search is None).
 
     Returns (action_index, features, value); features/value are None for
-    forced moves, which are not recorded in the trajectory.
+    forced moves, which are not recorded in the trajectory. The value of
+    a searched choice is its playout score (the record the TD targets
+    bootstrap from at lambda < 1).
     """
     actions = obs["legalActions"]
     if len(actions) == 1:
@@ -136,7 +284,10 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth):
     seat = obs["seat"]
 
     if epsilon > 0.0 and rng.random() < epsilon:
-        picked = rng.choice(actions)
+        if rng.random() < prior_frac:
+            picked = aggression_prior(actions, extractor, rng)
+        else:
+            picked = rng.choice(actions)
         rows, terms = afterstate_rows(fork, seat, [picked], extractor)
         value = terms[0] if terms[0] is not None else net.value(rows[0])
         return picked["index"], rows[0], value
@@ -144,9 +295,39 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth):
     budget = eval_budget(depth, max_eval)
     if len(actions) > budget:
         actions = rng.sample(actions, budget)
-    rows, terms = afterstate_rows(fork, seat, actions, extractor)
+    rows, terms, copies = afterstate_rows(fork, seat, actions, extractor,
+                                          keep_copies=True)
     values = net.value_batch(np.stack(rows))
     scores = [t if t is not None else v for t, v in zip(terms, values)]
+    if search is not None and search.top_k > 0 and len(actions) > 1:
+        # Myopic screen -> playouts for the top-k. Terminal candidates
+        # keep their exact outcome; the final argmax is over the refined
+        # top-k only (myopic and playout values are not on one scale).
+        turn0 = obs.get("turn", 0)
+        was_pregame = bool(obs.get("pregame"))
+        order = sorted(range(len(scores)), key=lambda i: scores[i],
+                       reverse=True)[:search.top_k]
+        refined = [-1.0] * len(scores)
+        for i in order:
+            if terms[i] is not None:
+                refined[i] = terms[i]
+                continue
+            try:
+                total = 0.0
+                for p in range(search.playouts):
+                    sim = copies[i].clone()
+                    total += playout_value(
+                        sim, seat, net, extractor, rng, turn0, was_pregame,
+                        search,
+                        epsilon=0.0 if p == 0 else search.playout_epsilon)
+                refined[i] = total / search.playouts
+            except ValueError:
+                # Upstream engine fault inside a playout clone (the
+                # built-in handcrafted policy can return no action, seen
+                # on 0.3.0): the CLONE is stuck, not the real game, so
+                # fall back to this candidate's myopic screen value.
+                refined[i] = float(scores[i])
+        scores = refined
     best = int(np.argmax(scores))
     return actions[best]["index"], rows[best], float(scores[best])
 
@@ -166,7 +347,7 @@ def td_targets(values, z, lam=TD_LAMBDA):
 
 def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                        max_eval, opponent_net=None, learner_seat=None,
-                       lam=TD_LAMBDA):
+                       lam=TD_LAMBDA, search=None, prior_frac=PRIOR_FRACTION):
     """One external-mode game; returns (rows, targets, stats).
 
     Mirror mode (opponent_net None) plays and records both seats with the
@@ -189,13 +370,15 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         if opponent_net is not None and seat != learner_seat:
             index, feats, value = choose(
                 fork, obs, opponent_net, extractor, rng,
-                epsilon=0.0, max_eval=max_eval, depth=len(history))
+                epsilon=0.0, max_eval=max_eval, depth=len(history),
+                search=search)
             if feats is not None:
                 value = net.value(feats)  # learner-net bootstrap
         else:
             index, feats, value = choose(
                 fork, obs, net, extractor, rng, epsilon,
-                max_eval, depth=len(history))
+                max_eval, depth=len(history), search=search,
+                prior_frac=prior_frac)
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -224,7 +407,8 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
 
 def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
-                          max_eval, learner_seat, lam=TD_LAMBDA):
+                          max_eval, learner_seat, lam=TD_LAMBDA, search=None,
+                          prior_frac=PRIOR_FRACTION):
     """One league game vs penta's built-in handcrafted bot.
 
     Only the learner's seat is observed and recorded (reconstruction
@@ -244,7 +428,8 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         obs = json.loads(game.observe())
         index, feats, value = choose(
             make_fork(make_game, history, game), obs, net, extractor, rng,
-            epsilon, max_eval, depth=len(history))
+            epsilon, max_eval, depth=len(history), search=search,
+            prior_frac=prior_frac)
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -276,7 +461,7 @@ def _worker_init(hidden, frozen_paths):
 
 
 def _worker_play(task):
-    weights, games, max_eval, lam = task
+    weights, games, max_eval, lam, search, prior_frac = task
     net = _WORKER["net"]
     net.set_weights(weights)
     extractor = _WORKER["extractor"]
@@ -288,14 +473,16 @@ def _worker_play(task):
             if mode == "handcrafted":
                 rows, targets, stats = play_handcrafted_game(
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
-                    max_eval, learner_seat, lam=lam)
+                    max_eval, learner_seat, lam=lam, search=search,
+                    prior_frac=prior_frac)
             else:
                 opponent_net = (_WORKER["frozen"][frozen_idx]
                                 if mode == "frozen" else None)
                 rows, targets, stats = play_selfplay_game(
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, opponent_net=opponent_net,
-                    learner_seat=learner_seat, lam=lam)
+                    learner_seat=learner_seat, lam=lam, search=search,
+                    prior_frac=prior_frac)
         except ValueError as error:
             # Upstream engine fault mid-game (seen on 0.3.0: "the scripted
             # opponent returned no action" from the built-in handcrafted
@@ -394,6 +581,31 @@ def main():
     parser.add_argument("--epsilon-start", type=float, default=0.25)
     parser.add_argument("--epsilon-final", type=float, default=0.03)
     parser.add_argument("--max-eval", type=int, default=16)
+    parser.add_argument("--search-topk", type=int,
+                        default=DEFAULT_SEARCH.top_k,
+                        help="candidates surviving the myopic screen into "
+                             "rollout playouts; 0 disables search (plain "
+                             "1-ply afterstate policy)")
+    parser.add_argument("--playouts", type=int,
+                        default=DEFAULT_SEARCH.playouts,
+                        help="playouts per candidate (2+ adds "
+                             "playout-epsilon noise past the first)")
+    parser.add_argument("--playout-budget", type=int,
+                        default=DEFAULT_SEARCH.budget,
+                        help="max penta-decisions per playout before the "
+                             "boundary evaluation")
+    parser.add_argument("--playout-max-eval", type=int,
+                        default=DEFAULT_SEARCH.playout_max_eval,
+                        help="candidates the in-playout greedy 1-ply "
+                             "evaluates per decision")
+    parser.add_argument("--playout-epsilon", type=float,
+                        default=DEFAULT_SEARCH.playout_epsilon,
+                        help="uniform-noise rate for playouts 2..n")
+    parser.add_argument("--prior-frac", type=float, default=PRIOR_FRACTION,
+                        help="fraction of exploration draws taken from the "
+                             "first_bot-shaped aggression prior (land > "
+                             "biggest castable > attack); the rest stay "
+                             "uniform")
     parser.add_argument("--td-lambda", type=float, default=TD_LAMBDA,
                         help="TD lambda per recorded decision; 1.0 (default)"
                              " = pure outcome targets, no bootstrapping")
@@ -427,10 +639,19 @@ def main():
     net = Net(extractor.size, hidden=args.hidden, seed=1)
     if args.init:
         net = Net.load(args.init)
+    search = None
+    if args.search_topk > 0:
+        search = SearchConfig(
+            top_k=args.search_topk, playouts=args.playouts,
+            budget=args.playout_budget,
+            playout_max_eval=args.playout_max_eval,
+            playout_epsilon=args.playout_epsilon)
     print(f"engine {extractor.engine_version} protocol "
           f"{extractor.protocol_version}; features {extractor.size} "
           f"({extractor.defs} defs x 5 zones + {extractor.n_scalars} scalars); "
           f"td-lambda {args.td_lambda:.2f}")
+    print(f"search: {search if search else 'off (1-ply afterstates)'}; "
+          f"prior-frac {args.prior_frac:.2f}")
     if args.league_handcrafted or args.league_frozen:
         frozen_frac = LEAGUE_FROZEN_FRACTION if args.league_frozen else 0.0
         print(f"league: handcrafted {args.league_handcrafted:.2f}, frozen "
@@ -469,7 +690,8 @@ def main():
             per_worker = [game_specs[w::args.workers]
                           for w in range(args.workers)]
             weights = net.get_weights()
-            tasks = [(weights, chunk, args.max_eval, args.td_lambda)
+            tasks = [(weights, chunk, args.max_eval, args.td_lambda,
+                      search, args.prior_frac)
                      for chunk in per_worker if chunk]
             results = pool.map(_worker_play, tasks)
 
@@ -504,7 +726,8 @@ def main():
             net.save(args.out,
                      engine_version=extractor.engine_version,
                      protocol_version=extractor.protocol_version,
-                     hidden=args.hidden, games=played)
+                     hidden=args.hidden, games=played,
+                     search_topk=args.search_topk)
             rate = played / (time.time() - t_start)
             print(f"games {played:5d}  eps {epsilon:.3f}  "
                   f"loss {np.mean(losses):.4f}  "

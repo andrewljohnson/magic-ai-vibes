@@ -90,6 +90,12 @@ class Extractor:
         self.card_kind = {
             card["definition"]: card["kind"] for card in catalog["cards"]
         }
+        # Printed power per definition (0 for non-creatures); used by the
+        # trainer's first_bot-shaped exploration prior, not by features.
+        self.card_power = {
+            card["definition"]: card.get("power") or 0
+            for card in catalog["cards"]
+        }
         self.n_scalars = len(self._scalars_of_empty())
         self.size = 5 * self.defs + self.n_scalars
 

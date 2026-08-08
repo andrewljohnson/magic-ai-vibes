@@ -32,7 +32,7 @@ import numpy as np
 
 from extractor import Extractor, import_penta
 from net import Net
-from trainer import choose, make_fork, matchup
+from trainer import DEFAULT_SEARCH, SearchConfig, choose, make_fork, matchup
 
 # Action-type buckets for the contested-decision distribution.
 BUCKETS = (
@@ -60,7 +60,7 @@ def bucket(action_type):
 
 
 def play_probe_game(net, extractor, penta, my_seat, d1, d2, seed, max_eval,
-                    rng):
+                    rng, search=None):
     """One greedy game vs handcrafted; returns a per-game record dict."""
     opponent_seat = "p2" if my_seat == "p1" else "p1"
 
@@ -88,7 +88,8 @@ def play_probe_game(net, extractor, penta, my_seat, d1, d2, seed, max_eval,
         try:
             index, _, _ = choose(make_fork(make_game, history, game), obs,
                                  net, extractor, rng, epsilon=0.0,
-                                 max_eval=max_eval, depth=len(history))
+                                 max_eval=max_eval, depth=len(history),
+                                 search=search)
             game.act(index)
         except ValueError:
             engine_error = True  # upstream 0.3.0 fault; drop the game
@@ -155,19 +156,19 @@ def _init(net_path):
 
 
 def _play(task):
-    my_seat, d1, d2, seed, max_eval = task
+    my_seat, d1, d2, seed, max_eval, search = task
     rng = random.Random(seed)
     return play_probe_game(_WORKER["net"], _WORKER["extractor"],
                            _WORKER["penta"], my_seat, d1, d2, seed,
-                           max_eval, rng)
+                           max_eval, rng, search=search)
 
 
-def run_games(net_path, games, seed_base, max_eval, workers):
+def run_games(net_path, games, seed_base, max_eval, workers, search=None):
     tasks = []
     for g in range(games):
         my_seat = "p1" if g % 2 == 0 else "p2"
         d1, d2 = matchup(g // 2)
-        tasks.append((my_seat, d1, d2, seed_base + g, max_eval))
+        tasks.append((my_seat, d1, d2, seed_base + g, max_eval, search))
     t0 = time.time()
     with Pool(workers, initializer=_init, initargs=(net_path,)) as pool:
         records = pool.map(_play, tasks)
@@ -277,16 +278,29 @@ def main():
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--samples", type=int, default=300,
                         help="mid-game observations for transform probes")
+    parser.add_argument("--search-topk", type=int, default=0,
+                        help="rollout-search top-k for BOTH nets' play "
+                             "(default 0 = plain 1-ply, the historical "
+                             "probe setting)")
     args = parser.parse_args()
+
+    search = None
+    if args.search_topk > 0:
+        search = SearchConfig(
+            top_k=args.search_topk, playouts=DEFAULT_SEARCH.playouts,
+            budget=DEFAULT_SEARCH.budget,
+            playout_max_eval=DEFAULT_SEARCH.playout_max_eval,
+            playout_epsilon=DEFAULT_SEARCH.playout_epsilon)
 
     extractor = Extractor()
     print(f"probe: {args.games} fixed-seed games vs handcrafted per net, "
-          f"seeds {args.seed_base}+, engine {extractor.engine_version}")
+          f"seeds {args.seed_base}+, engine {extractor.engine_version}, "
+          f"search {search if search else 'off (1-ply)'}")
     sides = []
     for path, label in ((args.net_a, args.label_a),
                         (args.net_b, args.label_b)):
         records = run_games(path, args.games, args.seed_base, args.max_eval,
-                            args.workers)
+                            args.workers, search=search)
         summary = behavior_summary(records)
         cal_rows, cal_stats = calibration(records)
         # Fixed-seed subsample of mid-game states for the transform probes.
