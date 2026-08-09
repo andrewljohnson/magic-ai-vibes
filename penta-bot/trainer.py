@@ -174,6 +174,190 @@ def afterstate_rows(fork, seat, actions, extractor, keep_copies=False):
     return rows, terminals
 
 
+# -- no-upside-versus-pass dominance prune -------------------------------
+#
+# Port of our C++ engine's dominance prune: before the value screen, a
+# candidate whose settled afterstate leaves the OPPONENT nowhere worse
+# and US nowhere better with at least one strict loss -- compared against
+# the no-op pass branch -- is discarded. The scouting corpus caught the
+# class of blunder this kills: Ancestral Recall cast AT the opponent
+# (seed 9101102 t13), Fireball aimed at our own creature (9100103 t20),
+# Strip Mine cracking our own Mountain (9100200 t3) -- all strictly
+# dominated by passing, all mispriced inside 1-ply/short-playout noise.
+#
+# The baseline is the CURRENT observation: a pure pass preserves the
+# status quo, and whatever the opponent does afterwards happens in both
+# branches (with a scripted opponent the literal pass afterstate already
+# contains their response, so it cannot serve as a no-op baseline).
+#
+# Card-agnostic and rules-derived; every ambiguity FAILS CLOSED (the
+# action is kept): non-empty starting stack, settling that hits a real
+# branching decision / a terminal / the step budget / a different
+# turn-step context (this also covers window-ending situations),
+# stat-changed permanents (combat tricks are incomparable, not worse),
+# mana-pool gains (rituals), and cards whose rules text signals effects
+# invisible to the observation snapshot (extra turns, until-end-of-turn
+# grants, prevention, regeneration -- extractor.invisible_upside_defs)
+# whenever the play's visible consequence is only our own hand
+# shrinking. Tapped/attacking state and mana differences never count as
+# "strictly worse". Only CastSpell and ActivateAbility candidates are
+# tested (nothing else is prunable), the only non-pass action is never
+# pruned, and Pass itself is exempt.
+
+PRUNE_SETTLE_STEPS = 24
+_PRUNABLE_TYPES = frozenset({"CastSpell", "ActivateAbility"})
+
+
+def _card_multiset(cards):
+    counts = {}
+    for card in cards or ():
+        counts[card["definition"]] = counts.get(card["definition"], 0) + 1
+    return counts
+
+
+def _sub_multiset(a, b):
+    """Every count in `a` is covered by `b`."""
+    return all(b.get(key, 0) >= n for key, n in a.items())
+
+
+def _dominance_state(obs, seat):
+    """The comparable slice of one observation, from `seat`'s view.
+    Battlefield elements carry (definition, power, toughness) so a
+    stat-changed permanent compares as incomparable, never as equal."""
+    me = 0 if seat == "p1" else 1
+    opp = 1 - me
+    seat_names = ("p1", "p2")
+    my_bf, opp_bf = {}, {}
+    for perm in obs.get("battlefield", ()):
+        key = (perm["definition"], perm["power"], perm["toughness"])
+        side = my_bf if perm["controller"] == seat_names[me] else opp_bf
+        side[key] = side.get(key, 0) + 1
+    graveyards = obs.get("graveyards") or ((), ())
+    exiles = obs.get("exiles") or ((), ())
+    return {
+        "turn": obs.get("turn"), "step": obs.get("step"),
+        "my_hand": len(obs.get("hand", ())),
+        "my_life": obs["life"][me],
+        "my_lib": obs["librarySizes"][me],
+        "my_bf": my_bf,
+        "my_mana": sum(obs["manaPools"][me].values()),
+        "opp_hand": obs.get("opponentHandSize", 0),
+        "opp_life": obs["life"][opp],
+        "opp_bf": opp_bf,
+        "opp_gy": _card_multiset(graveyards[opp] if len(graveyards) > opp
+                                 else ()),
+        "opp_exile": _card_multiset(exiles[opp] if len(exiles) > opp
+                                    else ()),
+    }
+
+
+def _settle_all_pass(copy, budget=PRUNE_SETTLE_STEPS):
+    """Advance an afterstate copy until its stack is empty, answering
+    every priority with PassPriority (forced moves taken as-is). Returns
+    True when settled; False FAILS CLOSED (terminal result, a branching
+    decision with no pass available, or budget exhausted)."""
+    for _ in range(budget):
+        if copy.result() is not None:
+            return False
+        obs = json.loads(copy.observe())
+        if not obs.get("stack"):
+            return True
+        actions = obs["legalActions"]
+        if len(actions) == 1:
+            copy.act(actions[0]["index"])
+            continue
+        passes = [a for a in actions if a["type"] == "PassPriority"]
+        if not passes:
+            return False
+        copy.act(passes[0]["index"])
+    return False
+
+
+def _dominated_by_pass(cand, base, invisible_upside):
+    """True when the settled candidate state is strictly dominated by the
+    status-quo (pass) state. See the prune commentary for the guards."""
+    # Same settled context only.
+    if cand["turn"] != base["turn"] or cand["step"] != base["step"]:
+        return False
+    # Opponent nowhere worse: kept all permanents (stats included), hand,
+    # life, and every graveyard/exile card they already had.
+    if cand["opp_hand"] < base["opp_hand"]:
+        return False
+    if cand["opp_life"] < base["opp_life"]:
+        return False
+    if not _sub_multiset(base["opp_bf"], cand["opp_bf"]):
+        return False
+    if not _sub_multiset(base["opp_gy"], cand["opp_gy"]):
+        return False
+    if not _sub_multiset(base["opp_exile"], cand["opp_exile"]):
+        return False
+    # We nowhere better: no gained/changed permanents, hand, life,
+    # library, or floating mana (rituals are upside, not waste).
+    if cand["my_hand"] > base["my_hand"]:
+        return False
+    if cand["my_life"] > base["my_life"]:
+        return False
+    if cand["my_lib"] > base["my_lib"]:
+        return False
+    if not _sub_multiset(cand["my_bf"], base["my_bf"]):
+        return False
+    if cand["my_mana"] > base["my_mana"]:
+        return False
+    # ... and somewhere strictly worse.
+    strict = (cand["my_hand"] < base["my_hand"]
+              or cand["my_life"] < base["my_life"]
+              or cand["my_lib"] < base["my_lib"]
+              or cand["my_bf"] != base["my_bf"])
+    if not strict:
+        return False
+    # Invisible-upside guard: a card whose rules text can act outside
+    # the compared snapshot (extra turns, until-end-of-turn grants,
+    # prevention, regeneration) fails closed.
+    return not invisible_upside
+
+
+def dominance_prune(fork, obs, actions, extractor):
+    """Drop candidates with no upside versus passing; see commentary.
+    Always returns a non-empty subset of `actions` containing Pass and
+    at least one non-pass action (with no pass present, a lone non-pass
+    action, or any failed guard the list comes back untouched)."""
+    seat = obs["seat"]
+    if obs.get("pregame") or obs.get("stack"):
+        return actions
+    passes = [a for a in actions if a["type"] == "PassPriority"]
+    if not passes:
+        return actions
+    non_pass = [a for a in actions if a["type"] != "PassPriority"]
+    testable = [a for a in non_pass if a["type"] in _PRUNABLE_TYPES]
+    if len(non_pass) < 2 or not testable:
+        return actions
+    base = _dominance_state(obs, seat)
+    # Candidate card definitions: CastSpell carries the hand instance,
+    # ActivateAbility the battlefield source instance. Unmappable ids
+    # count as invisible-upside (fail closed).
+    instance_def = {c.get("instance", c.get("objectId")): c["definition"]
+                    for c in obs.get("hand", ())}
+    instance_def.update({p["instance"]: p["definition"]
+                         for p in obs.get("battlefield", ())})
+    pruned = set()
+    for action in testable:
+        inst = action.get("card", action.get("source"))
+        definition = instance_def.get(inst)
+        upside = (definition is None
+                  or definition in extractor.invisible_upside_defs)
+        copy = fork()
+        copy.act(action["index"])
+        if not _settle_all_pass(copy):
+            continue
+        cand = _dominance_state(json.loads(copy.observe(seat)), seat)
+        if _dominated_by_pass(cand, base, upside):
+            pruned.add(action["index"])
+    if not pruned or len(pruned) == len(non_pass):
+        # Never remove every non-pass action (fail closed on a sweep).
+        return actions
+    return [a for a in actions if a["index"] not in pruned]
+
+
 def aggression_prior(actions, extractor, rng, obs=None):
     """First_bot-shaped exploration draw: play a land, else cast the
     biggest thing castable, else declare an attacker, else uniform.
@@ -291,13 +475,19 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
 
 
 def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
-           search=None, prior_frac=PRIOR_FRACTION):
+           search=None, prior_frac=PRIOR_FRACTION, dominance=True):
     """Epsilon-greedy rollout-search choice (1-ply when search is None).
 
     Returns (action_index, features, value); features/value are None for
     forced moves, which are not recorded in the trajectory. The value of
     a searched choice is its playout score (the record the TD targets
     bootstrap from at lambda < 1).
+
+    Greedy candidates pass through the no-upside-versus-pass dominance
+    prune (dominance=False restores the raw screen, e.g. to replay old
+    trajectories). Exploration draws are NOT pruned: dominated actions
+    stay in the exploration support (checks C3/H4), the prune only
+    protects the exploitation path.
     """
     actions = obs["legalActions"]
     if len(actions) == 1:
@@ -316,6 +506,9 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
     budget = eval_budget(depth, max_eval)
     if len(actions) > budget:
         actions = rng.sample(actions, budget)
+    if dominance:
+        # Always leaves >= 2 actions (pass plus at least one non-pass).
+        actions = dominance_prune(fork, obs, actions, extractor)
     rows, terms, copies = afterstate_rows(fork, seat, actions, extractor,
                                           keep_copies=True)
     values = net.value_batch(np.stack(rows))

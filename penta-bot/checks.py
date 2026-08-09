@@ -319,8 +319,11 @@ def check_c_sampling_uniform():
     fork = make_fork(make_game, history)
     for t in range(trials):
         rng = random.Random(t)
+        # dominance=False: this check probes the SAMPLER's distribution;
+        # the prune legitimately empties some slots (section I covers it).
         index, _, _ = choose(fork, obs, net, EX, rng,
-                             epsilon=0.0, max_eval=4, depth=len(history))
+                             epsilon=0.0, max_eval=4, depth=len(history),
+                             dominance=False)
         hist[index] += 1
     n = len(acts)
     first4 = sum(hist[a["index"]] for a in acts[:4])
@@ -673,6 +676,227 @@ def check_h_playout_and_search():
           found > 0 and taken == found, f"{taken}/{found}")
 
 
+# ---------------------------------------------------------------- I -----
+#
+# No-upside-versus-pass dominance prune. I1-I3 replay the three scouted
+# blunder decisions (scout.py corpus, net = the era's deliverable
+# ckpt-search-7000) with the prune DISABLED to reach the exact historical
+# state, then assert the prune predicate kills the blunder action while
+# the legitimate targeted plays in the SAME state survive. I4 plays live
+# games with the prune active and audits its invariants.
+
+SCOUT_NET = "penta_net.ckpt-search-7000.npz"
+
+
+def _cast_targets(action):
+    return [t for sel in (action.get("choices") or {}).get(
+                "targetSelections", ())
+            for t in sel.get("targets", ())]
+
+
+def _replay_to(net, ex, our_deck, their_deck, my_seat, seed, pred):
+    """Re-drive a scout game (greedy, DEFAULT_SEARCH, prune off) to the
+    first decision where pred(obs) is truthy; returns (obs, fork)."""
+    opponent_seat = "p2" if my_seat == "p1" else "p1"
+    d1, d2 = ((our_deck, their_deck) if my_seat == "p1"
+              else (their_deck, our_deck))
+
+    def make_game():
+        return penta.Game(d1, d2, opponent="handcrafted",
+                          opponent_seat=opponent_seat, seed=seed)
+
+    game = make_game()
+    rng = random.Random(seed)
+    history = []
+    while game.result() is None and len(history) < 3000:
+        obs = json.loads(game.observe())
+        fork = make_fork(make_game, history, game)
+        if pred(obs):
+            return obs, fork
+        index, _, _ = choose(fork, obs, net, ex, rng, epsilon=0.0,
+                             max_eval=16, depth=len(history),
+                             search=DEFAULT_SEARCH, dominance=False)
+        game.act(index)
+        history.append(index)
+    return None, None
+
+
+def _prune_case(name, obs, fork, blunder, survivors, ex):
+    """Run dominance_prune on the state's full action list and assert the
+    blunder is dropped while every legitimate survivor action remains."""
+    if obs is None:
+        check(name, False, "replay never reached the scouted decision")
+        return
+    kept = trainer.dominance_prune(fork, obs, obs["legalActions"], ex)
+    kept_idx = {a["index"] for a in kept}
+    ok = blunder["index"] not in kept_idx
+    missing = [a["index"] for a in survivors if a["index"] not in kept_idx]
+    check(name, ok and not missing,
+          f"pruned {len(obs['legalActions']) - len(kept)}/"
+          f"{len(obs['legalActions'])}; blunder "
+          f"{'pruned' if ok else 'KEPT'}; "
+          f"{len(survivors) - len(missing)}/{len(survivors)} legit kept")
+
+
+def check_i_scouted_blunders():
+    import os
+    if not os.path.exists(SCOUT_NET):
+        check("I1-I3 scouted blunder regressions", False,
+              f"{SCOUT_NET} missing")
+        return
+    net = Net.load(SCOUT_NET)
+    ex = Extractor.for_inputs(net.inputs)
+
+    # I1: Ancestral Recall cast AT THE OPPONENT (The Deck vs Counterburn,
+    # seat p1, seed 9101102, turn 13 Draw). Aiming it at ourselves is the
+    # legitimate line and must survive.
+    def hand_name(obs, action):
+        names = {c["instance"]: c["name"] for c in obs.get("hand", ())}
+        return names.get(action.get("card"))
+
+    def ancestral_casts(obs):
+        out = {"blunder": None, "legit": []}
+        for a in obs["legalActions"]:
+            if a["type"] != "CastSpell" or hand_name(obs, a) != \
+                    "Ancestral Recall":
+                continue
+            for t in _cast_targets(a):
+                if t.get("type") == "player" and t.get("seat") == "p2":
+                    out["blunder"] = a
+                elif t.get("type") == "player" and t.get("seat") == "p1":
+                    out["legit"].append(a)
+        return out
+
+    def pred1(obs):
+        if obs.get("turn") != 13 or obs.get("step") != "Draw" \
+                or obs.get("stack"):
+            return False
+        return ancestral_casts(obs)["blunder"] is not None
+
+    obs, fork = _replay_to(net, ex, "The Deck", "Counterburn", "p1",
+                           9101102, pred1)
+    found = ancestral_casts(obs) if obs else {"blunder": None, "legit": []}
+    _prune_case("I1 Ancestral Recall at the opponent is pruned "
+                "(cast at self survives)", obs, fork,
+                found["blunder"] or {"index": -1}, found["legit"], ex)
+
+    # I2: Fireball aimed at our own Goblin Balloon Brigade (Sligh vs
+    # White Weenie, seat p2, seed 9100103, turn 20 PrecombatMain). The
+    # engine enumerates these casts at x=0 -- pure card waste either
+    # way. Plays with real upside in the SAME state (land drops,
+    # creature casts) must survive.
+    def fireball_casts(obs):
+        mine = {p["instance"]: p["name"] for p in obs.get("battlefield", ())
+                if p["controller"] == "p2"}
+        hand_defs = {c["instance"]: c["definition"]
+                     for c in obs.get("hand", ())}
+        out = {"blunder": None, "legit": []}
+        for a in obs["legalActions"]:
+            if a["type"] == "PlayLand":
+                out["legit"].append(a)
+            if a["type"] != "CastSpell":
+                continue
+            if hand_name(obs, a) == "Fireball":
+                for t in _cast_targets(a):
+                    if mine.get(t.get("instance")) == \
+                            "Goblin Balloon Brigade":
+                        out["blunder"] = a
+            elif EX.card_kind.get(hand_defs.get(a.get("card"))) in (
+                    "Creature", "ArtifactCreature"):
+                out["legit"].append(a)
+        return out
+
+    def pred2(obs):
+        if obs.get("turn") != 20 or obs.get("step") != "PrecombatMain" \
+                or obs.get("stack"):
+            return False
+        return fireball_casts(obs)["blunder"] is not None
+
+    obs, fork = _replay_to(net, ex, "Sligh", "White Weenie", "p2",
+                           9100103, pred2)
+    found = fireball_casts(obs) if obs else {"blunder": None, "legit": []}
+    _prune_case("I2 Fireball at our own creature is pruned (land/creature "
+                "plays survive)", obs, fork,
+                found["blunder"] or {"index": -1}, found["legit"], ex)
+
+    # I3: Strip Mine cracked on our OWN Mountain (Sligh vs The Deck, seat
+    # p1, seed 9100200, turn 3 PostcombatMain). Strip Mine pointed at any
+    # opposing land must survive (when the engine offers one).
+    def stripmine_acts(obs):
+        perms = {p["instance"]: p for p in obs.get("battlefield", ())}
+        out = {"blunder": None, "legit": []}
+        for a in obs["legalActions"]:
+            if a["type"] != "ActivateAbility":
+                continue
+            source = perms.get(a.get("source"))
+            if source is None or source["name"] != "Strip Mine":
+                continue
+            target = perms.get((a.get("target") or {}).get("instance"))
+            if target is None:
+                continue
+            if target["controller"] == "p1" and target["name"] == "Mountain":
+                out["blunder"] = a
+            elif target["controller"] == "p2":
+                out["legit"].append(a)
+        return out
+
+    def pred3(obs):
+        if obs.get("turn") != 3 or obs.get("step") != "PostcombatMain" \
+                or obs.get("stack"):
+            return False
+        return stripmine_acts(obs)["blunder"] is not None
+
+    obs, fork = _replay_to(net, ex, "Sligh", "The Deck", "p1",
+                           9100200, pred3)
+    found = stripmine_acts(obs) if obs else {"blunder": None, "legit": []}
+    _prune_case("I3 Strip Mine on our own Mountain is pruned (opposing-"
+                "land targets survive)", obs, fork,
+                found["blunder"] or {"index": -1}, found["legit"], ex)
+
+
+def check_i_prune_invariants():
+    """Live games with the prune active: the filtered list is always a
+    non-empty subset that keeps Pass and at least one non-pass action,
+    and games still complete."""
+    net = Net(EX.size, hidden=8, seed=13)
+    stats_log = []
+    violations = []
+    real = trainer.dominance_prune
+
+    def spy(fork, obs, actions, ex):
+        kept = real(fork, obs, actions, ex)
+        stats_log.append((len(actions), len(kept)))
+        kept_idx = {a["index"] for a in kept}
+        all_idx = {a["index"] for a in actions}
+        if not kept or not kept_idx <= all_idx:
+            violations.append("not a subset / empty")
+        had_pass = any(a["type"] == "PassPriority" for a in actions)
+        has_pass = any(a["type"] == "PassPriority" for a in kept)
+        if had_pass and not has_pass:
+            violations.append("pass removed")
+        if len(kept) < len(actions) and not any(
+                a["type"] != "PassPriority" for a in kept):
+            violations.append("all non-pass actions pruned")
+        return kept
+
+    trainer.dominance_prune = spy
+    try:
+        completed = 0
+        for seed in (700, 701, 702, 703):
+            rng = random.Random(seed)
+            _, _, stats = trainer.play_selfplay_game(
+                net, EX, penta, "Sligh", "The Deck", seed, 0.1, rng,
+                max_eval=8)
+            completed += stats["result"] in ("p1", "p2", "draw", "cap")
+    finally:
+        trainer.dominance_prune = real
+    pruned_calls = sum(1 for n_in, n_out in stats_log if n_out < n_in)
+    check("I4 prune invariants hold in live games",
+          completed == 4 and stats_log and not violations,
+          f"{completed}/4 games, {len(stats_log)} prune calls, "
+          f"{pruned_calls} pruned decisions, violations={violations[:3]}")
+
+
 def main():
     print("A. seat/perspective labels")
     check_a_observe_default_seat()
@@ -698,6 +922,9 @@ def main():
     check_h_aggression_prior()
     check_h_playout_boundary()
     check_h_playout_and_search()
+    print("I. dominance prune (no upside versus pass)")
+    check_i_scouted_blunders()
+    check_i_prune_invariants()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

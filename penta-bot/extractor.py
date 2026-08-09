@@ -142,6 +142,19 @@ class Extractor:
             if (card.get("power") is not None
                     and (card.get("rulesText") or "").startswith("Flying")):
                 self.flying_defs.add(card["definition"])
+        # Definitions whose rules text signals effects INVISIBLE to an
+        # observation snapshot (extra turns, until-end-of-turn grants,
+        # damage prevention/protection, regeneration shields). The
+        # dominance prune fails closed on these: a play that changes
+        # nothing visible may still carry this upside. Text-derived, so
+        # future cards with these effects are covered automatically.
+        markers = ("extra turn", "until end of turn", "prevent",
+                   "protection from", "regenerate")
+        self.invisible_upside_defs = {
+            card["definition"] for card in catalog["cards"]
+            if any(marker in (card.get("rulesText") or "").lower()
+                   for marker in markers)
+        }
         self.n_scalars = len(self._scalars_of_empty())
         self.v1_size = 5 * self.defs + self.n_scalars
         self.size = self.v1_size
