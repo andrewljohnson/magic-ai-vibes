@@ -37,3 +37,13 @@
       kept penta_net.npz (ckpt-23000 handcrafted 5.0% <= 17.5%)
 === curve run complete Fri Aug  7 22:28:16 PDT 2026 ===
 09:20 SEARCH-ERA smoke gate: handcrafted 33.3% (LCB 25.5%) — promoted penta_net_latest -> penta_net.npz (beats all-time 1-ply best 17.5%)
+=== search-era curve run Sun Aug  9 09:56:47 PDT 2026 | search topk 4 at train+gate | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps 0.10->0.08, td-lambda 1.0, ring continued + lr-warmup 200 | from penta_net_latest.npz (ckpt-search-3000, 3000 games) | promotion bar 33.3% (search smoke gate) ===
+10:35 cumulative-games=5000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [11s, 5.35 games/s] | handcrafted: vs handcrafted  120 games: 42 wins, 0 draws ->  35.0% (LCB  27.1%)  [35s, 3.47 games/s]
+      promoted ckpt-search-5000 -> penta_net.npz (handcrafted 35.0% > 33.3%)
+11:06 cumulative-games=7000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [6s, 10.79 games/s] | handcrafted: vs handcrafted  120 games: 45 wins, 0 draws ->  37.5% (LCB  29.4%)  [34s, 3.58 games/s]
+      promoted ckpt-search-7000 -> penta_net.npz (handcrafted 37.5% > 35.0%)
+11:40 cumulative-games=9000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [20s, 3.02 games/s] | handcrafted: vs handcrafted  120 games: 42 wins, 0 draws ->  35.0% (LCB  27.1%)  [50s, 2.39 games/s]
+      kept penta_net.npz (ckpt-search-9000 handcrafted 35.0% <= 37.5%)
+12:18 cumulative-games=11000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [14s, 4.38 games/s] | handcrafted: vs handcrafted  120 games: 43 wins, 0 draws ->  35.8% (LCB  27.8%)  [40s, 2.97 games/s]
+      kept penta_net.npz (ckpt-search-11000 handcrafted 35.8% <= 37.5%)
+=== search-era curve run complete Sun Aug  9 12:18:35 PDT 2026 ===
