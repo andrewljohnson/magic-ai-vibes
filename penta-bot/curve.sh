@@ -23,6 +23,7 @@ CHUNKS=${CHUNKS:-"1 2 3"}
 # a previous run's ring.
 RING=${RING:-penta_ring.npz}
 LR_WARMUP=${LR_WARMUP:-200}
+WORKERS=${WORKERS:-8}
 [ "${KEEP_RING:-0}" = 1 ] || rm -f "$RING"
 # START_NET (optional): weights to start the curve from (copied to
 # $LATEST); default keeps whatever $LATEST already holds.
@@ -50,6 +51,7 @@ echo "      baseline: smoke net promoted as initial $BEST_NET (handcrafted ${BES
 for CHUNK in ${=CHUNKS}; do
   FROZEN="penta_net.ckpt-${TOTAL}.npz"
   python3 trainer.py --games 2000 --init "$LATEST" --out "$LATEST" \
+    --workers "$WORKERS" \
     --epsilon-start 0.10 --epsilon-final 0.08 \
     --league-handcrafted 0.15 --league-frozen "$FROZEN" \
     --ring "$RING" --lr-warmup "$LR_WARMUP" \

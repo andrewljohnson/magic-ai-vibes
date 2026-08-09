@@ -1,0 +1,4 @@
+net penta_net_latest.npz: inputs 675, hidden 64, meta {'engine_version': '0.3.0', 'protocol_version': 2, 'hidden': 64, 'games': 3000}
+decks: Sligh, White Weenie, The Deck, Counterburn; alternating seats; seeds from 5000000
+vs random       120 games: 92 wins, 0 draws ->  76.7% (LCB  68.3%)  [87s, 1.38 games/s]
+vs handcrafted  120 games: 19 wins, 0 draws ->  15.8% (LCB  10.4%)  [26s, 4.61 games/s]

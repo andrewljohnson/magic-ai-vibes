@@ -1,0 +1,39 @@
+=== curve run Fri Aug  7 18:08:29 PDT 2026 | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08, td-lambda 1.0 | from fresh v2 smoke net (3000 games) ===
+18:09 cumulative-games=3000 | random: vs random       60 games: 50 wins, 0 draws ->  83.3% (LCB  72.0%)  [13s, 4.62 games/s] | handcrafted: vs handcrafted  120 games: 19 wins, 0 draws ->  15.8% (LCB  10.4%)  [26s, 4.66 games/s]
+      baseline: smoke net promoted as initial penta_net.npz (handcrafted 15.8%)
+18:18 cumulative-games=5000 | random: vs random       60 games: 48 wins, 0 draws ->  80.0% (LCB  68.2%)  [10s, 6.25 games/s] | handcrafted: vs handcrafted  120 games: 11 wins, 0 draws ->   9.2% (LCB   5.2%)  [61s, 1.98 games/s]
+      kept penta_net.npz (ckpt-5000 handcrafted 9.2% <= 15.8%)
+18:25 cumulative-games=7000 | random: vs random       60 games: 47 wins, 1 draws ->  79.2% (LCB  66.4%)  [9s, 6.56 games/s] | handcrafted: vs handcrafted  120 games: 12 wins, 0 draws ->  10.0% (LCB   5.8%)  [47s, 2.57 games/s]
+      kept penta_net.npz (ckpt-7000 handcrafted 10.0% <= 15.8%)
+18:37 cumulative-games=9000 | random: vs random       60 games: 49 wins, 0 draws ->  81.7% (LCB  70.1%)  [9s, 6.59 games/s] | handcrafted: vs handcrafted  120 games: 10 wins, 1 draws ->   8.8% (LCB   4.6%)  [43s, 2.81 games/s]
+      kept penta_net.npz (ckpt-9000 handcrafted 8.8% <= 15.8%)
+=== curve run complete Fri Aug  7 18:37:44 PDT 2026 ===
+=== confirm run Fri Aug  7 18:51:40 PDT 2026 | chunks 4-5, same league mechanics, continuing from 9000 ===
+19:02 cumulative-games=11000 | random: vs random       60 games: 56 wins, 0 draws ->  93.3% (LCB  84.1%)  [6s, 10.55 games/s] | handcrafted: vs handcrafted  120 games: 21 wins, 0 draws ->  17.5% (LCB  11.7%)  [30s, 3.94 games/s]
+      promoted ckpt-11000 -> penta_net.npz (handcrafted 17.5% > 15.8%)
+19:11 cumulative-games=13000 | random: vs random       60 games: 54 wins, 0 draws ->  90.0% (LCB  79.9%)  [8s, 7.63 games/s] | handcrafted: vs handcrafted  120 games: 18 wins, 0 draws ->  15.0% (LCB   9.7%)  [34s, 3.49 games/s]
+      kept penta_net.npz (ckpt-13000 handcrafted 15.0% <= 17.5%)
+=== confirm run complete Fri Aug  7 19:11:01 PDT 2026 ===
+=== curve run Fri Aug  7 19:27:03 PDT 2026 | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08, td-lambda 1.0 | from fresh v2 smoke net (3000 games) ===
+19:27 cumulative-games=3000 | random: vs random       60 games: 54 wins, 0 draws ->  90.0% (LCB  79.9%)  [8s, 7.94 games/s] | handcrafted: vs handcrafted  120 games: 18 wins, 0 draws ->  15.0% (LCB   9.7%)  [40s, 2.98 games/s]
+      baseline: smoke net promoted as initial penta_net.npz (handcrafted 15.0%)
+19:36 cumulative-games=5000 | random: vs random       60 games: 50 wins, 0 draws ->  83.3% (LCB  72.0%)  [7s, 8.97 games/s] | handcrafted: vs handcrafted  120 games: 16 wins, 0 draws ->  13.3% (LCB   8.4%)  [39s, 3.10 games/s]
+      kept penta_net.npz (ckpt-5000 handcrafted 13.3% <= 15.0%)
+19:46 cumulative-games=7000 | random: vs random       60 games: 50 wins, 0 draws ->  83.3% (LCB  72.0%)  [8s, 7.35 games/s] | handcrafted: vs handcrafted  120 games: 12 wins, 0 draws ->  10.0% (LCB   5.8%)  [27s, 4.51 games/s]
+      kept penta_net.npz (ckpt-7000 handcrafted 10.0% <= 15.0%)
+19:55 cumulative-games=9000 | random: vs random       60 games: 44 wins, 1 draws ->  74.2% (LCB  61.0%)  [11s, 5.31 games/s] | handcrafted: vs handcrafted  120 games: 4 wins, 0 draws ->   3.3% (LCB   1.3%)  [40s, 3.01 games/s]
+      kept penta_net.npz (ckpt-9000 handcrafted 3.3% <= 15.0%)
+=== curve run complete Fri Aug  7 19:55:44 PDT 2026 ===
+=== curve run Fri Aug  7 21:27:19 PDT 2026 | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08, td-lambda 1.0, ring persisted + lr-warmup 200 | from penta_net.npz (15000 games) ===
+21:28 cumulative-games=15000 | random: vs random       60 games: 54 wins, 0 draws ->  90.0% (LCB  79.9%)  [13s, 4.58 games/s] | handcrafted: vs handcrafted  120 games: 18 wins, 0 draws ->  15.0% (LCB   9.7%)  [57s, 2.10 games/s]
+      baseline: smoke net promoted as initial penta_net.npz (handcrafted 15.0%)
+21:43 cumulative-games=17000 | random: vs random       60 games: 47 wins, 0 draws ->  78.3% (LCB  66.4%)  [12s, 5.00 games/s] | handcrafted: vs handcrafted  120 games: 7 wins, 0 draws ->   5.8% (LCB   2.9%)  [49s, 2.47 games/s]
+      kept penta_net.npz (ckpt-17000 handcrafted 5.8% <= 15.0%)
+21:57 cumulative-games=19000 | random: vs random       60 games: 49 wins, 0 draws ->  81.7% (LCB  70.1%)  [12s, 4.92 games/s] | handcrafted: vs handcrafted  120 games: 9 wins, 0 draws ->   7.5% (LCB   4.0%)  [42s, 2.88 games/s]
+      kept penta_net.npz (ckpt-19000 handcrafted 7.5% <= 15.0%)
+22:14 cumulative-games=21000 | random: vs random       60 games: 51 wins, 0 draws ->  85.0% (LCB  73.9%)  [9s, 6.70 games/s] | handcrafted: vs handcrafted  120 games: 21 wins, 0 draws ->  17.5% (LCB  11.7%)  [91s, 1.32 games/s]
+      promoted ckpt-21000 -> penta_net.npz (handcrafted 17.5% > 15.0%)
+22:28 cumulative-games=23000 | random: vs random       60 games: 48 wins, 0 draws ->  80.0% (LCB  68.2%)  [9s, 6.95 games/s] | handcrafted: vs handcrafted  120 games: 6 wins, 0 draws ->   5.0% (LCB   2.3%)  [40s, 3.03 games/s]
+      kept penta_net.npz (ckpt-23000 handcrafted 5.0% <= 17.5%)
+=== curve run complete Fri Aug  7 22:28:16 PDT 2026 ===
+09:20 SEARCH-ERA smoke gate: handcrafted 33.3% (LCB 25.5%) — promoted penta_net_latest -> penta_net.npz (beats all-time 1-ply best 17.5%)

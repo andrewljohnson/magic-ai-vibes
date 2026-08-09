@@ -1,0 +1,14 @@
+=== curve run Fri Aug  7 13:14:00 PDT 2026 | starting from smoke net (3000 games) ===
+13:23 cumulative-games=5000 | random: vs random       60 games: 51 wins, 0 draws ->  85.0% (LCB  73.9%)  [8s, 7.63 games/s] | handcrafted: vs handcrafted  120 games: 25 wins, 0 draws ->  20.8% (LCB  14.5%)  [49s, 2.46 games/s]
+13:37 cumulative-games=7000 | random: vs random       60 games: 51 wins, 0 draws ->  85.0% (LCB  73.9%)  [7s, 8.21 games/s] | handcrafted: vs handcrafted  120 games: 7 wins, 0 draws ->   5.8% (LCB   2.9%)  [112s, 1.07 games/s]
+13:50 cumulative-games=9000 | random: vs random       60 games: 47 wins, 0 draws ->  78.3% (LCB  66.4%)  [9s, 6.58 games/s] | handcrafted: vs handcrafted  120 games: 6 wins, 0 draws ->   5.0% (LCB   2.3%)  [64s, 1.86 games/s]
+14:03 cumulative-games=11000 | random: vs random       60 games: 47 wins, 0 draws ->  78.3% (LCB  66.4%)  [8s, 7.34 games/s] | handcrafted: vs handcrafted  120 games: 8 wins, 0 draws ->   6.7% (LCB   3.4%)  [71s, 1.70 games/s]
+=== curve run Fri Aug  7 15:06:08 PDT 2026 | league: handcrafted 0.15 + prev-chunk frozen 0.25, eps floor 0.08 | from restored smoke net (3000 games) ===
+15:06 cumulative-games=3000 | random: vs random       60 games: 56 wins, 1 draws ->  94.2% (LCB  84.1%)  [4s, 15.75 games/s] | handcrafted: vs handcrafted  120 games: 21 wins, 0 draws ->  17.5% (LCB  11.7%)  [38s, 3.18 games/s]
+      baseline: smoke net promoted as initial penta_net.npz (handcrafted 17.5%)
+15:17 cumulative-games=5000 | random: vs random       60 games: 53 wins, 0 draws ->  88.3% (LCB  77.8%)  [6s, 9.97 games/s] | handcrafted: vs handcrafted  120 games: 15 wins, 1 draws ->  12.9% (LCB   7.7%)  [79s, 1.52 games/s]
+      kept penta_net.npz (ckpt-5000 handcrafted 12.9% <= 17.5%)
+15:28 cumulative-games=7000 | random: vs random       60 games: 49 wins, 1 draws ->  82.5% (LCB  70.1%)  [6s, 9.29 games/s] | handcrafted: vs handcrafted  120 games: 11 wins, 0 draws ->   9.2% (LCB   5.2%)  [31s, 3.88 games/s]
+      kept penta_net.npz (ckpt-7000 handcrafted 9.2% <= 17.5%)
+15:41 cumulative-games=9000 | random: vs random       60 games: 45 wins, 0 draws ->  75.0% (LCB  62.8%)  [12s, 5.17 games/s] | handcrafted: vs handcrafted  120 games: 7 wins, 0 draws ->   5.8% (LCB   2.9%)  [93s, 1.29 games/s]
+      kept penta_net.npz (ckpt-9000 handcrafted 5.8% <= 17.5%)

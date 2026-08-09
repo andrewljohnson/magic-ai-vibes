@@ -1,0 +1,37 @@
+engine 0.3.0 protocol 2; features 675 (128 defs x 5 zones + 35 scalars); td-lambda 1.00
+league: handcrafted 0.15, frozen 0.25 across 1 snapshot(s) ['penta_net.ckpt-19000.npz']
+ring: resumed 150000 samples + momentum from penta_ring.npz
+games    64  eps 0.100  loss 0.3240  samples  3343  replay 150000  len 541.2  caps 44   2.05 games/s
+games   128  eps 0.099  loss 0.3222  samples  2520  replay 150000  len 523.1  caps 44   1.88 games/s
+games   192  eps 0.099  loss 0.3165  samples  2975  replay 150000  len 514.2  caps 42   2.12 games/s
+games   256  eps 0.098  loss 0.3189  samples  2663  replay 150000  len 515.4  caps 45   2.19 games/s
+games   320  eps 0.097  loss 0.3293  samples  2267  replay 150000  len 531.3  caps 48   2.04 games/s
+games   384  eps 0.097  loss 0.3269  samples  2138  replay 150000  len 490.7  caps 43   2.11 games/s
+games   448  eps 0.096  loss 0.3222  samples  2021  replay 150000  len 534.9  caps 48   2.06 games/s
+games   512  eps 0.096  loss 0.3235  samples  2122  replay 150000  len 532.3  caps 47   2.17 games/s
+games   576  eps 0.095  loss 0.3191  samples  1667  replay 150000  len 537.5  caps 49   2.01 games/s
+games   640  eps 0.094  loss 0.3443  samples  3031  replay 150000  len 515.8  caps 42   2.03 games/s
+games   704  eps 0.094  loss 0.3130  samples  2011  replay 150000  len 529.0  caps 46   2.09 games/s
+games   768  eps 0.093  loss 0.3261  samples  4419  replay 150000  len 492.3  caps 34   2.10 games/s
+games   832  eps 0.092  loss 0.3465  samples  3303  replay 150000  len 525.4  caps 44   2.14 games/s
+games   896  eps 0.092  loss 0.3369  samples  2064  replay 150000  len 539.3  caps 48   2.15 games/s
+games   960  eps 0.091  loss 0.3131  samples  2415  replay 150000  len 543.2  caps 48   2.15 games/s
+games  1024  eps 0.090  loss 0.3328  samples  2914  replay 150000  len 500.0  caps 40   2.14 games/s
+games  1088  eps 0.090  loss 0.3344  samples  2107  replay 150000  len 516.9  caps 44   2.17 games/s
+games  1152  eps 0.089  loss 0.3287  samples  3516  replay 150000  len 557.0  caps 45   2.19 games/s
+games  1216  eps 0.088  loss 0.3244  samples  4967  replay 150000  len 504.8  caps 35   2.20 games/s
+games  1280  eps 0.088  loss 0.3239  samples  4131  replay 150000  len 510.0  caps 38   2.21 games/s
+games  1344  eps 0.087  loss 0.3308  samples  2955  replay 150000  len 523.5  caps 44   2.20 games/s
+games  1408  eps 0.087  loss 0.3444  samples  3841  replay 150000  len 505.9  caps 38   2.22 games/s
+games  1472  eps 0.086  loss 0.3217  samples  3313  replay 150000  len 523.2  caps 42   2.19 games/s
+games  1536  eps 0.085  loss 0.3143  samples  2983  replay 150000  len 540.2  caps 46   2.20 games/s
+games  1600  eps 0.085  loss 0.3335  samples  3275  replay 150000  len 526.6  caps 41   2.19 games/s
+games  1664  eps 0.084  loss 0.3294  samples  2184  replay 150000  len 481.2  caps 41   2.20 games/s
+games  1728  eps 0.083  loss 0.3265  samples  3558  replay 150000  len 535.3  caps 43   2.20 games/s
+games  1792  eps 0.083  loss 0.3278  samples  4703  replay 150000  len 468.6  caps 29   2.21 games/s
+games  1856  eps 0.082  loss 0.3174  samples  4385  replay 150000  len 519.2  caps 37   2.23 games/s
+games  1920  eps 0.081  loss 0.3333  samples  4730  replay 150000  len 517.4  caps 34   2.23 games/s
+games  1984  eps 0.081  loss 0.3347  samples  3005  replay 150000  len 502.6  caps 40   2.24 games/s
+games  2000  eps 0.080  loss 0.3436  samples   622  replay 150000  len 535.0  caps 11   2.25 games/s
+ring: saved 150000 samples + momentum -> penta_ring.npz
+done: 2000 games -> penta_net_latest.npz

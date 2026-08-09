@@ -1,0 +1,34 @@
+engine 0.1.0 protocol 0; features 675 (128 defs x 5 zones + 35 scalars)
+games    64  eps 0.100  loss 0.5745  samples  9556  replay   9556  len 384.1  caps 5   5.12 games/s
+games   128  eps 0.098  loss 0.5701  samples  9789  replay  19345  len 398.0  caps 7   4.21 games/s
+games   192  eps 0.096  loss 0.5746  samples 11991  replay  31336  len 502.2  caps 22   2.95 games/s
+games   256  eps 0.093  loss 0.5687  samples  9320  replay  40656  len 399.6  caps 7   3.28 games/s
+games   320  eps 0.091  loss 0.5655  samples  8903  replay  49559  len 385.0  caps 7   3.57 games/s
+games   384  eps 0.089  loss 0.5612  samples  8855  replay  58414  len 379.0  caps 7   3.86 games/s
+games   448  eps 0.087  loss 0.5581  samples  9614  replay  68028  len 394.4  caps 6   3.99 games/s
+games   512  eps 0.084  loss 0.5530  samples  9457  replay  77485  len 387.5  caps 5   4.17 games/s
+games   576  eps 0.082  loss 0.5545  samples  9374  replay  86859  len 382.1  caps 7   4.19 games/s
+games   640  eps 0.080  loss 0.5509  samples  9403  replay  96262  len 402.2  caps 7   4.21 games/s
+games   704  eps 0.078  loss 0.5490  samples  9857  replay 106119  len 387.7  caps 4   4.29 games/s
+games   768  eps 0.075  loss 0.5486  samples  9297  replay 115416  len 395.6  caps 9   4.39 games/s
+games   832  eps 0.073  loss 0.5472  samples  9678  replay 125094  len 401.0  caps 7   4.27 games/s
+games   896  eps 0.071  loss 0.5451  samples 10089  replay 135183  len 437.9  caps 15   4.33 games/s
+games   960  eps 0.069  loss 0.5429  samples  9913  replay 145096  len 439.5  caps 17   4.45 games/s
+games  1024  eps 0.066  loss 0.5425  samples  9765  replay 150000  len 420.2  caps 12   4.56 games/s
+games  1088  eps 0.064  loss 0.5410  samples  9920  replay 150000  len 456.5  caps 17   4.65 games/s
+games  1152  eps 0.062  loss 0.5396  samples 10741  replay 150000  len 504.7  caps 33   4.69 games/s
+games  1216  eps 0.060  loss 0.5390  samples 10608  replay 150000  len 497.3  caps 28   4.82 games/s
+games  1280  eps 0.057  loss 0.5415  samples 10894  replay 150000  len 482.5  caps 32   4.88 games/s
+games  1344  eps 0.055  loss 0.5458  samples 11892  replay 150000  len 512.8  caps 32   4.77 games/s
+games  1408  eps 0.053  loss 0.5480  samples 14169  replay 150000  len 504.0  caps 30   4.48 games/s
+games  1472  eps 0.051  loss 0.5468  samples 10872  replay 150000  len 426.3  caps 19   4.50 games/s
+games  1536  eps 0.048  loss 0.5471  samples 10967  replay 150000  len 426.3  caps 14   4.55 games/s
+games  1600  eps 0.046  loss 0.5428  samples 10502  replay 150000  len 397.8  caps 7   4.51 games/s
+games  1664  eps 0.044  loss 0.5411  samples 10414  replay 150000  len 390.2  caps 6   4.43 games/s
+games  1728  eps 0.042  loss 0.5390  samples 11215  replay 150000  len 381.2  caps 8   4.36 games/s
+games  1792  eps 0.040  loss 0.5372  samples 12446  replay 150000  len 420.1  caps 9   4.23 games/s
+games  1856  eps 0.037  loss 0.5320  samples 10994  replay 150000  len 394.0  caps 10   4.15 games/s
+games  1920  eps 0.035  loss 0.5268  samples 11310  replay 150000  len 398.6  caps 9   4.06 games/s
+games  1984  eps 0.033  loss 0.5230  samples 11371  replay 150000  len 394.3  caps 9   3.99 games/s
+games  2000  eps 0.031  loss 0.5212  samples  3154  replay 150000  len 412.4  caps 3   3.97 games/s
+done: 2000 games -> penta_net.npz
