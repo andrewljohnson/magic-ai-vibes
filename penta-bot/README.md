@@ -166,41 +166,109 @@ Uniform exploration was the second half of the passivity trap: aggression
 never entered the replay data, so the value net had no attack
 consequences to learn from even when they would have scored well.
 
+## Lever package (2026-08-09, the v3 era)
+
+Four levers plus a scouted-blunder fix, each validated before the v3
+full-package run (results at the bottom of this file / progress.txt):
+
+1. **Feature schema v2 (825 inputs, versioned).** Saved nets carry their
+   input size; `Extractor.for_inputs()` dispatches old 675-input nets
+   onto the v1 layout, so both eras stay loadable. v2 appends: exact
+   CASTABLE-NOW counts per definition for our hand (from the enumerated
+   `CastSpell` legalActions -- free and exact, zero when this seat holds
+   no decision), hand + castable-now counts per converted-cost bucket
+   (0..5, 6+), and 8 race-math scalars (castable count, max castable
+   cost, life delta, flying power both sides from catalog keyword text,
+   turns-to-kill both directions at current power, attackers available).
+2. **Search config sweep** (120-game fixed-seed handcrafted gates on the
+   37.5% deliverable): topk4/1-playout 37.5% @ 3.56 games/s, topk8/1
+   40.0% @ 1.96, topk4/2 37.5% @ 2.20, topk8/2 35.0% @ 1.50. The +2.5pt
+   for topk8 is inside 120-game noise at 1.8x cost: **topk 4 / 1 playout
+   stays the train+gate config**.
+3. **Per-turn TD(lambda)** (`--td-lambda-per-turn 0.9`): lambda decay at
+   TURN boundaries (turn index recorded per decision; decisions within a
+   turn share one decay step). A 65-decision/10-turn trajectory keeps
+   ~39% outcome weight in its deepest target, vs ~0.1% at the
+   per-decision 0.9 that collapsed (post-mortem below).
+4. **League richness:** DECKS widened to 8 built-ins -- Sligh, White
+   Weenie, The Deck, Counterburn + Goblins (aggro), Erhnamgeddon
+   (midrange), Mono Black (disruption), Jeskai Aggro (tempo). 56 ordered
+   pairs; `PENTA_DECKS` env override reproduces old 4-deck gates.
+   Random-pilot smoke over the new decks: 120 games, 0 engine faults.
+
+## Dominance prune (no upside versus pass)
+
+The scouting corpus (scout.py) caught owner-blind blunders the 1-ply
+screen + short playouts misprice inside noise: Ancestral Recall cast AT
+the opponent (seed 9101102 t13), Fireball aimed at our own Goblin
+Balloon Brigade (9100103 t20), Strip Mine cracking our own Mountain
+(9100200 t3). All are strictly dominated by passing, so the C++
+engine's dominance prune is ported into `choose()` (trainer, gate, and
+scout all inherit it; exploration draws keep full support).
+
+Before the value screen, each CastSpell/ActivateAbility candidate is
+played on a clone and SETTLED (all-pass stack resolution, bounded); it
+is pruned when versus the status-quo baseline the opponent is nowhere
+worse (hand count, life, battlefield multiset keyed by definition AND
+current stats, graveyard/exile) and we are nowhere better with at least
+one strict loss (hand, life, library, battlefield). Every ambiguity
+fails CLOSED: non-empty starting stack, settling that branches /
+terminates / leaves the turn-step context, stat-changed permanents
+(combat tricks are incomparable, not worse), mana-pool gains (rituals),
+and cards whose rules text signals snapshot-invisible effects (extra
+turns, until-end-of-turn grants, prevention, regeneration; text-derived
+from the catalog, 39 definitions, future cards covered automatically).
+Pass itself is exempt and the only non-pass action is never pruned.
+checks.py section I replays all three scouted decisions (blunder
+pruned, legitimate targeted plays in the same state survive) and audits
+the invariants over live games.
+
 ## Files
 
-- `extractor.py` -- observation JSON -> 675-dim float32 vector: 128
-  card-definition counts (from `penta.catalog()`, fetched once) for each of
-  own hand / own battlefield / opponent battlefield / own graveyard /
-  opponent graveyard (5 x 128 = 640), plus 35 global scalars (turn, pregame
-  flag, active-seat flag, 11-step one-hot, both lifes, hand sizes, library
-  sizes, mana pool totals, stack size, and per-side creature count / total
-  power / total toughness / untapped creatures / untapped lands / pending
-  attackers). Own-library-remaining counts are skipped: the protocol does
-  not expose the built-in decklists, so there is nothing to subtract from.
+- `extractor.py` -- observation JSON -> float32 features, VERSIONED
+  schema. v1 (675): 128 card-definition counts (from `penta.catalog()`,
+  fetched once) for each of own hand / own battlefield / opponent
+  battlefield / own graveyard / opponent graveyard (5 x 128 = 640), plus
+  35 global scalars (turn, pregame flag, active-seat flag, 11-step
+  one-hot, both lifes, hand sizes, library sizes, mana pool totals,
+  stack size, and per-side creature count / total power / total
+  toughness / untapped creatures / untapped lands / pending attackers).
+  v2 (825, default): v1 plus the castability + race-math block (lever 1
+  above). Own-library-remaining counts are skipped: the protocol does
+  not expose the built-in decklists, so there is nothing to subtract
+  from. Nets dispatch by input size via `Extractor.for_inputs()`.
 - `net.py` -- numpy mirror of our C++ `SpzNet`: one tanh hidden layer,
   sigmoid output, binary cross-entropy, minibatch SGD with momentum 0.9,
   uniform(+-1/sqrt(fan_in)) init, save/load as `.npz`. No torch.
 - `trainer.py` -- **epsilon-greedy ROLLOUT SEARCH over afterstates**
-  (myopic 1-ply screen, then top-k playouts to the deciding seat's next
-  turn start; `--search-topk 0` restores plain 1-ply; copies via the
-  binding's `clone()`, else deterministic replay reconstruction), with a
-  first_bot-shaped aggression prior on exploration draws. Targets
-  computed backward over each seat's recorded afterstate values with the
-  terminal 0/1 (0.5 draw/cap) outcome, replay ring buffer,
-  multiprocessing across seeds (one `Game` per task). Forced
-  single-action decisions are played without evaluation or recording.
-  **Targets default to pure undiscounted outcomes (`--td-lambda 1.0`)**
-  -- see the collapse post-mortem below.
+  (myopic 1-ply screen behind the dominance prune, then top-k playouts
+  to the deciding seat's next turn start; `--search-topk 0` restores
+  plain 1-ply; copies via the binding's `clone()`, else deterministic
+  replay reconstruction), with a first_bot-shaped aggression prior on
+  exploration draws. Targets computed backward over each seat's recorded
+  afterstate values with the terminal 0/1 (0.5 draw/cap) outcome, replay
+  ring buffer, multiprocessing across seeds (one `Game` per task).
+  Forced single-action decisions are played without evaluation or
+  recording. **Targets default to pure undiscounted outcomes
+  (`--td-lambda 1.0`)** -- see the collapse post-mortem below;
+  `--td-lambda-per-turn` applies decay per turn boundary instead.
 - `gate.py` -- greedy (epsilon 0) evaluation vs `handcrafted` and `random`,
   alternating seats, rotating deck pairs, fixed seeds, Wilson 95% LCB.
-- `checks.py` -- 34 standalone audit checks against the live engine: seat/
+- `scout.py` -- instrumented mistake-review games vs handcrafted (full
+  transcripts, blunder counters); the corpus behind the dominance prune.
+- `checks.py` -- 42 standalone audit checks against the live engine: seat/
   perspective labels (recorded rows must be the learner's own view with its
   own outcome, in mirror, frozen-league, and handcrafted-league games), TD
-  target recursion, candidate-sampling uniformity, afterstate/fork
-  exactness, replay-ring arithmetic, league seat scheduling, capped-game
-  exclusion, aggression-prior ordering, playout boundary/determinism, and
-  search taking immediate wins. Run `python3 checks.py` after any trainer
-  change.
+  target recursion (per-decision and per-turn), candidate-sampling
+  uniformity, afterstate/fork exactness, replay-ring arithmetic, league
+  seat scheduling, capped-game exclusion, aggression-prior ordering,
+  playout boundary/determinism, search taking immediate wins, and the
+  dominance-prune blunder regressions + invariants. Run
+  `python3 checks.py` after any trainer change.
+- `curve-v3.sh` -- the v3 full-package run harness (fresh v2-schema net,
+  4000-game ring-persistent league chunks, promotion-on-beat from a 0
+  bar, one-time cross-era reference gate, early stop on two consecutive
+  gates below 60% of the running best).
 
 ## Collapse post-mortem (2026-08 audit)
 

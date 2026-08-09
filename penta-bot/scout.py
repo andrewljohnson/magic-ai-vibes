@@ -325,8 +325,10 @@ _WORKER = {}
 
 def _init(net_path):
     _WORKER["penta"] = import_penta()
-    _WORKER["extractor"] = Extractor()
     _WORKER["net"] = Net.load(net_path)
+    # Feature schemas are versioned by input size (extractor.py), so
+    # scouting runs put the net on the layout it was trained on.
+    _WORKER["extractor"] = Extractor.for_inputs(_WORKER["net"].inputs)
 
 
 def _play(task):
