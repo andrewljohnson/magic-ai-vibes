@@ -15,8 +15,10 @@ import time
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "..", "build", "telemetry",
                    "penta-telemetry.json")
-SMOKE_GAMES = 3000
-CHUNK_GAMES = 2000
+# Cumulative-game offsets for chunk-N.log lines; the v3 curve runs
+# 4000-game chunks with no separate smoke (SMOKE_GAMES=0 CHUNK_GAMES=4000).
+SMOKE_GAMES = int(os.environ.get("SMOKE_GAMES", 3000))
+CHUNK_GAMES = int(os.environ.get("CHUNK_GAMES", 2000))
 
 TRAIN_LINE = re.compile(
     r"games\s+(\d+)\s+eps\s+([\d.]+)\s+loss\s+([\d.]+).*?"
