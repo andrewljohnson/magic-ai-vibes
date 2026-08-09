@@ -157,9 +157,9 @@ def check_a_mirror_and_frozen_labels():
     calls = []
     real = trainer.td_targets
 
-    def spy(values, z, lam=trainer.TD_LAMBDA):
+    def spy(values, z, lam=trainer.TD_LAMBDA, **kwargs):
         calls.append((len(values), z))
-        return real(values, z, lam)
+        return real(values, z, lam, **kwargs)
 
     trainer.td_targets = spy
     try:
@@ -251,6 +251,29 @@ def check_b_td_targets():
     th = td_targets([0.3, 0.7, 0.2], 1.0, lam=1.0)
     check("B7 default lambda 1.0 gives pure outcome targets",
           trainer.TD_LAMBDA == 1.0 and np.all(th == 1.0), f"{th}")
+    # Per-TURN lambda: decay applies only at turn boundaries; decisions
+    # within one turn share the decay step (identical targets).
+    v = [0.5, 0.6, 0.4, 0.3, 0.7]
+    turns = [1, 1, 2, 2, 3]
+    tp = td_targets(v, 1.0, turns=turns, turn_lam=0.9)
+    # backward: boundary 2->3: 0.1*0.7+0.9*1.0 = 0.97 (both turn-2 rows);
+    # boundary 1->2: 0.1*0.4+0.9*0.97 = 0.913 (both turn-1 rows).
+    expect = [0.913, 0.913, 0.97, 0.97, 1.0]
+    check("B8 per-turn lambda decays at turn boundaries only",
+          np.allclose(tp, expect, atol=1e-6), f"{tp}")
+    # With one decision per turn it reduces exactly to per-decision lambda.
+    v2 = [0.9, 0.1, 0.9, 0.1]
+    same = td_targets(v2, 1.0, turns=[1, 2, 3, 4], turn_lam=0.5)
+    per_dec = td_targets(v2, 1.0, lam=0.5)
+    check("B9 per-turn == per-decision when every turn has one decision",
+          np.allclose(same, per_dec, atol=1e-6), f"{same} vs {per_dec}")
+    # Outcome weight survives per-turn decay on realistic trajectories: a
+    # 65-decision game spans ~10 turns, so the deepest target keeps
+    # 0.9^9 ~ 39% outcome weight vs 0.9^64 ~ 0.1% per-decision.
+    turns65 = [1 + i // 7 for i in range(65)]  # ~7 decisions/turn, 10 turns
+    tp65 = td_targets([0.0] * 65, 1.0, turns=turns65, turn_lam=0.9)
+    check("B10 per-turn decay keeps real outcome weight in early targets",
+          tp65[0] > 0.3, f"first target {tp65[0]:.3f}")
 
 
 # ---------------------------------------------------------------- C -----
@@ -556,6 +579,16 @@ def check_h_aggression_prior():
               aggression_prior([quiet, cast_small, cast_big, finish], EX,
                                rng)["index"] == 2 for _ in range(20)),
           f"powers {small_p} vs {big_p}")
+    # Protocol v2: CastSpell "card" is a hand INSTANCE id; the prior must
+    # resolve it through the observation's hand to find the power.
+    obs_v2 = {"hand": [{"definition": small_def, "instance": 501},
+                       {"definition": big_def, "instance": 502}]}
+    cast_i_small = {"index": 1, "type": "CastSpell", "card": 501}
+    cast_i_big = {"index": 2, "type": "CastSpell", "card": 502}
+    check("H2b prior resolves v2 instance ids through the hand",
+          all(aggression_prior([quiet, cast_i_small, cast_i_big, finish],
+                               EX, rng, obs=obs_v2)["index"] == 2
+              for _ in range(20)))
     check("H3 prior declares attackers over quiet options",
           all(aggression_prior([finish, quiet, attack], EX, rng)["index"] == 3
               for _ in range(20)))

@@ -61,8 +61,10 @@ _WORKER = {}
 
 def _init(net_path):
     _WORKER["penta"] = import_penta()
-    _WORKER["extractor"] = Extractor()
     _WORKER["net"] = Net.load(net_path)
+    # Feature schemas are versioned by input size (extractor.py): old
+    # 675-input nets gate on the v1 layout, new nets on v2.
+    _WORKER["extractor"] = Extractor.for_inputs(_WORKER["net"].inputs)
 
 
 def _play(task):

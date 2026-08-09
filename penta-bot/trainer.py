@@ -76,7 +76,14 @@ import numpy as np
 from extractor import Extractor, import_penta
 from net import Net
 
-DECKS = ("Sligh", "White Weenie", "The Deck", "Counterburn")
+# League decks: the four originals plus four more spanning archetypes
+# (aggro Goblins, midrange Erhnamgeddon, disruption Mono Black, tempo
+# Jeskai Aggro), all penta built-ins (penta.deck_names()). PENTA_DECKS
+# (comma-separated) overrides, e.g. to reproduce old four-deck gates.
+DECKS = tuple(os.environ.get(
+    "PENTA_DECKS",
+    "Sligh,White Weenie,The Deck,Counterburn,"
+    "Goblins,Erhnamgeddon,Mono Black,Jeskai Aggro").split(","))
 
 # Rollout-search knobs (see the module docstring; --search-topk 0 turns
 # the whole layer off and restores the 1-ply afterstate policy):
@@ -167,7 +174,7 @@ def afterstate_rows(fork, seat, actions, extractor, keep_copies=False):
     return rows, terminals
 
 
-def aggression_prior(actions, extractor, rng):
+def aggression_prior(actions, extractor, rng, obs=None):
     """First_bot-shaped exploration draw: play a land, else cast the
     biggest thing castable, else declare an attacker, else uniform.
 
@@ -175,16 +182,30 @@ def aggression_prior(actions, extractor, rng):
     examples/python/first_bot.py (lacker, Apache-2.0) -- that trivial
     heuristic beats the handcrafted bot 73% while uniform-explored 1-ply
     nets collapsed to passivity, so exploration draws from its shape put
-    lands, threats, and above all ATTACKS into the replay data."""
+    lands, threats, and above all ATTACKS into the replay data.
+
+    Protocol v2 CastSpell actions carry the hand INSTANCE id in "card";
+    `obs` (when given) resolves instances to definitions for the power
+    lookup. Ids with no hand entry are tried as definitions directly
+    (protocol 0/1 shape)."""
     by_type = {}
     for action in actions:
         by_type.setdefault(action["type"], []).append(action)
     if "PlayLand" in by_type:
         return rng.choice(by_type["PlayLand"])
     if "CastSpell" in by_type:
+        instance_def = {}
+        if obs is not None:
+            for card in obs.get("hand", ()):
+                inst = card.get("instance", card.get("objectId"))
+                instance_def[inst] = card["definition"]
         power = extractor.card_power
-        return max(by_type["CastSpell"],
-                   key=lambda a: power.get(a.get("card"), 0))
+
+        def cast_power(action):
+            card = action.get("card")
+            return power.get(instance_def.get(card, card), 0)
+
+        return max(by_type["CastSpell"], key=cast_power)
     if "DeclareAttacker" in by_type:
         return rng.choice(by_type["DeclareAttacker"])
     return rng.choice(actions)
@@ -285,7 +306,7 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
 
     if epsilon > 0.0 and rng.random() < epsilon:
         if rng.random() < prior_frac:
-            picked = aggression_prior(actions, extractor, rng)
+            picked = aggression_prior(actions, extractor, rng, obs=obs)
         else:
             picked = rng.choice(actions)
         rows, terms = afterstate_rows(fork, seat, [picked], extractor)
@@ -332,22 +353,39 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
     return actions[best]["index"], rows[best], float(scores[best])
 
 
-def td_targets(values, z, lam=TD_LAMBDA):
+def td_targets(values, z, lam=TD_LAMBDA, turns=None, turn_lam=0.0):
     """Backward TD(lambda) targets over one seat's recorded values, gamma=1.
-    Mirrors the SPZ C++ target loop with the recorded values as bootstraps."""
+    Mirrors the SPZ C++ target loop with the recorded values as bootstraps.
+
+    With turn_lam > 0 (and `turns`, the recorded TURN index per decision:
+    0 in the mulligan phase, else the observation's turn number), lambda
+    decay is applied per TURN boundary instead of per decision: crossing
+    from turn t to t+1 applies one turn_lam decay step, while decisions
+    within one turn pass the tail through undecayed (equivalently, they
+    share one decay step and hence one target). Penta trajectories run
+    40-130 recorded decisions but only ~5-20 turns, so per-turn decay
+    keeps real outcome weight in every target where per-DECISION lambda
+    0.9 starved it to <5% (the 2026-08 collapse); `lam` is ignored in
+    this mode.
+    """
     n = len(values)
     targets = np.empty(n, dtype=np.float32)
     tail = z
     targets[n - 1] = tail
     for i in range(n - 2, -1, -1):
-        tail = (1.0 - lam) * values[i + 1] + lam * tail
+        if turn_lam > 0.0:
+            step = turn_lam if turns[i + 1] != turns[i] else 1.0
+        else:
+            step = lam
+        tail = (1.0 - step) * values[i + 1] + step * tail
         targets[i] = tail
     return targets
 
 
 def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                        max_eval, opponent_net=None, learner_seat=None,
-                       lam=TD_LAMBDA, search=None, prior_frac=PRIOR_FRACTION):
+                       lam=TD_LAMBDA, search=None, prior_frac=PRIOR_FRACTION,
+                       turn_lam=0.0):
     """One external-mode game; returns (rows, targets, stats).
 
     Mirror mode (opponent_net None) plays and records both seats with the
@@ -362,7 +400,7 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
     game = make_game()
     history = []
-    traj = {"p1": ([], []), "p2": ([], [])}
+    traj = {"p1": ([], [], []), "p2": ([], [], [])}
     while game.result() is None and len(history) < MAX_DECISIONS:
         seat = game.decision_seat()
         obs = json.loads(game.observe())
@@ -384,6 +422,8 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         if feats is not None:
             traj[seat][0].append(feats)
             traj[seat][1].append(value)
+            traj[seat][2].append(
+                0 if obs.get("pregame") else obs.get("turn", 0))
 
     result = game.result()  # None if the cap was hit
     stats = {"decisions": len(history), "result": result or "cap"}
@@ -394,12 +434,13 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                 np.empty(0, dtype=np.float32), stats)
     rows, targets = [], []
     for seat in ("p1", "p2"):
-        feats, values = traj[seat]
+        feats, values, turns = traj[seat]
         if not feats:
             continue
         z = 0.5 if result == "draw" else (1.0 if result == seat else 0.0)
         rows.append(np.stack(feats))
-        targets.append(td_targets(values, z, lam))
+        targets.append(td_targets(values, z, lam, turns=turns,
+                                  turn_lam=turn_lam))
     if rows:
         return np.concatenate(rows), np.concatenate(targets), stats
     return (np.empty((0, extractor.size), dtype=np.float32),
@@ -408,7 +449,7 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
 def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                           max_eval, learner_seat, lam=TD_LAMBDA, search=None,
-                          prior_frac=PRIOR_FRACTION):
+                          prior_frac=PRIOR_FRACTION, turn_lam=0.0):
     """One league game vs penta's built-in handcrafted bot.
 
     Only the learner's seat is observed and recorded (reconstruction
@@ -423,7 +464,7 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
     game = make_game()
     history = []
-    feats_list, values = [], []
+    feats_list, values, turns = [], [], []
     while game.result() is None and len(history) < MAX_DECISIONS:
         obs = json.loads(game.observe())
         index, feats, value = choose(
@@ -435,6 +476,7 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         if feats is not None:
             feats_list.append(feats)
             values.append(value)
+            turns.append(0 if obs.get("pregame") else obs.get("turn", 0))
 
     result = game.result()  # None if the cap was hit
     stats = {"decisions": len(history), "result": result or "cap"}
@@ -443,7 +485,9 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         return (np.empty((0, extractor.size), dtype=np.float32),
                 np.empty(0, dtype=np.float32), stats)
     z = 0.5 if result == "draw" else (1.0 if result == learner_seat else 0.0)
-    return np.stack(feats_list), td_targets(values, z, lam), stats
+    return (np.stack(feats_list),
+            td_targets(values, z, lam, turns=turns, turn_lam=turn_lam),
+            stats)
 
 
 # -- multiprocessing plumbing -------------------------------------------
@@ -451,9 +495,9 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 _WORKER = {}
 
 
-def _worker_init(hidden, frozen_paths):
+def _worker_init(hidden, frozen_paths, schema_version=2):
     penta = import_penta()
-    extractor = Extractor()
+    extractor = Extractor(version=schema_version)
     _WORKER["penta"] = penta
     _WORKER["extractor"] = extractor
     _WORKER["net"] = Net(extractor.size, hidden=hidden, seed=0)
@@ -461,7 +505,7 @@ def _worker_init(hidden, frozen_paths):
 
 
 def _worker_play(task):
-    weights, games, max_eval, lam, search, prior_frac = task
+    weights, games, max_eval, lam, search, prior_frac, turn_lam = task
     net = _WORKER["net"]
     net.set_weights(weights)
     extractor = _WORKER["extractor"]
@@ -474,7 +518,7 @@ def _worker_play(task):
                 rows, targets, stats = play_handcrafted_game(
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, learner_seat, lam=lam, search=search,
-                    prior_frac=prior_frac)
+                    prior_frac=prior_frac, turn_lam=turn_lam)
             else:
                 opponent_net = (_WORKER["frozen"][frozen_idx]
                                 if mode == "frozen" else None)
@@ -482,7 +526,7 @@ def _worker_play(task):
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, opponent_net=opponent_net,
                     learner_seat=learner_seat, lam=lam, search=search,
-                    prior_frac=prior_frac)
+                    prior_frac=prior_frac, turn_lam=turn_lam)
         except ValueError as error:
             # Upstream engine fault mid-game (seen on 0.3.0: "the scripted
             # opponent returned no action" from the built-in handcrafted
@@ -609,6 +653,12 @@ def main():
     parser.add_argument("--td-lambda", type=float, default=TD_LAMBDA,
                         help="TD lambda per recorded decision; 1.0 (default)"
                              " = pure outcome targets, no bootstrapping")
+    parser.add_argument("--td-lambda-per-turn", type=float, default=0.0,
+                        metavar="LAM",
+                        help="TD lambda applied per TURN boundary instead "
+                             "of per decision (decisions within one turn "
+                             "share the decay step); 0 (default) = off, "
+                             "overrides --td-lambda when set")
     parser.add_argument("--replay-capacity", type=int, default=150_000)
     parser.add_argument("--round-games", type=int, default=64)
     parser.add_argument("--seed-base", type=int, default=1_000_000)
@@ -635,10 +685,22 @@ def main():
                              "handcrafted bot")
     args = parser.parse_args()
 
-    extractor = Extractor()
-    net = Net(extractor.size, hidden=args.hidden, seed=1)
     if args.init:
+        # Feature schemas are versioned by input size: dispatch on the
+        # warm-start net so old (v1, 675-input) nets keep their layout.
         net = Net.load(args.init)
+        extractor = Extractor.for_inputs(net.inputs)
+    else:
+        extractor = Extractor()
+        net = Net(extractor.size, hidden=args.hidden, seed=1)
+    for path in args.league_frozen:
+        frozen_inputs = Net.load(path).inputs
+        if frozen_inputs != extractor.size:
+            raise SystemExit(
+                f"frozen league net {path} has {frozen_inputs} inputs but "
+                f"the learner's schema v{extractor.version} has "
+                f"{extractor.size}; never seat a sparring net whose "
+                f"feature schema differs from the learner")
     search = None
     if args.search_topk > 0:
         search = SearchConfig(
@@ -646,10 +708,15 @@ def main():
             budget=args.playout_budget,
             playout_max_eval=args.playout_max_eval,
             playout_epsilon=args.playout_epsilon)
+    td_desc = (f"per-turn {args.td_lambda_per_turn:.2f}"
+               if args.td_lambda_per_turn > 0.0
+               else f"{args.td_lambda:.2f}")
     print(f"engine {extractor.engine_version} protocol "
           f"{extractor.protocol_version}; features {extractor.size} "
-          f"({extractor.defs} defs x 5 zones + {extractor.n_scalars} scalars); "
-          f"td-lambda {args.td_lambda:.2f}")
+          f"(schema v{extractor.version}: {extractor.defs} defs x 5 zones + "
+          f"{extractor.n_scalars} scalars"
+          + (" + castability/race block" if extractor.version >= 2 else "")
+          + f"); decks {len(DECKS)}; td-lambda {td_desc}")
     print(f"search: {search if search else 'off (1-ply afterstates)'}; "
           f"prior-frac {args.prior_frac:.2f}")
     if args.league_handcrafted or args.league_frozen:
@@ -671,7 +738,8 @@ def main():
     played = 0
     t_start = time.time()
     with Pool(args.workers, initializer=_worker_init,
-              initargs=(args.hidden, tuple(args.league_frozen))) as pool:
+              initargs=(args.hidden, tuple(args.league_frozen),
+                        extractor.version)) as pool:
         while played < args.games:
             round_n = min(args.round_games, args.games - played)
             frac = played / max(1, args.games)
@@ -691,7 +759,7 @@ def main():
                           for w in range(args.workers)]
             weights = net.get_weights()
             tasks = [(weights, chunk, args.max_eval, args.td_lambda,
-                      search, args.prior_frac)
+                      search, args.prior_frac, args.td_lambda_per_turn)
                      for chunk in per_worker if chunk]
             results = pool.map(_worker_play, tasks)
 
@@ -727,7 +795,9 @@ def main():
                      engine_version=extractor.engine_version,
                      protocol_version=extractor.protocol_version,
                      hidden=args.hidden, games=played,
-                     search_topk=args.search_topk)
+                     search_topk=args.search_topk,
+                     feature_schema=extractor.version,
+                     td_lambda_per_turn=args.td_lambda_per_turn)
             rate = played / (time.time() - t_start)
             print(f"games {played:5d}  eps {epsilon:.3f}  "
                   f"loss {np.mean(losses):.4f}  "
