@@ -52,14 +52,15 @@
 <body>
 <main>
   <h1>Penta scouting</h1>
-  <p class="sub">Mistake review of the penta deliverable net
-    (<code>penta_net.npz</code>, search on) piloting each of the four
-    training decks against every deck flown by penta's built-in
-    handcrafted bot &mdash; 64 fixed-seed games, full action transcripts
-    reviewed by hand, per-matchup metrics in the os-digest style.
+  <p class="sub" id="sub">Mistake review of the penta deliverable net
+    (<code>penta_net.npz</code>, search on) piloting each training deck
+    against every deck flown by penta's built-in handcrafted bot &mdash;
+    fixed-seed games, per-matchup metrics in the os-digest style.
     Companion to the main bot's <a href="deck-scouting.html"
     style="color:var(--accent)">Scouting</a> page.</p>
 
+  <section class="themes" id="overall" hidden></section>
+  <div class="matrix-wrap"><table id="deck-table"></table></div>
   <div class="matrix-wrap"><table id="matrix"></table></div>
   <section class="themes" id="themes"></section>
   <div id="cards"></div>
@@ -75,9 +76,94 @@ function fmt(value, suffix) {
     : value + (suffix || "");
 }
 
+function renderV2(notes) {
+  // scout.py v2 schema: meta + summary (one row per ordered pairing) +
+  // games (per-game instrumentation). Prose/themes are not hand-written
+  // in this schema; watch-items are derived from the metrics instead.
+  const s = notes.summary;
+  const wins = s.reduce((a, r) => a + r.wins, 0);
+  const games = s.reduce((a, r) => a + r.games, 0);
+
+  const byDeck = new Map();
+  for (const r of s) {
+    const d = byDeck.get(r.our_deck) ||
+      { wins: 0, games: 0, unspent: 0, suicide: 0, atk: [], n: 0 };
+    d.wins += r.wins; d.games += r.games;
+    d.unspent += r.unspent_turns_per_game * r.games;
+    d.suicide += r.suicide_attacks_per_game * r.games;
+    if (r.attack_take_rate !== null) d.atk.push(r.attack_take_rate);
+    byDeck.set(r.our_deck, d);
+  }
+
+  const overall = document.getElementById("overall");
+  overall.hidden = false;
+  const weak = s.filter(r => r.wins <= 2)
+    .sort((a, b) => a.wins - b.wins)
+    .map(r => `<li><b>${r.our_deck}</b> vs ${r.their_deck}: ` +
+      `${r.wins}/${r.games}` +
+      (r.unspent_turns_per_game >= 1
+        ? ` &mdash; ${r.unspent_turns_per_game} unspent turns/g` : "") +
+      `</li>`).join("");
+  overall.innerHTML =
+    `<h2>Overall: ${wins}/${games} ` +
+    `(${(100 * wins / games).toFixed(1)}%) vs handcrafted</h2>` +
+    (weak ? `<ol>${weak}</ol>` : "<p>No pairing at 2/16 or worse.</p>");
+
+  let dt = "<tr><th>Piloting</th><th>Wins</th><th>Win %</th>" +
+    "<th>Median attack take</th><th>Unspent turns/g</th>" +
+    "<th>Suicide attacks/g</th></tr>";
+  const decks = [...byDeck.entries()]
+    .sort((a, b) => b[1].wins - a[1].wins);
+  for (const [name, d] of decks) {
+    const pct = 100 * d.wins / d.games;
+    const cls = pct >= 55 ? "hot" : pct <= 35 ? "cold" : "";
+    const atk = d.atk.sort((x, y) => x - y)[Math.floor(d.atk.length / 2)];
+    dt += `<tr><td>${name}</td>` +
+      `<td class="${cls}">${d.wins}/${d.games}</td>` +
+      `<td class="${cls}">${pct.toFixed(0)}%</td>` +
+      `<td>${fmt(atk)}</td>` +
+      `<td>${(d.unspent / d.games).toFixed(1)}</td>` +
+      `<td>${(d.suicide / d.games).toFixed(2)}</td></tr>`;
+  }
+  document.getElementById("deck-table").innerHTML = dt;
+
+  const table = document.getElementById("matrix");
+  let html = "<tr><th>Piloting</th><th>vs (handcrafted)</th><th>Wins</th>" +
+    "<th>Avg turns</th><th>Attack take</th><th>Block take</th>" +
+    "<th>Unspent turns/g</th><th>Suicide atk/g</th>" +
+    "<th>Unblocked life lost/g</th><th>Casts into counter mana/g</th></tr>";
+  for (const r of s) {
+    const winCls = r.wins >= 10 ? "hot" : r.wins <= 5 ? "cold" : "";
+    const atkCls = r.attack_take_rate !== null && r.attack_take_rate < 0.5
+      ? "cold" : "";
+    const unsCls = r.unspent_turns_per_game >= 1 ? "cold" : "";
+    const suiCls = r.suicide_attacks_per_game >= 0.5 ? "cold" : "";
+    html += `<tr><td>${r.our_deck}</td><td>${r.their_deck}</td>` +
+      `<td class="${winCls}">${r.wins}/${r.games}</td>` +
+      `<td>${r.avg_turns}</td>` +
+      `<td class="${atkCls}">${fmt(r.attack_take_rate)}</td>` +
+      `<td>${fmt(r.block_take_rate)}</td>` +
+      `<td class="${unsCls}">${r.unspent_turns_per_game}</td>` +
+      `<td class="${suiCls}">${r.suicide_attacks_per_game}</td>` +
+      `<td>${r.life_lost_unblocked_per_game}</td>` +
+      `<td>${r.casts_into_counter_mana_per_game}</td></tr>`;
+  }
+  table.innerHTML = html;
+
+  const m = notes.meta;
+  document.getElementById("method").textContent =
+    `Method: ${m.games_per_pair} games per ordered pairing, seeds from ` +
+    `${m.seed_base}, alternating seats. Net: ${m.net} (engine ` +
+    `${m.engine_version}). Search: topk ${m.search.top_k} / ` +
+    `${m.search.playouts} playout / budget ${m.search.budget}. ` +
+    `Caveat: search clones carry true hidden state (upstream issue #11). ` +
+    `Notes are re-earned after each promotion, not carried forward.`;
+}
+
 async function load() {
   const notes = await fetch("penta-scout-notes.json", { cache: "no-store" })
     .then(r => r.json());
+  if (notes.summary) { renderV2(notes); return; }
 
   const table = document.getElementById("matrix");
   let html = "<tr><th>Piloting</th><th>vs (handcrafted)</th><th>Wins</th>" +
