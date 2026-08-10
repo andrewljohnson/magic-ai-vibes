@@ -47,3 +47,28 @@
 12:18 cumulative-games=11000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [14s, 4.38 games/s] | handcrafted: vs handcrafted  120 games: 43 wins, 0 draws ->  35.8% (LCB  27.8%)  [40s, 2.97 games/s]
       kept penta_net.npz (ckpt-search-11000 handcrafted 35.8% <= 37.5%)
 === search-era curve run complete Sun Aug  9 12:18:35 PDT 2026 ===
+=== v3 curve run Sun Aug  9 16:58:30 PDT 2026 | v2 features (825), search topk 4 train+gate, 8 decks, td-per-turn 0.0 | league: handcrafted 0.15 + prev-chunk frozen 0.25, ring fresh + lr-warmup 200 | fresh net, 4000-game chunks, promotion bar 0 ===
+      cross-era reference: penta_net.ckpt-search-7000.npz (old v1 features) on this gate config: vs handcrafted  120 games: 45 wins, 1 draws ->  37.9% (LCB  29.4%)  [30s, 3.94 games/s]
+17:48 cumulative-games=4000 | random: vs random       60 games: 60 wins, 0 draws -> 100.0% (LCB  94.0%)  [6s, 9.81 games/s] | handcrafted: vs handcrafted  120 games: 45 wins, 0 draws ->  37.5% (LCB  29.4%)  [28s, 4.21 games/s]
+      promoted ckpt-v3-4000 -> penta_net.npz (handcrafted 37.5% > 0%)
+18:43 cumulative-games=8000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [9s, 6.96 games/s] | handcrafted: vs handcrafted  120 games: 40 wins, 0 draws ->  33.3% (LCB  25.5%)  [30s, 3.95 games/s]
+      kept penta_net.npz (ckpt-v3-8000 handcrafted 33.3% <= 37.5%)
+19:44 cumulative-games=12000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [6s, 10.45 games/s] | handcrafted: vs handcrafted  120 games: 51 wins, 0 draws ->  42.5% (LCB  34.0%)  [25s, 4.73 games/s]
+      promoted ckpt-v3-12000 -> penta_net.npz (handcrafted 42.5% > 37.5%)
+20:53 cumulative-games=16000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [6s, 10.69 games/s] | handcrafted: vs handcrafted  120 games: 55 wins, 0 draws ->  45.8% (LCB  37.2%)  [609s, 0.20 games/s]
+      promoted ckpt-v3-16000 -> penta_net.npz (handcrafted 45.8% > 42.5%)
+21:50 cumulative-games=20000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [7s, 8.71 games/s] | handcrafted: vs handcrafted  120 games: 57 wins, 0 draws ->  47.5% (LCB  38.8%)  [27s, 4.40 games/s]
+      promoted ckpt-v3-20000 -> penta_net.npz (handcrafted 47.5% > 45.8%)
+22:50 cumulative-games=24000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [5s, 11.98 games/s] | handcrafted: vs handcrafted  120 games: 53 wins, 0 draws ->  44.2% (LCB  35.6%)  [34s, 3.54 games/s]
+      kept penta_net.npz (ckpt-v3-24000 handcrafted 44.2% <= 47.5%)
+23:48 cumulative-games=28000 | random: vs random       60 games: 56 wins, 0 draws ->  93.3% (LCB  84.1%)  [5s, 11.98 games/s] | handcrafted: vs handcrafted  120 games: 54 wins, 0 draws ->  45.0% (LCB  36.4%)  [39s, 3.09 games/s]
+      kept penta_net.npz (ckpt-v3-28000 handcrafted 45.0% <= 47.5%)
+00:46 cumulative-games=32000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [6s, 10.62 games/s] | handcrafted: vs handcrafted  120 games: 56 wins, 0 draws ->  46.7% (LCB  38.0%)  [28s, 4.22 games/s]
+      kept penta_net.npz (ckpt-v3-32000 handcrafted 46.7% <= 47.5%)
+01:43 cumulative-games=36000 | random: vs random       60 games: 57 wins, 0 draws ->  95.0% (LCB  86.3%)  [6s, 9.96 games/s] | handcrafted: vs handcrafted  120 games: 59 wins, 0 draws ->  49.2% (LCB  40.4%)  [25s, 4.81 games/s]
+      promoted ckpt-v3-36000 -> penta_net.npz (handcrafted 49.2% > 47.5%)
+02:49 cumulative-games=40000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [7s, 9.16 games/s] | handcrafted: vs handcrafted  120 games: 59 wins, 0 draws ->  49.2% (LCB  40.4%)  [30s, 4.03 games/s]
+      kept penta_net.npz (ckpt-v3-40000 handcrafted 49.2% <= 49.2%)
+03:50 cumulative-games=44000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [7s, 8.24 games/s] | handcrafted: vs handcrafted  120 games: 67 wins, 0 draws ->  55.8% (LCB  46.9%)  [29s, 4.13 games/s]
+      promoted ckpt-v3-44000 -> penta_net.npz (handcrafted 55.8% > 49.2%)
+=== v3 curve run complete Mon Aug 10 03:50:28 PDT 2026 ===
