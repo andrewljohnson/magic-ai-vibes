@@ -535,6 +535,29 @@ compute cost, or a policy head / explicit multi-turn credit -- not
 another feature block. The deliverable stands at handcrafted parity:
 ckpt-v3-48000, 57.5%/120, confirm-400 54.8% (LCB 49.9%).
 
+## Counter-window diagnosis (2026-08-11): verdict (c), held for discussion
+
+Counterburn casts 0.0-0.1 counterspells/game (its bottom-three losing
+matchups all carry dead counter halves). Hypothesis tested: the
+observation omits stack contents, so countering looks like "down a card
+for nothing". Findings from 32 instrumented games (ckpt-v3-48000, sweep
+seeds): (1) the extractor IS stack-blind -- one scalar, stack size, in
+every schema; (2) but the engine offers counter casts correctly
+(enumerated when UU is payable from untapped; stack targets carry
+stackId/type='spell', NOT 'instance' -- a probe/scout blind spot, now
+fixed in scout.py); (3) at the 11 eligible windows the MYOPIC screen
+already favors countering (0.663 vs 0.582, 7/11) despite the blindness,
+and it is the PLAYOUT refinement -- the lens that actually sees the
+resolution -- that prefers passing (0.463 vs 0.367, 4/11) and drives
+the declines; the net countered 2/11 and mana-floated toward more. The
+binding constraints are (i) OFFER SCARCITY, ~0.34 eligible windows per
+game, because the pilot taps out (no learned untapped-mana discipline),
+and (ii) the playout stand-in policy's handling of post-counter
+positions -- the same multi-turn-credit limitation as the deployment
+arc. Stack features would only sharpen a screen that is already
+directionally right, so per the (c) branch nothing was implemented;
+held for discussion.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->

@@ -79,17 +79,26 @@ def describe_action(action, obs, names_by_instance):
 
 
 def describe_targets(action, obs, names_by_instance):
-    """Names for a CastSpell's targets, from the enumerated choices."""
+    """Names for a CastSpell's targets, from the enumerated choices.
+
+    Battlefield/hand targets carry 'instance'; STACK targets carry
+    stackId/objectId with type='spell' instead (the counter-window
+    diagnosis's probe blind spot) -- resolve those against the stack's
+    own ids so counter targets are named in transcripts."""
     out = []
     selections = (action.get("choices") or {}).get("targetSelections", ())
-    stack_names = {entry.get("instance"): entry.get("name")
-                   for entry in obs.get("stack", ())}
+    stack_names = {}
+    for entry in obs.get("stack", ()):
+        for key in ("instance", "stackId", "objectId"):
+            if entry.get(key) is not None:
+                stack_names[entry[key]] = entry.get("name")
     for selection in selections:
         for target in selection.get("targets", ()):
             if target.get("type") == "player":
                 out.append(f"player {target.get('seat')}")
             else:
-                inst = target.get("instance")
+                inst = target.get("instance", target.get("stackId",
+                                                         target.get("objectId")))
                 out.append(names_by_instance.get(inst)
                            or stack_names.get(inst) or f"instance {inst}")
     return out
