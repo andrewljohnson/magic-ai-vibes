@@ -491,6 +491,24 @@ above (skips 2.9 -> 0.2/loss, wins unchanged -- hoarding binds, not
 mana). Next lever: the deployment package (schema v3 + seat
 oversampling), A/B-gated and grown from the 48k net via --grow-init.
 
+**Deployment-package verdict (v4 run, 2026-08-10): NULL -- features
+without signal.** The A/B smokes tied (v3 features 51.7%, + seat
+oversampling 50.0%; oversampling bought nothing) and the v4 full run
+from the grown 48k net declined (46.7 -> 43.3 over two chunks, killed).
+The behavioral re-gate of The Deck on ckpt-v4-56000: 3/128 wins,
+spells/game 5.7 vs the 5.5 baseline -- after 8k games the net does not
+USE the deployment features. The lesson: The Deck's seat loses its
+games regardless of which action it takes, so no outcome gradient ever
+favors deploying; REPRESENTATION alone cannot break a hoarding
+equilibrium that the VALUE SIGNAL never punishes. The fix must inject
+signal, not features: a counterfactual deploy-axis aux loss (weight
+0.01 hard max -- 0.1 destroyed the C++ net), or deeper training
+playouts so Tome/Serra payoffs become visible to the value target
+(playout-max-eval 8 hides them; the same family of lever that cured
+passivity last era). Both are A/B'd BEHAVIORALLY (The Deck 128-game
+sweep: spells/game, win-condition deploys, wins), not gate-first.
+Deliverable stays ckpt-v3-48000 (57.5% / confirm-400 54.8%).
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->
