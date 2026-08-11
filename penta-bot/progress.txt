@@ -115,3 +115,9 @@
       sanity gates: w=0.25 -> 58.3% (LCB 49.4%); w=0.5 -> 55.8%
       confirm-400 (w=0.25 blend on ckpt-v3-48000): 228/400 -> 57.0% (LCB 52.1%) -- FIRST CONFIG TO CERTIFY BETTER-THAN-HANDCRAFTED (previous best confirm 54.8%, LCB 49.9%)
       VERDICT: SCALE. First lever of the arc to move casting behavior materially (The Deck +0.8-1.0 spells/game, engines x3, big-threats x4) AND lift wins AND clear the bar. Certified config = penta_net.npz (value, ckpt-v3-48000) + policy_head.npz @ w=0.25; value net artifact unchanged.
+=== DAgger-1 acceptance Tue Aug 11: ACCEPTED ===
+      blended-self-play archive: 1617 decisive games, 461011 rows / 128362 decisions; head rank-acc 72.0% (v1: 70.9%)
+      behavioral vs stage-0 blend: Counterburn wins 67/128 = hold, counters 0.14 (~hold) | The Deck spells 6.2 = hold, engines 0.33 (up), big-threat 0.08 (~hold), wins 5/128 (~hold)
+      gates: 120-gate 59.2% (LCB 50.2%) -- NEW BEST-EVER, up from 58.3 | confirm-400: 57.1% LCB 52.1% -- certification holds (>50%)
+      certified pair advances to penta_net.npz (ckpt-v3-48000 value) + policy_head.ckpt-dagger1.npz @ w=0.25; v1 head artifact untouched
+      stage 2 launching: value training under the blend, 4 x 4000 chunks, prefix v5, seeds 7000000+, promotion bar 59.2%/120 (the accepted pair's own gate -- supersedes the pre-DAgger 58.3 bar) + standing confirm-400
