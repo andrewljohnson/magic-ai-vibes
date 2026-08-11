@@ -589,6 +589,33 @@ against it. v1 learns ACTION SELECTION directly, cheaply:
   vs the 7/128 / 4/128 references; 120-gate sanity, deliverable behind
   the 57.5% bar throughout.
 
+**v1 results (2026-08-11): SCALE -- and the first certified
+better-than-handcrafted configuration.** Archive: 1462 decisive games,
+384k candidate rows over 109k decisions; head holdout rank-accuracy
+70.9% vs 33.5% random. Behavioral table (128-game sweeps, sweep seeds):
+
+| pilot seat | metric | baseline | w=0.25 | w=0.5 |
+| --- | --- | --- | --- | --- |
+| Counterburn | wins | 58/128 | **67/128** | 64/128 |
+| Counterburn | counterspells/g | 0.09 | 0.16 | 0.14 |
+| The Deck | wins | 4/128 | 6/128 | 5/128 |
+| The Deck | spells/g | 5.4 | **6.2** | **6.4** |
+| The Deck | big-threat casts/g | 0.03 | 0.11 | 0.11 |
+| The Deck | engine casts/g | 0.10 | 0.30 | 0.28 |
+
+The first lever of the whole arc to move casting behavior materially:
+The Deck +0.8-1.0 spells/game, engines x3, big threats x4, and wins up
+on both seats. Counterspells rose 0.09 -> 0.16, short of the 1+ hope
+-- the offer-scarcity constraint (tapping out) still binds. Sanity
+gates: w=0.25 58.3% (LCB 49.4%), w=0.5 55.8%; the standing confirm-400
+on the w=0.25 blend: **57.0%, LCB 52.1% -- the first configuration
+whose 400-game lower confidence bound clears 50%** (previous best:
+54.8%, LCB 49.9%). Certified config = penta_net.npz (value net,
+ckpt-v3-48000, artifact unchanged) + policy_head.npz at
+PENTA_POLICY_WEIGHT=0.25. Natural scale-ups, in order of expected
+value: iterate the head (bigger archive from BLENDED self-play,
+DAgger-style), let training run under the blend, and revisit w.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->
