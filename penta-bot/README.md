@@ -474,6 +474,23 @@ fix is the one already on the roadmap: rollout search once the upstream
 clone API merges (the lever that pushed the C++ SPZ bot past
 Handcrafted), not more 1-ply chunks.
 
+## v3-era curves and the peaked continuation (2026-08-10)
+
+The v3 full-package run (fresh 825-input net, 11 x 4000-game chunks)
+climbed monotonically to the 44k deliverable: 37.5 -> 42.5 -> 45.8 ->
+47.5 -> 49.2 -> 55.8% with no collapse (cross-era reference: the old
+37.5% net gates 37.9% on this yardstick). The continuation from 44k
+promoted once more at 48000 games -- **57.5% / 120, confirm-400 54.8%
+(LCB 49.9%), a hair from certified handcrafted parity** -- then PEAKED:
+five gates without a promotion (46.7 / 55.0 / 53.3 / 48.3 / 55.0 /
+53.3 / 53.3 / 51.7 through 80000), stopped by hand mid-chunk-21.
+Deliverable: penta_net.npz = ckpt-v3-48000. The land-drop rule shipped
+at the 80000 gate boundary and was outcome-null on the curve (51.7%
+before/after class); its mechanism verdict lives in the fix-1 note
+above (skips 2.9 -> 0.2/loss, wins unchanged -- hoarding binds, not
+mana). Next lever: the deployment package (schema v3 + seat
+oversampling), A/B-gated and grown from the 48k net via --grow-init.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->
