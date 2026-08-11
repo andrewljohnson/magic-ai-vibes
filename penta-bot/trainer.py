@@ -797,21 +797,51 @@ def _worker_play(task):
 
 
 def matchup(game_number):
-    """Rotate through ordered deck pairs (mirrors excluded)."""
+    """Rotate through ordered deck pairs (mirrors excluded). This is the
+    GATE schedule (uniform) -- the yardstick never changes."""
     pairs = [(a, b) for a in DECKS for b in DECKS if a != b]
     return pairs[game_number % len(pairs)]
 
 
 N_PAIRS = len(DECKS) * (len(DECKS) - 1)
 
+# Pilot-seat oversampling (--seat-oversample, the deployment package):
+# the scouted control-deck pathologies (The Deck 7/128, hoarding) get
+# more learner reps by weighting TRAINING pair frequency by both decks'
+# seat weights (pair weight = w_a * w_b), which puts The Deck in ~1.8x
+# and Counterburn / Jeskai Aggro in ~1.4x as many seats as the plain
+# decks. Gates keep the uniform matchup() above. The schedule is a
+# deterministic fixed-seed shuffle so runs stay reproducible.
+TRAIN_SEAT_WEIGHTS = {"The Deck": 4, "Counterburn": 3, "Jeskai Aggro": 3}
+TRAIN_DEFAULT_WEIGHT = 2
 
-def learner_seat_for(game_number):
+
+def _train_pairs():
+    weights = {d: TRAIN_SEAT_WEIGHTS.get(d, TRAIN_DEFAULT_WEIGHT)
+               for d in DECKS}
+    pairs = [(a, b) for a in DECKS for b in DECKS if a != b
+             for _ in range(weights[a] * weights[b])]
+    random.Random(97).shuffle(pairs)  # deterministic interleave
+    return pairs
+
+
+TRAIN_PAIRS = _train_pairs()
+
+
+def matchup_train(game_number):
+    """The weighted TRAINING schedule (--seat-oversample)."""
+    return TRAIN_PAIRS[game_number % len(TRAIN_PAIRS)]
+
+
+def learner_seat_for(game_number, period=N_PAIRS):
     """Learner seat for league games. Plain `number % 2` is aliased with
-    matchup(number) -- the pair count is even, so each ordered deck pair
-    would ALWAYS put the learner on the same seat. Flipping the parity
-    every full rotation gives every pair both seats over 2*N_PAIRS games.
+    the pair rotation -- the schedule length is even, so each ordered
+    deck pair would ALWAYS put the learner on the same seat. Flipping
+    the parity every full rotation gives every pair both seats over two
+    rotations. `period` must be the active schedule's length
+    (N_PAIRS uniform, len(TRAIN_PAIRS) oversampled).
     """
-    return "p1" if (game_number + game_number // N_PAIRS) % 2 == 0 else "p2"
+    return "p1" if (game_number + game_number // period) % 2 == 0 else "p2"
 
 
 def league_roll(seed, handcrafted_fraction, n_frozen):
@@ -919,6 +949,16 @@ def main():
     parser.add_argument("--out", default="penta_net.npz")
     parser.add_argument("--init", default="",
                         help="warm-start weights (.npz) to continue from")
+    parser.add_argument("--grow-init", action="store_true",
+                        help="allow --init nets from an OLDER feature "
+                             "schema: schemas are nested, so the input "
+                             "weight matrix is grown with zero columns "
+                             "for the new features (the net starts "
+                             "identical and learns to use them)")
+    parser.add_argument("--seat-oversample", action="store_true",
+                        help="weighted TRAINING deck schedule (The Deck "
+                             "~1.8x, Counterburn/Jeskai ~1.4x seat share); "
+                             "gates keep the uniform rotation")
     parser.add_argument("--ring", default="", metavar="PATH",
                         help="replay-ring persistence file (.npz): loaded "
                              "at start when it exists, saved at exit, so "
@@ -944,6 +984,18 @@ def main():
         # warm-start net so old (v1, 675-input) nets keep their layout.
         net = Net.load(args.init)
         extractor = Extractor.for_inputs(net.inputs)
+        if args.grow_init and extractor.version < Extractor().version:
+            # Schemas are nested (v3 = v2 + block, ...): grow the input
+            # weight matrix with zero columns so the old net transfers
+            # exactly, then learns the new features from zero.
+            target = Extractor()
+            pad = np.zeros((net.w1.shape[0], target.size - net.inputs))
+            net.w1 = np.hstack([net.w1, pad])
+            net._vel[0] = np.zeros_like(net.w1)
+            print(f"grow-init: {args.init} grown v{extractor.version} "
+                  f"({net.w1.shape[1] - pad.shape[1]}) -> "
+                  f"v{target.version} ({target.size}) with zero columns")
+            extractor = target
     else:
         extractor = Extractor()
         net = Net(extractor.size, hidden=args.hidden, seed=1)
@@ -970,7 +1022,11 @@ def main():
           f"(schema v{extractor.version}: {extractor.defs} defs x 5 zones + "
           f"{extractor.n_scalars} scalars"
           + (" + castability/race block" if extractor.version >= 2 else "")
-          + f"); decks {len(DECKS)}; td-lambda {td_desc}")
+          + (" + deployment block" if extractor.version >= 3 else "")
+          + f"); decks {len(DECKS)}"
+          + (" (seat-oversampled: The Deck ~1.8x, CB/JA ~1.4x)"
+             if args.seat_oversample else "")
+          + f"; td-lambda {td_desc}")
     print(f"search: {search if search else 'off (1-ply afterstates)'}; "
           f"prior-frac {args.prior_frac:.2f}")
     if args.league_handcrafted or args.league_frozen:
@@ -1002,11 +1058,16 @@ def main():
             game_specs = []
             for g in range(round_n):
                 number = played + g
-                d1, d2 = matchup(number)
+                if args.seat_oversample:
+                    d1, d2 = matchup_train(number)
+                    learner_seat = learner_seat_for(
+                        number, period=len(TRAIN_PAIRS))
+                else:
+                    d1, d2 = matchup(number)
+                    learner_seat = learner_seat_for(number)
                 seed = args.seed_base + number
                 mode, frozen_idx = league_roll(
                     seed, args.league_handcrafted, len(args.league_frozen))
-                learner_seat = learner_seat_for(number)
                 game_specs.append(
                     (d1, d2, seed, epsilon, mode, frozen_idx, learner_seat))
             per_worker = [game_specs[w::args.workers]
@@ -1051,7 +1112,8 @@ def main():
                      hidden=args.hidden, games=played,
                      search_topk=args.search_topk,
                      feature_schema=extractor.version,
-                     td_lambda_per_turn=args.td_lambda_per_turn)
+                     td_lambda_per_turn=args.td_lambda_per_turn,
+                     seat_oversample=int(args.seat_oversample))
             rate = played / (time.time() - t_start)
             print(f"games {played:5d}  eps {epsilon:.3f}  "
                   f"loss {np.mean(losses):.4f}  "

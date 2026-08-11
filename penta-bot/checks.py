@@ -533,6 +533,40 @@ def check_f_seat_pair_dealiasing():
           f"{sum(len(s) for s in seats.values())}/24 seat-pair combos")
 
 
+def check_f_seat_oversampling():
+    """--seat-oversample: the weighted TRAINING schedule gives The Deck
+    ~1.8x and Counterburn/Jeskai ~1.4x the plain decks' seat share,
+    covers every ordered pair on both learner seats, and never touches
+    the uniform gate schedule."""
+    n = len(trainer.TRAIN_PAIRS)
+    share = {}
+    seats = {}
+    for number in range(2 * n):
+        a, b = trainer.matchup_train(number)
+        share[a] = share.get(a, 0) + 1
+        share[b] = share.get(b, 0) + 1
+        seats.setdefault((a, b), set()).add(
+            trainer.learner_seat_for(number, period=n))
+    plain = share["Sligh"]
+    ratio_deck = share["The Deck"] / plain
+    ratio_cb = share["Counterburn"] / plain
+    check("F2 oversampled seat shares hit ~1.8x/~1.4x",
+          1.6 <= ratio_deck <= 2.0 and 1.25 <= ratio_cb <= 1.55,
+          f"The Deck {ratio_deck:.2f}x, Counterburn {ratio_cb:.2f}x, "
+          f"schedule {n} pairs")
+    check("F3 oversampled schedule covers every pair on both seats",
+          len(seats) == trainer.N_PAIRS
+          and all(s == {"p1", "p2"} for s in seats.values()),
+          f"{len(seats)}/{trainer.N_PAIRS} pairs")
+    gate_counts = {}
+    for i in range(4 * trainer.N_PAIRS):
+        a, _ = trainer.matchup(i)
+        gate_counts[a] = gate_counts.get(a, 0) + 1
+    check("F4 gate schedule stays uniform",
+          len(set(gate_counts.values())) == 1,
+          f"{sorted(set(gate_counts.values()))} per-deck gate counts")
+
+
 def check_e_replay_ring():
     """The trainer's ring insertion arithmetic: oldest samples overwritten,
     size never exceeds capacity, all live slots reachable by the sampler."""
@@ -929,6 +963,50 @@ def check_i_land_rule_units():
                                       (11, None, None): 1}), base))
 
 
+def check_j_schema_v3():
+    """Schema v3 (deployment block): sizes, prefix nesting, the
+    property-derived draw-engine set, and grow-init equivalence (a v2
+    net grown with zero columns must value every v3 observation exactly
+    as it valued the v2 features)."""
+    ex2 = Extractor(version=2)
+    ex3 = Extractor(version=3)
+    check("J1 schema sizes are nested (675/825/840)",
+          ex3.v1_size == 675 and ex3.v2_size == 825 and ex3.size == 840,
+          f"{ex3.v1_size}/{ex3.v2_size}/{ex3.size}")
+    names = {}
+    catalog = json.loads(penta.catalog())
+    for card in catalog["cards"]:
+        names[card["name"]] = card["definition"]
+    engines = {names["Jayemdae Tome"], names["Library of Alexandria"],
+               names["Sage of Lat-Nam"]}
+    one_shots = {names["Ancestral Recall"], names["Wheel of Fortune"],
+                 names["Timetwister"], names["Braingeyser"]}
+    check("J2 draw engines are activated abilities, not one-shot draw",
+          engines <= ex3.draw_engine_defs
+          and not (one_shots & ex3.draw_engine_defs),
+          f"{len(ex3.draw_engine_defs)} engine defs")
+    # Prefix nesting + grow-init equivalence over live observations.
+    net2 = Net(ex2.size, hidden=8, seed=21)
+    grown = Net(ex2.size, hidden=8, seed=21)
+    pad = np.zeros((grown.w1.shape[0], ex3.size - ex2.size))
+    grown.w1 = np.hstack([grown.w1, pad])
+    game, history, make_game = rand_game_to_depth(19, 40)
+    if game is None:
+        check("J3 v3 prefix + grow-init equivalence", False, "no state")
+        return
+    obs = json.loads(game.observe())
+    v2 = ex2.features(obs)
+    v3 = ex3.features(obs)
+    prefix_ok = np.array_equal(v2, v3[:ex2.size])
+    val_ok = abs(net2.value(v2) - grown.value(v3)) < 1e-12
+    block = v3[ex2.size:]
+    check("J3 v3 prefix + grow-init equivalence",
+          prefix_ok and val_ok and len(block) == 15,
+          f"prefix {prefix_ok}, value delta "
+          f"{abs(net2.value(v2) - grown.value(v3)):.2e}, "
+          f"block nonzero {int((block != 0).sum())}/15")
+
+
 def check_i_prune_invariants():
     """Live games with the prune active: the filtered list is always a
     non-empty subset keeping at least one non-pass action, Pass is only
@@ -993,6 +1071,7 @@ def main():
     check_e_replay_ring()
     print("F. league scheduling")
     check_f_seat_pair_dealiasing()
+    check_f_seat_oversampling()
     print("G. capped-game exclusion")
     check_g_capped_games_dropped()
     print("H. rollout search + aggression prior")
@@ -1004,6 +1083,8 @@ def main():
     check_i_land_skip()
     check_i_land_rule_units()
     check_i_prune_invariants()
+    print("J. schema v3 (deployment block)")
+    check_j_schema_v3()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

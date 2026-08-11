@@ -34,13 +34,33 @@ scalars:
                  turns-to-be-killed at current total power (clipped),
                  declare-attacker options available right now
 
+Schema v3 (default) appends a DEPLOYMENT block after v2 -- the fix-1
+post-mortem's hoarding pathology (win conditions and card-advantage
+engines dying in hand). All property-derived, no card lists:
+"win condition" = printed creature power, "draw engine" = an ACTIVATED
+draw ability (rules text with a ':' activation before "draw" --
+Jayemdae Tome, Library of Alexandria, Sage of Lat-Nam in this catalog,
+future cards automatically):
+
+    15 scalars, in the order built by _v3_scalars():
+                 own-hand creature power / count / max power,
+                 own-hand draw-engine count, castable creature power,
+                 castable draw-engine count, own/opponent battlefield
+                 draw-engine counts, active-engine signal (own engines x
+                 untapped lands), own/opp battlefield artifact counts,
+                 enchantment counts, total land counts
+
+Schemas are strictly NESTED (v3 = v2 + block, v2 = v1 + block), so an
+older net's weight matrix can be grown into a newer schema by
+zero-padding the new input columns (the trainer's --grow-init).
+
 Own-library-remaining counts are skipped: the protocol does not expose the
 decklists of the built-in decks, so the deduction "decklist minus seen
 zones" has no ground truth to start from.
 
 Counts are scaled by 1/4 (a playset); scalars carry their own divisors,
 documented inline. The vector length is `Extractor.size` (675 for v1,
-825 for v2 on the 128-definition Old School catalog).
+825 for v2, 840 for v3 on the 128-definition Old School catalog).
 """
 
 import json
@@ -94,13 +114,14 @@ _CREATURE_KINDS = frozenset({"Creature", "ArtifactCreature"})
 
 N_COST_BUCKETS = 7  # converted cost 0..5, then 6+
 N_EXTRA_SCALARS = 8  # keep in sync with _extra_scalars()
+N_V3_SCALARS = 15  # keep in sync with _v3_scalars()
 
 
 class Extractor:
     """Turns one observation dict into a fixed-length float32 vector."""
 
-    def __init__(self, version=2):
-        if version not in (1, 2):
+    def __init__(self, version=3):
+        if version not in (1, 2, 3):
             raise ValueError(f"unknown feature schema version {version}")
         self.version = version
         penta = import_penta()
@@ -155,16 +176,30 @@ class Extractor:
             if any(marker in (card.get("rulesText") or "").lower()
                    for marker in markers)
         }
+        # Definitions with an ACTIVATED draw ability (a ':' activation
+        # before "draw" in the rules text): repeatable card-advantage
+        # engines, not one-shot draw spells. Property-derived, so future
+        # cards are covered automatically.
+        self.draw_engine_defs = set()
+        for card in catalog["cards"]:
+            text = card.get("rulesText") or ""
+            low = text.lower()
+            if ":" in text and "draw" in low \
+                    and text.index(":") < low.index("draw"):
+                self.draw_engine_defs.add(card["definition"])
         self.n_scalars = len(self._scalars_of_empty())
         self.v1_size = 5 * self.defs + self.n_scalars
         self.size = self.v1_size
         if version >= 2:
             self.size += self.defs + 2 * N_COST_BUCKETS + N_EXTRA_SCALARS
+        self.v2_size = self.size if version >= 2 else None
+        if version >= 3:
+            self.size += N_V3_SCALARS
 
     @classmethod
     def for_inputs(cls, inputs):
         """Extractor whose schema matches a saved net's input size."""
-        for version in (2, 1):
+        for version in (3, 2, 1):
             ex = cls(version=version)
             if ex.size == inputs:
                 return ex
@@ -329,6 +364,63 @@ class Extractor:
             turns_to_kill(power[1], life[me]) / 10.0,   # turns to be killed
             attack_options / 8.0,                # attackers available now
         )
+        return castable_defs
+
+    # -- v3 deployment block ---------------------------------------------
+
+    def _v3_scalars(self, obs, me, opp, castable_defs):
+        """Deployment scalars (fix-1 post-mortem: win conditions and
+        card-advantage engines dying in hand). Order is the schema."""
+        hand_defs = [card["definition"] for card in obs.get("hand", ())]
+        hand_creatures = [d for d in hand_defs
+                          if self.card_kind.get(d) in _CREATURE_KINDS]
+        hand_power = float(sum(self.card_power.get(d, 0)
+                               for d in hand_creatures))
+        max_hand_power = float(max(
+            (self.card_power.get(d, 0) for d in hand_creatures), default=0))
+        castable_power = float(sum(
+            self.card_power.get(d, 0) for d in castable_defs
+            if self.card_kind.get(d) in _CREATURE_KINDS))
+
+        seat_names = ("p1", "p2")
+        # engines, artifacts, enchantments, lands per side
+        agg = [[0.0] * 4, [0.0] * 4]
+        untapped_lands = 0.0
+        for perm in obs.get("battlefield", ()):
+            side = 0 if perm["controller"] == seat_names[me] else 1
+            a = agg[side]
+            if perm["definition"] in self.draw_engine_defs:
+                a[0] += 1.0
+            kind = self.card_kind.get(perm["definition"], "")
+            if kind in ("Artifact", "ArtifactCreature"):
+                a[1] += 1.0
+            elif kind == "Enchantment":
+                a[2] += 1.0
+            elif kind == "Land":
+                a[3] += 1.0
+                if side == 0 and not perm["tapped"]:
+                    untapped_lands += 1.0
+
+        return [
+            hand_power / 16.0,                     # own-hand creature power
+            len(hand_creatures) / 4.0,             # own-hand creature count
+            max_hand_power / 8.0,                  # biggest threat in hand
+            sum(1 for d in hand_defs
+                if d in self.draw_engine_defs) / 4.0,  # engines in hand
+            castable_power / 16.0,                 # deployable power NOW
+            sum(1 for d in castable_defs
+                if d in self.draw_engine_defs) / 4.0,  # engines castable now
+            agg[0][0] / 4.0,                       # own engines on battlefield
+            agg[1][0] / 4.0,                       # opp engines on battlefield
+            (min(agg[0][0], 2.0) / 2.0)
+            * (min(untapped_lands, 4.0) / 4.0),    # active-engine signal
+            agg[0][1] / 8.0,                       # own artifacts
+            agg[1][1] / 8.0,                       # opp artifacts
+            agg[0][2] / 4.0,                       # own enchantments
+            agg[1][2] / 4.0,                       # opp enchantments
+            agg[0][3] / 12.0,                      # own lands total
+            agg[1][3] / 12.0,                      # opp lands total
+        ]
 
     # -- full vector -----------------------------------------------------
 
@@ -355,5 +447,9 @@ class Extractor:
 
         vec[5 * C:self.v1_size] = self._scalars(obs, me, opp)
         if self.version >= 2:
-            self._extra_block(obs, me, opp, vec, self.v1_size)
+            castable_defs = self._extra_block(obs, me, opp, vec,
+                                              self.v1_size)
+        if self.version >= 3:
+            vec[self.v2_size:] = self._v3_scalars(obs, me, opp,
+                                                  castable_defs)
         return vec
