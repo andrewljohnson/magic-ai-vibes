@@ -1052,6 +1052,41 @@ def check_i_prune_invariants():
           f"{pruned_calls} pruned decisions, violations={violations[:3]}")
 
 
+def check_k_deploy_aux():
+    """Counterfactual deploy-axis collection: aux samples appear only
+    when a cast was declined at a greedy decision, carry the deciding
+    seat's outcome, and vanish when disabled or capped."""
+    net = Net(EX.size, hidden=8, seed=17)
+    got_aux = 0
+    bad = 0
+    decisive = 0
+    for seed in (810, 811, 812):
+        rng = random.Random(seed)
+        _, _, stats = trainer.play_selfplay_game(
+            net, EX, penta, "White Weenie", "Mono Black", seed, 0.05, rng,
+            max_eval=8, collect_aux=True)
+        if stats["result"] == "cap":
+            if "aux_X" in stats:
+                bad += 1  # capped games must drop aux with everything
+            continue
+        decisive += 1
+        if "aux_X" in stats:
+            got_aux += len(stats["aux_y"])
+            if stats["aux_X"].shape[1] != EX.size or not all(
+                    y in (0.0, 0.5, 1.0) for y in stats["aux_y"]):
+                bad += 1
+        rng2 = random.Random(seed)
+        _, _, stats_off = trainer.play_selfplay_game(
+            net, EX, penta, "White Weenie", "Mono Black", seed, 0.05, rng2,
+            max_eval=8, collect_aux=False)
+        if "aux_X" in stats_off:
+            bad += 1
+    check("K1 deploy-aux samples are outcome-labeled declined casts",
+          (decisive == 0 or got_aux > 0) and bad == 0,
+          f"{got_aux} aux samples across {decisive} decisive games, "
+          f"{bad} violations")
+
+
 def main():
     print("A. seat/perspective labels")
     check_a_observe_default_seat()
@@ -1085,6 +1120,8 @@ def main():
     check_i_prune_invariants()
     print("J. schema v3 (deployment block)")
     check_j_schema_v3()
+    print("K. deploy-axis aux loss")
+    check_k_deploy_aux()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

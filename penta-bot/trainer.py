@@ -536,7 +536,8 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
 
 
 def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
-           search=None, prior_frac=PRIOR_FRACTION, dominance=True):
+           search=None, prior_frac=PRIOR_FRACTION, dominance=True,
+           aux_out=None):
     """Epsilon-greedy rollout-search choice (1-ply when search is None).
 
     Returns (action_index, features, value); features/value are None for
@@ -549,6 +550,10 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
     trajectories). Exploration draws are NOT pruned: dominated actions
     stay in the exploration support (checks C3/H4), the prune only
     protects the exploitation path.
+
+    aux_out (a list, greedy path only): receives the best declined
+    CastSpell afterstate's features, the counterfactual deploy-axis
+    sample for --deploy-aux-weight.
     """
     actions = obs["legalActions"]
     if len(actions) == 1:
@@ -604,6 +609,17 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
                 refined[i] = float(scores[i])
         scores = refined
     best = int(np.argmax(scores))
+    if aux_out is not None:
+        # Counterfactual deploy axis (--deploy-aux-weight): when a cast
+        # was on offer and the greedy choice DECLINED it, remember the
+        # best cast's afterstate. It gets labeled with the game outcome
+        # at a small weight, so deployment states the hoarding policy
+        # never visits still receive outcome gradient (The Deck's
+        # feature-without-signal post-mortem).
+        casts = [i for i, a in enumerate(actions)
+                 if a["type"] == "CastSpell"]
+        if casts and actions[best]["type"] != "CastSpell":
+            aux_out.append(rows[max(casts, key=lambda i: scores[i])])
     return actions[best]["index"], rows[best], float(scores[best])
 
 
@@ -639,8 +655,12 @@ def td_targets(values, z, lam=TD_LAMBDA, turns=None, turn_lam=0.0):
 def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                        max_eval, opponent_net=None, learner_seat=None,
                        lam=TD_LAMBDA, search=None, prior_frac=PRIOR_FRACTION,
-                       turn_lam=0.0):
+                       turn_lam=0.0, collect_aux=False):
     """One external-mode game; returns (rows, targets, stats).
+
+    With collect_aux, stats carries ("aux_X", "aux_y"): counterfactual
+    best-declined-cast afterstates labeled with the deciding seat's
+    outcome (dropped for capped games, like everything else).
 
     Mirror mode (opponent_net None) plays and records both seats with the
     learner net. League-frozen mode seats opponent_net on the other seat,
@@ -655,6 +675,7 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     game = make_game()
     history = []
     traj = {"p1": ([], [], []), "p2": ([], [], [])}
+    aux = {"p1": [], "p2": []}
     while game.result() is None and len(history) < MAX_DECISIONS:
         seat = game.decision_seat()
         obs = json.loads(game.observe())
@@ -670,7 +691,8 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
             index, feats, value = choose(
                 fork, obs, net, extractor, rng, epsilon,
                 max_eval, depth=len(history), search=search,
-                prior_frac=prior_frac)
+                prior_frac=prior_frac,
+                aux_out=aux[seat] if collect_aux else None)
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -695,6 +717,18 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         rows.append(np.stack(feats))
         targets.append(td_targets(values, z, lam, turns=turns,
                                   turn_lam=turn_lam))
+    if collect_aux:
+        aux_X, aux_y = [], []
+        for seat in ("p1", "p2"):
+            if not aux[seat]:
+                continue
+            z = 0.5 if result == "draw" else (1.0 if result == seat
+                                              else 0.0)
+            aux_X.extend(aux[seat])
+            aux_y.extend([z] * len(aux[seat]))
+        if aux_X:
+            stats["aux_X"] = np.stack(aux_X)
+            stats["aux_y"] = np.asarray(aux_y, dtype=np.float32)
     if rows:
         return np.concatenate(rows), np.concatenate(targets), stats
     return (np.empty((0, extractor.size), dtype=np.float32),
@@ -703,12 +737,14 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 
 def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
                           max_eval, learner_seat, lam=TD_LAMBDA, search=None,
-                          prior_frac=PRIOR_FRACTION, turn_lam=0.0):
+                          prior_frac=PRIOR_FRACTION, turn_lam=0.0,
+                          collect_aux=False):
     """One league game vs penta's built-in handcrafted bot.
 
     Only the learner's seat is observed and recorded (reconstruction
     replays our own action indices, exactly as gate.py does against the
-    seeded built-in opponents). Returns (rows, targets, stats).
+    seeded built-in opponents). Returns (rows, targets, stats); with
+    collect_aux, stats carries the counterfactual deploy samples.
     """
     opponent_seat = "p2" if learner_seat == "p1" else "p1"
 
@@ -719,12 +755,13 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     game = make_game()
     history = []
     feats_list, values, turns = [], [], []
+    aux = []
     while game.result() is None and len(history) < MAX_DECISIONS:
         obs = json.loads(game.observe())
         index, feats, value = choose(
             make_fork(make_game, history, game), obs, net, extractor, rng,
             epsilon, max_eval, depth=len(history), search=search,
-            prior_frac=prior_frac)
+            prior_frac=prior_frac, aux_out=aux if collect_aux else None)
         game.act(index)
         history.append(index)
         if feats is not None:
@@ -739,6 +776,9 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         return (np.empty((0, extractor.size), dtype=np.float32),
                 np.empty(0, dtype=np.float32), stats)
     z = 0.5 if result == "draw" else (1.0 if result == learner_seat else 0.0)
+    if collect_aux and aux:
+        stats["aux_X"] = np.stack(aux)
+        stats["aux_y"] = np.full(len(aux), z, dtype=np.float32)
     return (np.stack(feats_list),
             td_targets(values, z, lam, turns=turns, turn_lam=turn_lam),
             stats)
@@ -759,7 +799,8 @@ def _worker_init(hidden, frozen_paths, schema_version=2):
 
 
 def _worker_play(task):
-    weights, games, max_eval, lam, search, prior_frac, turn_lam = task
+    (weights, games, max_eval, lam, search, prior_frac, turn_lam,
+     collect_aux) = task
     net = _WORKER["net"]
     net.set_weights(weights)
     extractor = _WORKER["extractor"]
@@ -772,7 +813,8 @@ def _worker_play(task):
                 rows, targets, stats = play_handcrafted_game(
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, learner_seat, lam=lam, search=search,
-                    prior_frac=prior_frac, turn_lam=turn_lam)
+                    prior_frac=prior_frac, turn_lam=turn_lam,
+                    collect_aux=collect_aux)
             else:
                 opponent_net = (_WORKER["frozen"][frozen_idx]
                                 if mode == "frozen" else None)
@@ -780,7 +822,8 @@ def _worker_play(task):
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, opponent_net=opponent_net,
                     learner_seat=learner_seat, lam=lam, search=search,
-                    prior_frac=prior_frac, turn_lam=turn_lam)
+                    prior_frac=prior_frac, turn_lam=turn_lam,
+                    collect_aux=collect_aux)
         except ValueError as error:
             # Upstream engine fault mid-game (seen on 0.3.0: "the scripted
             # opponent returned no action" from the built-in handcrafted
@@ -959,6 +1002,14 @@ def main():
                         help="weighted TRAINING deck schedule (The Deck "
                              "~1.8x, Counterburn/Jeskai ~1.4x seat share); "
                              "gates keep the uniform rotation")
+    parser.add_argument("--deploy-aux-weight", type=float, default=0.0,
+                        metavar="W",
+                        help="counterfactual deploy-axis aux loss: the "
+                             "best DECLINED cast's afterstate is labeled "
+                             "with the game outcome and trained at "
+                             "lr*W (signal injection for hoarding "
+                             "equilibria; 0.01 HARD MAX -- 0.1 destroyed "
+                             "the C++ net); 0 disables")
     parser.add_argument("--ring", default="", metavar="PATH",
                         help="replay-ring persistence file (.npz): loaded "
                              "at start when it exists, saved at exit, so "
@@ -1042,6 +1093,15 @@ def main():
     if args.ring and os.path.exists(args.ring):
         replay_size, replay_cursor = load_ring(
             args.ring, replay_X, replay_y, args.replay_capacity, net)
+    collect_aux = args.deploy_aux_weight > 0.0
+    if collect_aux:
+        aux_capacity = args.replay_capacity // 3
+        aux_X = np.empty((aux_capacity, extractor.size), dtype=np.float32)
+        aux_y = np.empty(aux_capacity, dtype=np.float32)
+        aux_size = 0
+        aux_cursor = 0
+        print(f"deploy-aux: counterfactual declined-cast targets at "
+              f"lr x {args.deploy_aux_weight:g} (ring {aux_capacity})")
     train_rng = np.random.default_rng(7)
     updates_done = 0
 
@@ -1074,11 +1134,13 @@ def main():
                           for w in range(args.workers)]
             weights = net.get_weights()
             tasks = [(weights, chunk, args.max_eval, args.td_lambda,
-                      search, args.prior_frac, args.td_lambda_per_turn)
+                      search, args.prior_frac, args.td_lambda_per_turn,
+                      collect_aux)
                      for chunk in per_worker if chunk]
             results = pool.map(_worker_play, tasks)
 
             new = 0
+            aux_new = 0
             decisions, caps = [], 0
             engine_errors = []
             for rows, targets, stats in results:
@@ -1088,6 +1150,14 @@ def main():
                         continue
                     decisions.append(s["decisions"])
                     caps += s["result"] == "cap"
+                    if collect_aux and "aux_X" in s:
+                        for i in range(len(s["aux_y"])):
+                            aux_X[aux_cursor] = s["aux_X"][i]
+                            aux_y[aux_cursor] = s["aux_y"][i]
+                            aux_cursor = (aux_cursor + 1) % aux_capacity
+                        aux_new += len(s["aux_y"])
+                        aux_size = min(aux_size + len(s["aux_y"]),
+                                       aux_capacity)
                 for i in range(len(targets)):
                     replay_X[replay_cursor] = rows[i]
                     replay_y[replay_cursor] = targets[i]
@@ -1105,6 +1175,13 @@ def main():
                 pick = train_rng.integers(0, replay_size, size=args.batch)
                 losses.append(net.train_batch(
                     replay_X[pick], replay_y[pick], lr))
+                if collect_aux and aux_size >= args.batch:
+                    # The aux loss term: same step count, lr scaled by
+                    # the (hard-capped) weight -- equivalent to adding
+                    # weight * BCE(aux) to every update.
+                    apick = train_rng.integers(0, aux_size, size=args.batch)
+                    net.train_batch(aux_X[apick], aux_y[apick],
+                                    lr * args.deploy_aux_weight)
                 updates_done += 1
             net.save(args.out,
                      engine_version=extractor.engine_version,
@@ -1113,12 +1190,14 @@ def main():
                      search_topk=args.search_topk,
                      feature_schema=extractor.version,
                      td_lambda_per_turn=args.td_lambda_per_turn,
-                     seat_oversample=int(args.seat_oversample))
+                     seat_oversample=int(args.seat_oversample),
+                     deploy_aux_weight=args.deploy_aux_weight)
             rate = played / (time.time() - t_start)
             print(f"games {played:5d}  eps {epsilon:.3f}  "
                   f"loss {np.mean(losses):.4f}  "
                   f"samples {new:5d}  replay {replay_size:6d}  "
-                  f"len {np.mean(decisions):5.1f}  caps {caps}  "
+                  + (f"aux {aux_new:4d}  " if collect_aux else "")
+                  + f"len {np.mean(decisions):5.1f}  caps {caps}  "
                   f"{rate:5.2f} games/s", flush=True)
             for error in engine_errors:
                 print(f"      dropped game (engine error): {error}",
