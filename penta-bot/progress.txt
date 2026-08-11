@@ -72,3 +72,24 @@
 03:50 cumulative-games=44000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [7s, 8.24 games/s] | handcrafted: vs handcrafted  120 games: 67 wins, 0 draws ->  55.8% (LCB  46.9%)  [29s, 4.13 games/s]
       promoted ckpt-v3-44000 -> penta_net.npz (handcrafted 55.8% > 49.2%)
 === v3 curve run complete Mon Aug 10 03:50:28 PDT 2026 ===
+=== v3 curve CONTINUATION Mon Aug 10 06:53:03 PDT 2026 | from penta_net.ckpt-v3-44000.npz (44000 games) | promotion bar 55.8%, ring continued | v2 features (825), search topk 4 train+gate, 8 decks, td-per-turn 0.0, dominance prune | league: handcrafted 0.15 + prev-chunk frozen 0.25, lr-warmup 200, 4000-game chunks ===
+07:59 cumulative-games=48000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [7s, 8.95 games/s] | handcrafted: vs handcrafted  120 games: 69 wins, 0 draws ->  57.5% (LCB  48.6%)  [28s, 4.22 games/s]
+      promoted ckpt-v3-48000 -> penta_net.npz (handcrafted 57.5% > 55.8%)
+      confirm-400: ckpt-v3-48000: vs handcrafted  400 games: 219 wins, 0 draws ->  54.8% (LCB  49.9%)  [107s, 3.74 games/s]
+09:04 cumulative-games=52000 | random: vs random       60 games: 57 wins, 0 draws ->  95.0% (LCB  86.3%)  [7s, 8.89 games/s] | handcrafted: vs handcrafted  120 games: 56 wins, 0 draws ->  46.7% (LCB  38.0%)  [32s, 3.71 games/s]
+      kept penta_net.npz (ckpt-v3-52000 handcrafted 46.7% <= 57.5%)
+10:16 cumulative-games=56000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [8s, 7.28 games/s] | handcrafted: vs handcrafted  120 games: 66 wins, 0 draws ->  55.0% (LCB  46.1%)  [36s, 3.36 games/s]
+      kept penta_net.npz (ckpt-v3-56000 handcrafted 55.0% <= 57.5%)
+11:20 cumulative-games=60000 | random: vs random       60 games: 60 wins, 0 draws -> 100.0% (LCB  94.0%)  [6s, 9.81 games/s] | handcrafted: vs handcrafted  120 games: 64 wins, 0 draws ->  53.3% (LCB  44.4%)  [30s, 4.05 games/s]
+      kept penta_net.npz (ckpt-v3-60000 handcrafted 53.3% <= 57.5%)
+12:30 cumulative-games=64000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [10s, 6.09 games/s] | handcrafted: vs handcrafted  120 games: 58 wins, 0 draws ->  48.3% (LCB  39.6%)  [50s, 2.40 games/s]
+      kept penta_net.npz (ckpt-v3-64000 handcrafted 48.3% <= 57.5%)
+13:35 cumulative-games=68000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [8s, 7.97 games/s] | handcrafted: vs handcrafted  120 games: 66 wins, 0 draws ->  55.0% (LCB  46.1%)  [30s, 4.01 games/s]
+      kept penta_net.npz (ckpt-v3-68000 handcrafted 55.0% <= 57.5%)
+14:43 cumulative-games=72000 | random: vs random       60 games: 59 wins, 0 draws ->  98.3% (LCB  91.1%)  [9s, 6.96 games/s] | handcrafted: vs handcrafted  120 games: 64 wins, 0 draws ->  53.3% (LCB  44.4%)  [65s, 1.84 games/s]
+      kept penta_net.npz (ckpt-v3-72000 handcrafted 53.3% <= 57.5%)
+15:57 cumulative-games=76000 | random: vs random       60 games: 60 wins, 0 draws -> 100.0% (LCB  94.0%)  [6s, 9.71 games/s] | handcrafted: vs handcrafted  120 games: 64 wins, 0 draws ->  53.3% (LCB  44.4%)  [35s, 3.44 games/s]
+      kept penta_net.npz (ckpt-v3-76000 handcrafted 53.3% <= 57.5%)
+      NOTE Mon Aug 10 16:26 PDT 2026: land-drop dominance rule shipped (pass pruned when a free land drop is available; The Deck land-skip pathology). Active for ALL gates from cumulative-games=80000 onward (gate.py re-imports per gate) and for TRAINING from chunk 21 (games 80000+); chunk 20 (76000-80000) trained without it.
+17:23 cumulative-games=80000 | random: vs random       60 games: 60 wins, 0 draws -> 100.0% (LCB  94.0%)  [16s, 3.84 games/s] | handcrafted: vs handcrafted  120 games: 62 wins, 0 draws ->  51.7% (LCB  42.8%)  [48s, 2.52 games/s]
+      kept penta_net.npz (ckpt-v3-80000 handcrafted 51.7% <= 57.5%)

@@ -218,10 +218,34 @@ terminates / leaves the turn-step context, stat-changed permanents
 and cards whose rules text signals snapshot-invisible effects (extra
 turns, until-end-of-turn grants, prevention, regeneration; text-derived
 from the catalog, 39 definitions, future cards covered automatically).
-Pass itself is exempt and the only non-pass action is never pruned.
-checks.py section I replays all three scouted decisions (blunder
-pruned, legitimate targeted plays in the same state survive) and audits
-the invariants over live games.
+The only non-pass action is never pruned. checks.py section I replays
+all three scouted decisions (blunder pruned, legitimate targeted plays
+in the same state survive) and audits the invariants over live games.
+
+**Land-drop rule** (added mid-continuation at 80k games; the mirror
+direction, our C++ engine's "spend=-1 / land-drop-never-worse"): the
+8-deck scout sweep on the 48k net showed The Deck at 7/128 wins,
+skipping 2.9 land drops per losing game and dying at median turn 17
+holding the City of Brass / Tundra it never played -- pass looks
+value-equal to a free drop, so frugality starves every big spell. Now,
+in our own main phase with an empty stack, PASS ITSELF is pruned when a
+legal PlayLand settles to pure development (battlefield strictly grows,
+the hand spend is exactly the one land, our life/library and the entire
+opponent side untouched). The net still chooses WHICH land; any side
+effect (an Ankh-style life hit, a lost permanent) makes the drop
+incomparable and Pass survives -- no caps, no card lists, fail closed
+(checks I5/I6).
+
+Fix-1 verdict (128-game re-gate of The Deck pairings, scout seed block
+9200000, ckpt-v3-48000, land rule on): land skips per losing game 2.9
+-> 0.2 -- the mechanism works and the rule stays -- but wins 4/128 vs
+the 7/128 baseline and spells/game 5.4 vs 5.5, both unchanged inside
+noise: mana was NOT the binding constraint. The residual pathology is
+DEPLOYMENT HOARDING -- Serra Angel / Jayemdae Tome still die in hand
+with the mana to cast them available. A casting-dominates-pass prune is
+NOT safe (holding counter mana is legitimately correct for a control
+deck), so the fix moves to the training side: deployment-aware features
+(schema v3) and pilot-seat oversampling, the next run's package.
 
 ## Files
 

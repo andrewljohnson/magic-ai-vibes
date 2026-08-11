@@ -854,9 +854,85 @@ def check_i_scouted_blunders():
                 found["blunder"] or {"index": -1}, found["legit"], ex)
 
 
+SCOUT48_NET = "penta_net.ckpt-v3-48000.npz"
+
+
+def check_i_land_skip():
+    """I5: the land-drop rule on real scout data. Seed 9201713 (The Deck
+    seat p2 vs White Weenie, the 48k-net 8-deck sweep) lost with 9
+    skipped land drops, dying with three City of Brass in hand. At the
+    first main-phase decision of that game offering both a land drop and
+    Pass, the prune must remove Pass and keep every PlayLand."""
+    import os
+    if not os.path.exists(SCOUT48_NET):
+        check("I5 pass is pruned when a free land drop is available",
+              False, f"{SCOUT48_NET} missing")
+        return
+    net = Net.load(SCOUT48_NET)
+    ex = Extractor.for_inputs(net.inputs)
+
+    def pred(obs):
+        if obs.get("stack") or obs.get("pregame"):
+            return False
+        if obs.get("activeSeat") != "p2" or obs.get("step") not in (
+                "PrecombatMain", "PostcombatMain"):
+            return False
+        types = {a["type"] for a in obs["legalActions"]}
+        return "PlayLand" in types and "PassPriority" in types
+
+    obs, fork = _replay_to(net, ex, "The Deck", "White Weenie", "p2",
+                           9201713, pred)
+    if obs is None:
+        check("I5 pass is pruned when a free land drop is available",
+              False, "replay found no land+pass main-phase decision")
+        return
+    kept = trainer.dominance_prune(fork, obs, obs["legalActions"], ex)
+    kept_types = [a["type"] for a in kept]
+    lands_in = sum(1 for a in obs["legalActions"]
+                   if a["type"] == "PlayLand")
+    check("I5 pass is pruned when a free land drop is available",
+          "PassPriority" not in kept_types
+          and kept_types.count("PlayLand") == lands_in,
+          f"turn {obs.get('turn')} {obs.get('step')}: "
+          f"{len(obs['legalActions'])} -> {len(kept)} actions, "
+          f"lands {kept_types.count('PlayLand')}/{lands_in} kept, "
+          f"pass {'kept' if 'PassPriority' in kept_types else 'pruned'}")
+
+
+def check_i_land_rule_units():
+    """I6: _land_dominates_pass unit cases, including the fail-closed
+    side-effect guards (Ankh-style life hit, opponent change)."""
+    def state(**over):
+        base = {"turn": 5, "step": "PrecombatMain", "my_hand": 5,
+                "my_life": 20, "my_lib": 40, "my_bf": {(9, None, None): 3},
+                "my_mana": 0, "opp_hand": 6, "opp_life": 20,
+                "opp_bf": {(4, 2, 2): 1}, "opp_gy": {}, "opp_exile": {}}
+        base.update(over)
+        return base
+
+    base = state()
+    grown = {(9, None, None): 4}
+    check("I6a pure development dominates pass",
+          trainer._land_dominates_pass(
+              state(my_hand=4, my_bf=grown), base))
+    check("I6b a life hit on the drop fails closed (Ankh guard)",
+          not trainer._land_dominates_pass(
+              state(my_hand=4, my_bf=grown, my_life=18), base))
+    check("I6c an opponent-side change fails closed",
+          not trainer._land_dominates_pass(
+              state(my_hand=4, my_bf=grown, opp_life=22), base))
+    check("I6d no battlefield growth fails closed",
+          not trainer._land_dominates_pass(state(my_hand=4), base))
+    check("I6e losing another permanent fails closed",
+          not trainer._land_dominates_pass(
+              state(my_hand=4, my_bf={(9, None, None): 2,
+                                      (11, None, None): 1}), base))
+
+
 def check_i_prune_invariants():
     """Live games with the prune active: the filtered list is always a
-    non-empty subset that keeps Pass and at least one non-pass action,
+    non-empty subset keeping at least one non-pass action, Pass is only
+    ever removed by the land-drop rule (a PlayLand stays available),
     and games still complete."""
     net = Net(EX.size, hidden=8, seed=13)
     stats_log = []
@@ -872,10 +948,11 @@ def check_i_prune_invariants():
             violations.append("not a subset / empty")
         had_pass = any(a["type"] == "PassPriority" for a in actions)
         has_pass = any(a["type"] == "PassPriority" for a in kept)
-        if had_pass and not has_pass:
-            violations.append("pass removed")
-        if len(kept) < len(actions) and not any(
-                a["type"] != "PassPriority" for a in kept):
+        if had_pass and not has_pass and not any(
+                a["type"] == "PlayLand" for a in kept):
+            violations.append("pass removed without a land drop kept")
+        if len(kept) < len(actions) and all(
+                a["type"] == "PassPriority" for a in kept):
             violations.append("all non-pass actions pruned")
         return kept
 
@@ -924,6 +1001,8 @@ def main():
     check_h_playout_and_search()
     print("I. dominance prune (no upside versus pass)")
     check_i_scouted_blunders()
+    check_i_land_skip()
+    check_i_land_rule_units()
     check_i_prune_invariants()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")

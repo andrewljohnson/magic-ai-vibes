@@ -201,11 +201,25 @@ def afterstate_rows(fork, seat, actions, extractor, keep_copies=False):
 # whenever the play's visible consequence is only our own hand
 # shrinking. Tapped/attacking state and mana differences never count as
 # "strictly worse". Only CastSpell and ActivateAbility candidates are
-# tested (nothing else is prunable), the only non-pass action is never
-# pruned, and Pass itself is exempt.
+# tested (nothing else is prunable), and the only non-pass action is
+# never pruned.
+#
+# LAND-DROP RULE (the mirror direction, the C++ "spend=-1 /
+# land-drop-never-worse" port): in our own main phase with an empty
+# stack, PASS ITSELF is pruned when a legal PlayLand settles to pure
+# development -- our battlefield gains, the hand spend is exactly the
+# one land (spend is free), our life/library and the entire opponent
+# side untouched. The 8-deck scout sweep showed The Deck skipping 2.9
+# land drops per losing game and dying at turn 17 holding City of
+# Brass/Tundra it never played: pass looks value-equal to a free drop,
+# so frugality starves every big spell. The net still picks WHICH land
+# to play (only Pass is removed, never a choice among lands), and any
+# side effect (an Ankh-style life hit, a lost permanent) makes the drop
+# incomparable so Pass survives -- fail closed, no caps, no card lists.
 
 PRUNE_SETTLE_STEPS = 24
 _PRUNABLE_TYPES = frozenset({"CastSpell", "ActivateAbility"})
+_MAIN_STEPS = ("PrecombatMain", "PostcombatMain")
 
 
 def _card_multiset(cards):
@@ -316,11 +330,39 @@ def _dominated_by_pass(cand, base, invisible_upside):
     return not invisible_upside
 
 
+def _land_dominates_pass(cand, base):
+    """True when a settled land-drop state dominates standing pat: pure
+    development only. The hand spend of exactly one card is free (the
+    C++ 'spend=-1' rule); everything else must be no worse for us and
+    no better for the opponent, with the battlefield strictly growing.
+    Any side effect -- a life hit (Ankh-style), a lost or stat-changed
+    permanent, an opponent gain -- fails closed and keeps Pass."""
+    if cand["turn"] != base["turn"] or cand["step"] != base["step"]:
+        return False
+    # Us: exactly one card spent, battlefield strictly grew, nothing
+    # else declined.
+    if cand["my_hand"] != base["my_hand"] - 1:
+        return False
+    if cand["my_life"] < base["my_life"] or cand["my_lib"] < base["my_lib"]:
+        return False
+    if not _sub_multiset(base["my_bf"], cand["my_bf"]):
+        return False
+    if sum(cand["my_bf"].values()) <= sum(base["my_bf"].values()):
+        return False
+    # Opponent: completely untouched (any change is incomparable).
+    return (cand["opp_hand"] == base["opp_hand"]
+            and cand["opp_life"] == base["opp_life"]
+            and cand["opp_bf"] == base["opp_bf"]
+            and cand["opp_gy"] == base["opp_gy"]
+            and cand["opp_exile"] == base["opp_exile"])
+
+
 def dominance_prune(fork, obs, actions, extractor):
-    """Drop candidates with no upside versus passing; see commentary.
-    Always returns a non-empty subset of `actions` containing Pass and
-    at least one non-pass action (with no pass present, a lone non-pass
-    action, or any failed guard the list comes back untouched)."""
+    """Drop candidates with no upside versus passing, and Pass itself
+    when a free land drop dominates it; see commentary. Always returns
+    a non-empty subset of `actions` keeping at least one non-pass
+    action (with no pass present, a lone non-pass action, or any failed
+    guard the list comes back untouched)."""
     seat = obs["seat"]
     if obs.get("pregame") or obs.get("stack"):
         return actions
@@ -328,32 +370,51 @@ def dominance_prune(fork, obs, actions, extractor):
     if not passes:
         return actions
     non_pass = [a for a in actions if a["type"] != "PassPriority"]
-    testable = [a for a in non_pass if a["type"] in _PRUNABLE_TYPES]
-    if len(non_pass) < 2 or not testable:
-        return actions
     base = _dominance_state(obs, seat)
-    # Candidate card definitions: CastSpell carries the hand instance,
-    # ActivateAbility the battlefield source instance. Unmappable ids
-    # count as invisible-upside (fail closed).
-    instance_def = {c.get("instance", c.get("objectId")): c["definition"]
-                    for c in obs.get("hand", ())}
-    instance_def.update({p["instance"]: p["definition"]
-                         for p in obs.get("battlefield", ())})
     pruned = set()
-    for action in testable:
-        inst = action.get("card", action.get("source"))
-        definition = instance_def.get(inst)
-        upside = (definition is None
-                  or definition in extractor.invisible_upside_defs)
-        copy = fork()
-        copy.act(action["index"])
-        if not _settle_all_pass(copy):
-            continue
-        cand = _dominance_state(json.loads(copy.observe(seat)), seat)
-        if _dominated_by_pass(cand, base, upside):
-            pruned.add(action["index"])
-    if not pruned or len(pruned) == len(non_pass):
-        # Never remove every non-pass action (fail closed on a sweep).
+
+    # (a) Candidates strictly dominated by standing pat.
+    testable = [a for a in non_pass if a["type"] in _PRUNABLE_TYPES]
+    if len(non_pass) >= 2 and testable:
+        # Candidate card definitions: CastSpell carries the hand
+        # instance, ActivateAbility the battlefield source instance.
+        # Unmappable ids count as invisible-upside (fail closed).
+        instance_def = {c.get("instance", c.get("objectId")):
+                        c["definition"] for c in obs.get("hand", ())}
+        instance_def.update({p["instance"]: p["definition"]
+                             for p in obs.get("battlefield", ())})
+        for action in testable:
+            inst = action.get("card", action.get("source"))
+            definition = instance_def.get(inst)
+            upside = (definition is None
+                      or definition in extractor.invisible_upside_defs)
+            copy = fork()
+            copy.act(action["index"])
+            if not _settle_all_pass(copy):
+                continue
+            cand = _dominance_state(json.loads(copy.observe(seat)), seat)
+            if _dominated_by_pass(cand, base, upside):
+                pruned.add(action["index"])
+        if len(pruned) == len(non_pass):
+            # Never remove every non-pass action (fail closed on a sweep).
+            pruned = set()
+
+    # (b) Pass dominated by a free land drop (our main phase only). The
+    # net keeps the choice among lands; only Pass is removed.
+    if obs.get("activeSeat") == seat and obs.get("step") in _MAIN_STEPS:
+        for action in non_pass:
+            if action["type"] != "PlayLand":
+                continue
+            copy = fork()
+            copy.act(action["index"])
+            if not _settle_all_pass(copy):
+                continue
+            cand = _dominance_state(json.loads(copy.observe(seat)), seat)
+            if _land_dominates_pass(cand, base):
+                pruned.update(a["index"] for a in passes)
+                break
+
+    if not pruned:
         return actions
     return [a for a in actions if a["index"] not in pruned]
 
