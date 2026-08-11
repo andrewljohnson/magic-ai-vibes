@@ -509,6 +509,32 @@ passivity last era). Both are A/B'd BEHAVIORALLY (The Deck 128-game
 sweep: spells/game, win-condition deploys, wins), not gate-first.
 Deliverable stays ckpt-v3-48000 (57.5% / confirm-400 54.8%).
 
+**Signal-injection verdict (arms C/D, 2026-08-11): both NULL --
+stopped.** Seed-locked 3000-game smokes from the 48k net, behavioral
+acceptance on the The Deck 128-game sweep (deck-sweep.py, scout seed
+block):
+
+| The Deck seat | wins | spells/g | big-threat casts/g | engine casts/g |
+| --- | --- | --- | --- | --- |
+| baseline ckpt-v3-48000 | 4/128 | 5.4 | 0.03 | 0.10 |
+| arm C: deploy-aux 0.01 (v3 grow) | 3/128 | 5.4 | 0.10 | 0.15 |
+| arm D: playout-max-eval 24 | 4/128 | 5.6 | 0.05 | 0.17 |
+
+Sanity gates 52.5% / 50.0% -- no collapse, no monkey's paw at weight
+0.01. The deploy counters nudge the right way (the aux arm tripled the
+big-threat cast rate off a near-zero base; both arms +50-70% engine
+casts), but spells/game and wins are FLAT: The Deck still loses
+124+/128 with the cards in hand. Per the acceptance rule the line is
+closed: no more feature-side or smoke-scale deployment levers. What
+this whole arc establishes: the hoarding equilibrium is held in place
+by the VALUE function's blindness to multi-turn payoffs (a Tome
+activated three times, a Serra attacking twice are 5+ turns of
+consequence; playouts to the next turn start cannot see them), and the
+honest fixes are structural -- much deeper playout horizons at real
+compute cost, or a policy head / explicit multi-turn credit -- not
+another feature block. The deliverable stands at handcrafted parity:
+ckpt-v3-48000, 57.5%/120, confirm-400 54.8% (LCB 49.9%).
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->
