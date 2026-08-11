@@ -116,6 +116,21 @@ LEAGUE_FROZEN_FRACTION = 0.25
 # 1.0, shared this). True engine draws still score 0.5.
 MAX_DECISIONS = 600
 
+# Policy-head decision-time blend (winner-imitation prototype).
+# PENTA_POLICY_NET names a head trained by train_policy_head.py on the
+# SAME afterstate features as the value net; PENTA_POLICY_WEIGHT (w)
+# mixes it into the MYOPIC screen: screen = (1-w)*value + w*policy.
+# Applied BEFORE the playout stage, so actions a winner would take but
+# the myopic value dislikes survive into the top-k; terminal candidates
+# keep exact outcomes and the playout refinement stays pure value.
+# Env-based so gate.py / deck-sweep.py / scout.py workers inherit the
+# head with zero plumbing; training runs simply leave the vars unset.
+POLICY_HEAD = None
+POLICY_WEIGHT = 0.0
+if os.environ.get("PENTA_POLICY_NET"):
+    POLICY_HEAD = Net.load(os.environ["PENTA_POLICY_NET"])
+    POLICY_WEIGHT = float(os.environ.get("PENTA_POLICY_WEIGHT", "0.25"))
+
 
 def eval_budget(depth, max_eval):
     """Replay cost is O(history length) per candidate, so evaluate fewer
@@ -579,6 +594,15 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
                                           keep_copies=True)
     values = net.value_batch(np.stack(rows))
     scores = [t if t is not None else v for t, v in zip(terms, values)]
+    if POLICY_HEAD is not None and POLICY_WEIGHT > 0.0:
+        if POLICY_HEAD.inputs != len(rows[0]):
+            raise ValueError(
+                f"policy head has {POLICY_HEAD.inputs} inputs but the "
+                f"feature schema here has {len(rows[0])}")
+        policy = POLICY_HEAD.value_batch(np.stack(rows))
+        scores = [t if t is not None
+                  else (1.0 - POLICY_WEIGHT) * v + POLICY_WEIGHT * p
+                  for t, v, p in zip(terms, values, policy)]
     if search is not None and search.top_k > 0 and len(actions) > 1:
         # Myopic screen -> playouts for the top-k. Terminal candidates
         # keep their exact outcome; the final argmax is over the refined

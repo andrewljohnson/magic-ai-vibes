@@ -558,6 +558,37 @@ arc. Stack features would only sharpen a screen that is already
 directionally right, so per the (c) branch nothing was implemented;
 held for discussion.
 
+## Policy-head prototype (v1 design, 2026-08-11)
+
+Every wall this week -- deployment hoarding, the tap-out habit, counter
+declines, the old passivity -- is one failure: the greedy value
+stand-in cannot credit actions whose payoff spans multiple turns, and
+features / curriculum / aux-loss / deeper-playouts all proved null
+against it. v1 learns ACTION SELECTION directly, cheaply:
+
+- **Data**: winner imitation. Action-level data is NOT recoverable
+  from existing artifacts (rings hold only the chosen afterstate +
+  outcome -- positives-only collapses into the value function;
+  transcripts hold strings), so `gen_policy_archive.py` self-plays the
+  best net and records, at every multi-action greedy decision, the
+  post-prune candidate afterstate set + the choice + the seat's
+  eventual result. Winner-seat decisions only; ~330 rows/game, f16.
+- **Head**: `train_policy_head.py` -- same architecture and features
+  as the value net (no new schema), BCE on "the eventual winner chose
+  this afterstate" vs the winner's declined candidates; holdout RANK
+  accuracy (chosen ranks first) vs the 1/k random baseline is the
+  training-side sanity metric.
+- **Blend**: decision-time only, `PENTA_POLICY_NET` +
+  `PENTA_POLICY_WEIGHT` env (workers inherit; training runs leave the
+  vars unset): the MYOPIC screen becomes (1-w)*value + w*policy BEFORE
+  the top-k playout stage, so winner-typical but myopically-ugly
+  actions survive into the playouts. Terminals stay exact; the refined
+  argmax stays pure value. w swept over {0.25, 0.5}.
+- **Acceptance, behavioral first**: Counterburn counterspells/game
+  (~0.1 baseline), The Deck spells/game + big-threat casts, sweep wins
+  vs the 7/128 / 4/128 references; 120-gate sanity, deliverable behind
+  the 57.5% bar throughout.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->

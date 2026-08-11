@@ -92,10 +92,13 @@ def main():
         engines += e
     print(f"{args.deck} sweep: {args.net} | {n} games in "
           f"{time.time() - t0:.0f}s")
+    counterspells = sum(r["counters"].get("counterspells_cast", 0)
+                        for r in games) / n
     print(f"  wins {wins}/{n} | spells/game {spells:.1f} | "
           f"land-skips/loss {loss_skips:.1f}")
     print(f"  big-threat casts/game {big / n:.2f} | "
-          f"engine casts/game {engines / n:.2f}  (property-derived)")
+          f"engine casts/game {engines / n:.2f} | "
+          f"counterspells/game {counterspells:.2f}  (property-derived)")
     per_opp = {}
     for r in games:
         w, m = per_opp.get(r["their_deck"], (0, 0))
