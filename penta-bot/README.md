@@ -616,6 +616,34 @@ PENTA_POLICY_WEIGHT=0.25. Natural scale-ups, in order of expected
 value: iterate the head (bigger archive from BLENDED self-play,
 DAgger-style), let training run under the blend, and revisit w.
 
+## Playing against the bot (play_server.py)
+
+`play_server.py` serves a local human-vs-bot game over HTTP; the client
+page is `web/penta-play.html` (linked from the dashboard nav as "Play
+penta bot"):
+
+```bash
+cd penta-bot && python3 play_server.py     # API on http://localhost:4180
+```
+
+The web page itself is served by the ARENA web server (`web/server.mjs`,
+port 4173, our C++ engine's dashboard -- a separate process this server
+does not touch) or any static server over `web/`; it talks to port 4180
+for game state. The bot seat plays the CERTIFIED configuration through
+`trainer.choose()` -- value net `penta_net.npz` + policy head
+`policy_head.ckpt-dagger1.npz` at `PENTA_POLICY_WEIGHT=0.25`, dominance
+prune, rollout search at the gate config (topk 4 / 1 playout / budget
+120 / playout-max-eval 8, max-eval 16) on true `game.clone()` forks --
+so you face exactly the bot that gates. Every human choice is a
+`legalActions` index rendered as a labeled button (mulligans, casts
+with targets/X, attacks, blocks, response windows, mid-resolution
+decisions); nothing bypasses the list. Concede is session-level only
+(protocol 2 removed Concede from the action list). Read-only over the
+training artifacts; safe to run beside an active training run.
+`test_play_server.py` drives full games through the HTTP API (random
+human) and re-derives the bot's moves offline to assert they match
+`trainer.choose()`.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->

@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play the penta bot</title>
+<style>
+  :root {
+    --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --grid: #e7e6e2;
+    --s1: #2a78d6; --s2: #1baf7a; --ref: #9a9891;
+    --card: #ffffff; --danger: #c2483a; --accent-soft: #e8f0fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --grid: #34332f;
+      --s1: #3987e5; --s2: #199e70; --ref: #6f6d66;
+      --card: #232322; --danger: #e06a5c; --accent-soft: #22334a;
+    }
+  }
+  html, body { margin: 0; background: var(--surface); color: var(--ink);
+    font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--ink-2); margin: 0 0 14px; font-size: 13px; }
+  h2 { font-size: 13px; margin: 14px 0 6px; color: var(--ink-2);
+    font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .layout { display: flex; gap: 18px; align-items: flex-start; }
+  .board { flex: 1; min-width: 0; }
+  .side { width: 320px; flex-shrink: 0; }
+  @media (max-width: 900px) { .layout { flex-direction: column; }
+    .side { width: 100%; } }
+
+  .panel { border: 1px solid var(--grid); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 12px; background: var(--card); }
+  .statusline { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px;
+    align-items: baseline; }
+  .statusline b { font-size: 17px; font-variant-numeric: tabular-nums; }
+  .statusline .who { color: var(--ink-2); }
+  .phase { color: var(--s1); font-weight: 600; }
+
+  .cards { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; }
+  .cardt { border: 1px solid var(--grid); border-radius: 8px;
+    background: var(--card); padding: 5px 8px; font-size: 12px;
+    min-width: 92px; max-width: 170px; position: relative; }
+  .cardt .nm { font-weight: 600; }
+  .cardt .cost { color: var(--ink-2); float: right; margin-left: 6px;
+    font-variant-numeric: tabular-nums; }
+  .cardt .meta { color: var(--ink-2); font-size: 11px; margin-top: 1px; }
+  .cardt.tapped { opacity: .55; transform: rotate(3deg); }
+  .cardt.attacking { border-color: var(--danger); }
+  .cardt.blocking { border-color: var(--s2); }
+  .cardt .badge { position: absolute; top: -7px; right: -5px;
+    background: var(--s1); color: #fff; border-radius: 9px;
+    font-size: 10px; padding: 1px 6px; }
+  .pip { font-weight: 700; }
+  .pW { color: #b1a03c; } .pU { color: var(--s1); } .pB { color: #7d6b95; }
+  .pR { color: var(--danger); } .pG { color: var(--s2); }
+  .empty { color: var(--ref); font-size: 12px; padding: 4px 0; }
+
+  .stackpanel { border-color: var(--s1); background: var(--accent-soft); }
+  .stackpanel .cardt { border-color: var(--s1); }
+
+  .actions .grp { margin-bottom: 8px; }
+  .actions .gl { font-size: 11px; color: var(--ink-2);
+    text-transform: uppercase; letter-spacing: .04em; margin: 0 0 4px; }
+  button { font: inherit; }
+  .abtn { display: inline-block; margin: 0 6px 6px 0; padding: 6px 12px;
+    border: 1px solid var(--grid); border-radius: 8px; cursor: pointer;
+    background: var(--card); color: var(--ink); font-size: 13px; }
+  .abtn:hover { border-color: var(--s1); }
+  .abtn.pass { opacity: .8; }
+  .abtn.attack { border-color: var(--danger); }
+  .abtn:disabled { opacity: .4; cursor: default; }
+  .thinking { color: var(--s1); font-size: 13px; padding: 6px 0; }
+
+  .logbox { max-height: 420px; overflow-y: auto; font-size: 12px; }
+  .logbox .e { padding: 2px 0; border-bottom: 1px dotted var(--grid); }
+  .logbox .bot { color: var(--s1); }
+  .logbox .hum { color: var(--ink); }
+  .logbox .dim { opacity: .55; }
+  .logbox .t { color: var(--ink-2); font-size: 11px; margin-right: 5px;
+    font-variant-numeric: tabular-nums; }
+
+  select, input[type=number] { font: inherit; padding: 5px 8px;
+    border: 1px solid var(--grid); border-radius: 7px;
+    background: var(--card); color: var(--ink); width: 100%;
+    box-sizing: border-box; }
+  label { display: block; font-size: 12px; color: var(--ink-2);
+    margin: 8px 0 3px; }
+  .primary { background: var(--s1); color: #fff; border: none;
+    border-radius: 8px; padding: 8px 16px; cursor: pointer;
+    font-weight: 600; margin-top: 12px; }
+  .danger { background: none; border: 1px solid var(--danger);
+    color: var(--danger); border-radius: 8px; padding: 5px 12px;
+    cursor: pointer; font-size: 12px; }
+  .banner { border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+    font-weight: 600; border: 1px solid var(--grid); }
+  .banner.win { border-color: var(--s2); color: var(--s2); }
+  .banner.loss { border-color: var(--danger); color: var(--danger); }
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; }
+  details div { font-size: 12px; color: var(--ink-2); padding: 4px 0 0 8px; }
+  .offline { color: var(--danger); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Play the penta bot</h1>
+  <p class="sub" id="topline">Connecting to the play server…</p>
+
+  <div class="layout">
+    <div class="board" id="board" hidden>
+      <div id="banner"></div>
+
+      <div class="panel">
+        <div class="statusline" id="oppstatus"></div>
+        <details id="oppgy"><summary>graveyard</summary><div></div></details>
+      </div>
+      <h2>Opponent battlefield</h2>
+      <div class="cards" id="oppbf"></div>
+
+      <div id="stackwrap" hidden>
+        <h2>Stack <span style="text-transform:none">(top last)</span></h2>
+        <div class="panel stackpanel"><div class="cards" id="stack"></div></div>
+      </div>
+
+      <h2>Your battlefield</h2>
+      <div class="cards" id="mybf"></div>
+
+      <h2>Your hand</h2>
+      <div class="cards" id="hand"></div>
+      <div class="panel">
+        <div class="statusline" id="mystatus"></div>
+        <details id="mygy"><summary>graveyard</summary><div></div></details>
+      </div>
+
+      <h2>Your move</h2>
+      <div class="panel actions" id="actions"></div>
+    </div>
+
+    <div class="side">
+      <div class="panel" id="newgame">
+        <h2 style="margin-top:0">New game</h2>
+        <label for="humandeck">Your deck</label>
+        <select id="humandeck"></select>
+        <label for="botdeck">Bot deck</label>
+        <select id="botdeck"></select>
+        <label for="seatsel">Your seat</label>
+        <select id="seatsel">
+          <option value="random">Random</option>
+          <option value="p1">p1 (on the play)</option>
+          <option value="p2">p2 (on the draw)</option>
+        </select>
+        <label for="seedin">Seed (blank = random)</label>
+        <input id="seedin" type="number" min="0" placeholder="random">
+        <button class="primary" id="startbtn">Start game</button>
+      </div>
+
+      <div class="panel" id="gameinfo" hidden></div>
+
+      <div class="panel">
+        <h2 style="margin-top:0">Game log</h2>
+        <div class="logbox" id="log"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script src="site-nav.js"></script>
+<script>
+"use strict";
+const API = "http://localhost:4180";
+let META = null;
+let STATE = null;
+let BUSY = false;
+
+const $ = id => document.getElementById(id);
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  const r = await fetch(API + path, opts);
+  const data = await r.json();
+  if (!r.ok) throw Object.assign(new Error(data.error || r.status), { data });
+  return data;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g,
+    c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function costHtml(def) {
+  const info = META.catalog[def];
+  const c = info && info.manaCost;
+  if (!c) return "";
+  let out = "";
+  if (c.generic) out += c.generic;
+  const pips = [["white", "W", "pW"], ["blue", "U", "pU"],
+    ["black", "B", "pB"], ["red", "R", "pR"], ["green", "G", "pG"]];
+  for (const [key, letter, cls] of pips) {
+    for (let i = 0; i < (c[key] || 0); i++) {
+      out += `<span class="pip ${cls}">${letter}</span>`;
+    }
+  }
+  for (let i = 0; i < (c.whiteRedHybrid || 0); i++) {
+    out += `<span class="pip pW">W</span>/<span class="pip pR">R</span>`;
+  }
+  return out;
+}
+
+function handCard(card) {
+  const info = META.catalog[card.definition] || {};
+  const pt = info.power != null ? `${info.power}/${info.toughness}` : "";
+  return `<div class="cardt"><span class="cost">${costHtml(card.definition)}</span>
+    <span class="nm">${esc(card.name)}</span>
+    <div class="meta">${esc(info.kind || "")}${pt ? " · " + pt : ""}</div></div>`;
+}
+
+function permCard(perm, count) {
+  const info = META.catalog[perm.definition] || {};
+  const cls = ["cardt", perm.tapped ? "tapped" : "",
+    perm.attacking ? "attacking" : "", perm.blocking != null ? "blocking" : ""]
+    .filter(Boolean).join(" ");
+  const bits = [];
+  if (perm.power != null) {
+    const t = perm.toughness - (perm.damage || 0);
+    bits.push(`${perm.power}/${perm.damage ? t + "*" : perm.toughness}`);
+  } else if (info.kind) bits.push(esc(info.kind));
+  if (perm.flying) bits.push("✈");
+  if (perm.tapped) bits.push("⤵ tapped");
+  if (perm.attacking) bits.push("⚔ attacking");
+  if (perm.blocking != null) bits.push("🛡 blocking");
+  if (perm.enteredThisTurn && perm.power != null) bits.push("summoning-sick");
+  const badge = count > 1 ? `<span class="badge">×${count}</span>` : "";
+  return `<div class="${cls}">${badge}<span class="nm">${esc(perm.name)}</span>
+    <div class="meta">${bits.join(" · ")}</div></div>`;
+}
+
+function renderBattlefield(el, perms) {
+  if (!perms.length) { el.innerHTML = `<div class="empty">—</div>`; return; }
+  // Group identical lands/artifacts without combat state to cut clutter.
+  const groups = new Map();
+  const singles = [];
+  for (const p of perms) {
+    const groupable = p.power == null && !p.attacking && p.blocking == null
+      && !(p.damage > 0);
+    if (groupable) {
+      const key = `${p.definition}|${p.tapped}`;
+      if (!groups.has(key)) groups.set(key, { perm: p, n: 0 });
+      groups.get(key).n++;
+    } else singles.push(p);
+  }
+  let html = "";
+  for (const { perm, n } of groups.values()) html += permCard(perm, n);
+  for (const p of singles) html += permCard(p, 1);
+  el.innerHTML = html;
+}
+
+function stackCard(item, myseat) {
+  const who = item.controller === mySeat() ? "you" : "bot";
+  const targets = (item.targets || []).map(t => {
+    if (t.type === "player") return t.seat === mySeat() ? "you" : "opponent";
+    return "target";
+  }).join(", ");
+  return `<div class="cardt"><span class="nm">${esc(item.name)}</span>
+    <div class="meta">${who}${item.x ? ` · X=${item.x}` : ""}${
+      targets ? " → " + targets : ""}</div></div>`;
+}
+
+function mySeat() { return STATE.humanSeat; }
+
+function seatIndex(seat) { return seat === "p1" ? 0 : 1; }
+
+function manaStr(pool) {
+  const order = [["white", "W"], ["blue", "U"], ["black", "B"],
+    ["red", "R"], ["green", "G"], ["colorless", "C"]];
+  let out = "";
+  for (const [key, letter] of order) {
+    if (pool[key]) out += `${pool[key]}${letter} `;
+  }
+  return out.trim();
+}
+
+function gyList(cards) {
+  if (!cards || !cards.length) return "empty";
+  const counts = new Map();
+  for (const c of cards) {
+    const name = c.name || (META.catalog[c.definition] || {}).name || "?";
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return [...counts].map(([n, k]) => k > 1 ? `${n} ×${k}` : n).join(", ");
+}
+
+const GROUP_ORDER = ["mulligan", "decision", "land", "cast", "ability",
+  "attack", "block", "other", "pass"];
+const GROUP_LABEL = {
+  mulligan: "Mulligan", decision: "Choice", land: "Lands", cast: "Spells",
+  ability: "Abilities", attack: "Attacks", block: "Blocks",
+  other: "Other", pass: "" };
+
+function renderActions() {
+  const el = $("actions");
+  if (BUSY) {
+    el.innerHTML = `<div class="thinking">Bot is thinking…</div>`;
+    return;
+  }
+  if (STATE.result) {
+    el.innerHTML = `<div class="empty">Game over.</div>`;
+    return;
+  }
+  const acts = STATE.actions || [];
+  if (!acts.length) {
+    el.innerHTML = `<div class="empty">Waiting…</div>`;
+    return;
+  }
+  const byGroup = new Map();
+  for (const a of acts) {
+    if (!byGroup.has(a.group)) byGroup.set(a.group, []);
+    byGroup.get(a.group).push(a);
+  }
+  let html = "";
+  for (const g of GROUP_ORDER) {
+    const list = byGroup.get(g);
+    if (!list) continue;
+    html += `<div class="grp">`;
+    if (GROUP_LABEL[g]) html += `<div class="gl">${GROUP_LABEL[g]}</div>`;
+    for (const a of list) {
+      html += `<button class="abtn ${g}" data-index="${a.index}">${
+        esc(a.label)}</button>`;
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+  for (const btn of el.querySelectorAll("button[data-index]")) {
+    btn.addEventListener("click", () => act(Number(btn.dataset.index)));
+  }
+}
+
+function renderLog() {
+  const el = $("log");
+  const entries = (STATE && STATE.log) || [];
+  // Collapse runs of >=3 consecutive priority passes into one line.
+  const items = [];
+  let run = [];
+  const flush = () => {
+    if (run.length >= 3) {
+      const a = run[0], b = run[run.length - 1];
+      const span = a.turn === b.turn ? `T${a.turn}` : `T${a.turn}–T${b.turn}`;
+      items.push({ passRun: run.length, span });
+    } else items.push(...run);
+    run = [];
+  };
+  for (const e of entries) {
+    if (e.type === "PassPriority") run.push(e);
+    else { flush(); items.push(e); }
+  }
+  flush();
+  let html = "";
+  for (const e of items) {
+    if (e.passRun) {
+      html += `<div class="e dim"><span class="t">${e.span}</span>` +
+        `· ${e.passRun} passes</div>`;
+      continue;
+    }
+    const cls = e.bot ? "bot" : "hum";
+    const dim = e.type === "PassPriority" ? " dim" : "";
+    const when = e.pregame ? "pre" : `T${e.turn}`;
+    const who = e.bot ? "Bot" : "You";
+    const val = e.value != null
+      ? ` <span class="t">(${Math.round(e.value * 100)}%)</span>` : "";
+    html += `<div class="e ${cls}${dim}"><span class="t">${when}</span>` +
+      `${who}: ${esc(e.label)}${val}</div>`;
+  }
+  el.innerHTML = html || `<div class="empty">—</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderBanner() {
+  const el = $("banner");
+  const r = STATE.result;
+  if (!r) { el.innerHTML = ""; return; }
+  let cls = "", text = "";
+  if (r.reason === "concede") { cls = "loss"; text = "You conceded."; }
+  else if (r.winner === "draw") { text = "Draw."; }
+  else if (r.humanWon === true) { cls = "win"; text = "You win!"; }
+  else if (r.humanWon === false) { cls = "loss"; text = "The bot wins."; }
+  else { cls = "loss"; text = `Game ended: ${esc(r.reason)}`; }
+  el.innerHTML = `<div class="banner ${cls}">${text} ` +
+    `<span style="font-weight:400;color:var(--ink-2)">Start a new game ` +
+    `from the panel on the right.</span></div>`;
+}
+
+function render() {
+  if (!STATE || !STATE.active) {
+    $("board").hidden = true;
+    $("gameinfo").hidden = true;
+    return;
+  }
+  $("board").hidden = false;
+  const obs = STATE.obs;
+  renderBanner();
+  const info = $("gameinfo");
+  info.hidden = false;
+  info.innerHTML = `<h2 style="margin-top:0">This game</h2>
+    <div style="font-size:12px;color:var(--ink-2)">
+    You: <b>${esc(STATE.humanDeck)}</b> (${STATE.humanSeat})<br>
+    Bot: <b>${esc(STATE.botDeck)}</b> (${STATE.botSeat})<br>
+    Seed ${STATE.seed} · ${STATE.version} actions</div>
+    ${STATE.result ? "" :
+      `<button class="danger" id="concedebtn" style="margin-top:8px">
+       Concede</button>`}`;
+  const cb = $("concedebtn");
+  if (cb) cb.addEventListener("click", concede);
+  if (!obs) { renderActions(); renderLog(); return; }
+
+  const me = seatIndex(mySeat()), opp = 1 - me;
+  const phase = obs.pregame ? "Mulligans"
+    : `Turn ${obs.turn} · ${obs.step}` +
+      (obs.activeSeat === mySeat() ? " · your turn" : " · bot's turn");
+  $("topline").innerHTML =
+    `<span class="phase">${phase}</span> — ${esc(STATE.humanDeck)} (you) ` +
+    `vs ${esc(STATE.botDeck)} (bot)`;
+
+  const myPool = manaStr(obs.manaPools[me]);
+  const oppPool = manaStr(obs.manaPools[opp]);
+  $("oppstatus").innerHTML =
+    `<span><span class="who">Bot life</span> <b>${obs.life[opp]}</b></span>
+     <span><span class="who">hand</span> <b>${obs.opponentHandSize}</b></span>
+     <span><span class="who">library</span> <b>${obs.librarySizes[opp]}</b></span>
+     ${oppPool ? `<span><span class="who">mana</span> <b>${oppPool}</b></span>` : ""}`;
+  $("mystatus").innerHTML =
+    `<span><span class="who">Your life</span> <b>${obs.life[me]}</b></span>
+     <span><span class="who">library</span> <b>${obs.librarySizes[me]}</b></span>
+     ${myPool ? `<span><span class="who">mana</span> <b>${myPool}</b></span>` : ""}`;
+  $("oppgy").querySelector("div").textContent =
+    gyList((obs.graveyards || [[], []])[opp]);
+  $("mygy").querySelector("div").textContent =
+    gyList((obs.graveyards || [[], []])[me]);
+
+  const bf = obs.battlefield || [];
+  const seatName = ["p1", "p2"];
+  renderBattlefield($("oppbf"),
+    bf.filter(p => p.controller === seatName[opp]));
+  renderBattlefield($("mybf"),
+    bf.filter(p => p.controller === seatName[me]));
+
+  const stack = obs.stack || [];
+  $("stackwrap").hidden = !stack.length;
+  if (stack.length) {
+    $("stack").innerHTML = stack.map(s => stackCard(s)).join("");
+  }
+
+  $("hand").innerHTML = (obs.hand || []).map(handCard).join("")
+    || `<div class="empty">—</div>`;
+
+  renderActions();
+  renderLog();
+}
+
+async function act(index) {
+  if (BUSY || !STATE) return;
+  BUSY = true;
+  renderActions();
+  try {
+    STATE = await api("/api/act", { index, version: STATE.version });
+  } catch (err) {
+    if (err.data && err.data.version !== undefined) {
+      STATE = await api("/api/state");
+    } else {
+      $("topline").innerHTML =
+        `<span class="offline">Move failed: ${esc(err.message)}</span>`;
+    }
+  }
+  BUSY = false;
+  render();
+}
+
+async function concede() {
+  if (!STATE) return;
+  STATE = await api("/api/concede", {});
+  render();
+}
+
+async function newGame() {
+  const seedRaw = $("seedin").value.trim();
+  const body = {
+    humanDeck: $("humandeck").value,
+    botDeck: $("botdeck").value,
+    humanSeat: $("seatsel").value,
+  };
+  if (seedRaw !== "") body.seed = Number(seedRaw);
+  BUSY = true;
+  $("topline").textContent = "Shuffling up… (the bot may think first)";
+  try {
+    STATE = await api("/api/new", body);
+  } catch (err) {
+    $("topline").innerHTML =
+      `<span class="offline">Could not start: ${esc(err.message)}</span>`;
+  }
+  BUSY = false;
+  render();
+}
+
+function fillDeckSelects() {
+  const trained = new Set(META.trainedDecks);
+  for (const id of ["humandeck", "botdeck"]) {
+    const sel = $(id);
+    sel.innerHTML = "";
+    // Trained decks first: the bot was trained/certified piloting these.
+    const decks = [...META.decks].sort((a, b) =>
+      (trained.has(b) - trained.has(a)) || a.localeCompare(b));
+    for (const d of decks) {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = trained.has(d) ? `${d} (trained)` : d;
+      sel.appendChild(opt);
+    }
+  }
+  $("humandeck").value = "White Weenie";
+  $("botdeck").value = "Sligh";
+}
+
+async function poll() {
+  if (BUSY || document.hidden) return;
+  try {
+    const s = await api("/api/state");
+    if (!STATE || !s.active || s.version !== STATE.version) {
+      STATE = s.active ? s : STATE;
+      render();
+    }
+  } catch { /* transient */ }
+}
+
+async function init() {
+  try {
+    META = await api("/api/meta");
+  } catch {
+    $("topline").innerHTML = `<span class="offline">Play server not ` +
+      `reachable on localhost:4180 — start it with ` +
+      `<code>python3 penta-bot/play_server.py</code>, then reload.</span>`;
+    setTimeout(init, 3000);
+    return;
+  }
+  $("topline").textContent =
+    `Engine ${META.engineVersion} / protocol ${META.protocolVersion} — ` +
+    `certified bot: ${META.valueNet} + ${META.policyHead} @ w=` +
+    `${META.policyWeight}, search topk ${META.search.top_k}. ` +
+    `Pick decks and start a game.`;
+  fillDeckSelects();
+  $("startbtn").addEventListener("click", newGame);
+  try {
+    const s = await api("/api/state");
+    if (s.active) { STATE = s; render(); }
+  } catch { /* no game yet */ }
+  setInterval(poll, 3000);
+}
+
+init();
+</script>
+</body>
+</html>

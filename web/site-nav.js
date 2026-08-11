@@ -10,6 +10,7 @@
     ["replay.html", "Replays"],
     ["penta-monitor.html", "Penta bot"],
     ["penta-scouting.html", "Penta scouting"],
+    ["penta-play.html", "Play penta bot"],
   ];
   const here = location.pathname.split("/").pop() || "monitor.html";
   const nav = document.createElement("nav");
