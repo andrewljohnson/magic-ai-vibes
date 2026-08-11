@@ -60,13 +60,25 @@ START_NET=${START_NET:-}
 START_TOTAL=${START_TOTAL:-0}
 KEEP_RING=${KEEP_RING:-0}
 BEST=${BEST:-0}
+# GROW_INIT=1: the first chunk grows START_NET into the current feature
+# schema (--grow-init, zero-padded new columns); that chunk runs WITHOUT
+# a frozen league snapshot (the old-schema start net cannot spar
+# cross-schema). OVERSAMPLE=1 adds --seat-oversample (training schedule
+# only; gates stay uniform). CKPT_PREFIX names this era's checkpoints
+# (e.g. v4 so a dead branch's ckpt-v3-* history is never clobbered).
+# SEED_OFFSET relocates the seed range (offset+cumulative) when a
+# previous branch already consumed the default one.
+GROW_INIT=${GROW_INIT:-0}
+OVERSAMPLE=${OVERSAMPLE:-0}
+CKPT_PREFIX=${CKPT_PREFIX:-v3}
+SEED_OFFSET=${SEED_OFFSET:-3000000}
 BELOW=0
 
 hc_pct() { echo "$1" | sed -E 's/.*-> *([0-9.]+)%.*/\1/' }
 
 if [[ -n "$START_NET" ]]; then
   cp "$START_NET" "$LATEST"
-  echo "=== v3 curve CONTINUATION $(date) | from $START_NET ($START_TOTAL games) | promotion bar ${BEST}%, ring $([[ "$KEEP_RING" = 1 ]] && echo continued || echo fresh) | v2 features (825), search topk $SEARCH_TOPK train+gate, 8 decks, td-per-turn $TD_PER_TURN, dominance prune | league: handcrafted 0.15 + prev-chunk frozen 0.25, lr-warmup $LR_WARMUP, ${GAMES}-game chunks ===" >> "$PROGRESS"
+  echo "=== ${CKPT_PREFIX} curve CONTINUATION $(date) | from $START_NET ($START_TOTAL games)$([[ "$GROW_INIT" = 1 ]] && echo ', grow-init to current schema')$([[ "$OVERSAMPLE" = 1 ]] && echo ', seat-oversampled training') | promotion bar ${BEST}%, ring $([[ "$KEEP_RING" = 1 ]] && echo continued || echo fresh) | search topk $SEARCH_TOPK train+gate, 8 decks, td-per-turn $TD_PER_TURN, dominance prune | league: handcrafted 0.15 + prev-chunk frozen 0.25, lr-warmup $LR_WARMUP, ${GAMES}-game chunks, seeds $SEED_OFFSET+ ===" >> "$PROGRESS"
 else
   echo "=== v3 curve run $(date) | v2 features (825), search topk $SEARCH_TOPK train+gate, 8 decks, td-per-turn $TD_PER_TURN | league: handcrafted 0.15 + prev-chunk frozen 0.25, ring fresh + lr-warmup $LR_WARMUP | fresh net, ${GAMES}-game chunks, promotion bar ${BEST} ===" >> "$PROGRESS"
 
@@ -84,27 +96,37 @@ if [[ "$KEEP_RING" != 1 ]]; then
   rm -f "$RING"
 fi
 TOTAL=$START_TOTAL
+FIRST=1
 for CHUNK in ${=CHUNKS}; do
   EXTRA=()
   if [[ "$TOTAL" -eq 0 ]]; then
     EXTRA+=(--epsilon-start 0.25 --epsilon-final 0.10)
+  elif [[ "$FIRST" = 1 && "$GROW_INIT" = 1 ]]; then
+    # First chunk of a grow continuation: no frozen snapshot (the
+    # old-schema start net cannot spar cross-schema).
+    EXTRA+=(--init "$LATEST" --grow-init \
+            --epsilon-start 0.10 --epsilon-final 0.08)
   else
     EXTRA+=(--init "$LATEST" --epsilon-start 0.10 --epsilon-final 0.08 \
-            --league-frozen "penta_net.ckpt-v3-${TOTAL}.npz")
+            --league-frozen "penta_net.ckpt-${CKPT_PREFIX}-${TOTAL}.npz")
+  fi
+  if [[ "$OVERSAMPLE" = 1 ]]; then
+    EXTRA+=(--seat-oversample)
   fi
   if awk "BEGIN{exit !($TD_PER_TURN > 0)}"; then
     EXTRA+=(--td-lambda-per-turn "$TD_PER_TURN")
   fi
+  FIRST=0
   python3 trainer.py --games "$GAMES" --out "$LATEST" \
     --workers "$WORKERS" \
     --search-topk "$SEARCH_TOPK" \
     --league-handcrafted 0.15 \
     --ring "$RING" --lr-warmup "$LR_WARMUP" \
-    --seed-base $((3000000 + TOTAL)) \
+    --seed-base $((SEED_OFFSET + TOTAL)) \
     "${EXTRA[@]}" \
     > "chunk-${CHUNK}.log" 2>&1
   TOTAL=$((TOTAL + GAMES))
-  cp "$LATEST" "penta_net.ckpt-v3-${TOTAL}.npz"
+  cp "$LATEST" "penta_net.ckpt-${CKPT_PREFIX}-${TOTAL}.npz"
   RAND=$(python3 gate.py --net "$LATEST" --games 60 \
     --search-topk "$SEARCH_TOPK" \
     --opponents random 2>/dev/null | tail -1)
@@ -115,16 +137,16 @@ for CHUNK in ${=CHUNKS}; do
   PCT=$(hc_pct "$HC")
   if awk "BEGIN{exit !($PCT > $BEST)}"; then
     cp "$LATEST" "$BEST_NET"
-    echo "      promoted ckpt-v3-${TOTAL} -> $BEST_NET (handcrafted ${PCT}% > ${BEST}%)" >> "$PROGRESS"
+    echo "      promoted ckpt-${CKPT_PREFIX}-${TOTAL} -> $BEST_NET (handcrafted ${PCT}% > ${BEST}%)" >> "$PROGRESS"
     BEST=$PCT
     # Standing rule: confirm every promotion with a 400-game gate; the
     # LCB crossing 50% is the handcrafted-parity criterion.
     CONF=$(python3 gate.py --net "$LATEST" --games 400 \
       --search-topk "$SEARCH_TOPK" \
       --opponents handcrafted 2>/dev/null | tail -1)
-    echo "      confirm-400: ckpt-v3-${TOTAL}: $CONF" >> "$PROGRESS"
+    echo "      confirm-400: ckpt-${CKPT_PREFIX}-${TOTAL}: $CONF" >> "$PROGRESS"
   else
-    echo "      kept $BEST_NET (ckpt-v3-${TOTAL} handcrafted ${PCT}% <= ${BEST}%)" >> "$PROGRESS"
+    echo "      kept $BEST_NET (ckpt-${CKPT_PREFIX}-${TOTAL} handcrafted ${PCT}% <= ${BEST}%)" >> "$PROGRESS"
   fi
   if awk "BEGIN{exit !($PCT < 0.6 * $BEST)}"; then
     BELOW=$((BELOW + 1))
