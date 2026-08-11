@@ -463,6 +463,26 @@ class Handler(BaseHTTPRequestHandler):
                 if SESSION is None:
                     return self._send(200, {"active": False})
                 return self._send(200, SESSION.state())
+        static = {"/": ("penta-play.html", "text/html; charset=utf-8"),
+                  "/penta-play.html": ("penta-play.html",
+                                       "text/html; charset=utf-8"),
+                  "/site-nav.js": ("site-nav.js",
+                                   "text/javascript; charset=utf-8")}
+        if path in static:
+            name, ctype = static[path]
+            page = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "web", name)
+            try:
+                with open(page, "rb") as fh:
+                    body = fh.read()
+            except OSError:
+                return self._send(404, {"error": f"{name} not found"})
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return None
         return self._send(404, {"error": f"no route {path}"})
 
     def do_POST(self):
