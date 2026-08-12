@@ -616,6 +616,22 @@ PENTA_POLICY_WEIGHT=0.25. Natural scale-ups, in order of expected
 value: iterate the head (bigger archive from BLENDED self-play,
 DAgger-style), let training run under the blend, and revisit w.
 
+**Scale-up results (2026-08-11).** Stage 1, DAgger iteration: blended
+self-play archive (1617 decisive games, 461k rows), head rank-acc
+72.0%; behavior holds, 120-gate 59.2% (LCB 50.2%), confirm-400 57.1%
+(LCB 52.1%) -- accepted, head versioned as policy_head.ckpt-dagger1.
+Stage 2, value training under the blend (4 x 4000 games from 48k,
+seeds 7M+): gates 52.5 / 58.8 / 55.0 / 58.3 vs the 59.2 bar -- no
+promotion, a plateau straddling the bar; stability data point:
+training under the blend held the band, no collapse. (Chunk 15 also
+surfaced the engine-panic class fixed by the clone armor + upstream
+lacker/penta#38; field frequency 1 panicking game / 8000.) Stage 3,
+w sweep on the certified pair: w=0.15 -> **60.0%/120** (best-ever),
+w=0.25 -> 59.2%, w=0.35 -> 56.7%; confirm-400 at w=0.15: **57.4%, LCB
+52.4% -- the best certification yet**. CERTIFIED PAIR: penta_net.npz
+(ckpt-v3-48000 value) + policy_head.ckpt-dagger1.npz at
+PENTA_POLICY_WEIGHT=0.15.
+
 ## Playing against the bot (play_server.py)
 
 `play_server.py` serves a local human-vs-bot game over HTTP; the client

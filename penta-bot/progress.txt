@@ -127,3 +127,14 @@
 13:33 cumulative-games=56000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [8s, 7.51 games/s] | handcrafted: vs handcrafted  120 games: 70 wins, 1 draws ->  58.8% (LCB  49.4%)  [46s, 2.63 games/s]
       kept penta_net.npz (ckpt-v5-56000 handcrafted 58.8% <= 59.2%)
       NOTE Tue Aug 11 21:26: chunk-15 trainer hung -- engine panic (pyo3 PanicException: "a legal payment has a complete mana activation plan") inside a playout CLONE act deadlocked the pool. Deterministic repro found (seed 7056769, Erhnamgeddon vs Jeskai Aggro, handcrafted league game); filed upstream as lacker/penta#38. trainer.py armored: clone panics in playouts truncate (net-scored), prune clones fail closed, screen-clone panics surface as the existing dropped-game path; top-level acts still raise; detection by class identity (pyo3 registers no module). Checks L1-L4. Chunk 15 restarting from ckpt-v5-56000 + chunk-14 ring, same seed-base 7056000, bar 59.2.
+=== v5 curve CONTINUATION Tue Aug 11 21:07:43 PDT 2026 | from penta_net.ckpt-v5-56000.npz (56000 games) | promotion bar 59.2%, ring continued | search topk 4 train+gate, 8 decks, td-per-turn 0.0, dominance prune | league: handcrafted 0.15 + prev-chunk frozen 0.25, lr-warmup 200, 4000-game chunks, seeds 7000000+ ===
+22:12 cumulative-games=60000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [8s, 7.69 games/s] | handcrafted: vs handcrafted  120 games: 66 wins, 0 draws ->  55.0% (LCB  46.1%)  [36s, 3.35 games/s]
+      kept penta_net.npz (ckpt-v5-60000 handcrafted 55.0% <= 59.2%)
+23:20 cumulative-games=64000 | random: vs random       60 games: 58 wins, 0 draws ->  96.7% (LCB  88.6%)  [7s, 8.64 games/s] | handcrafted: vs handcrafted  120 games: 70 wins, 0 draws ->  58.3% (LCB  49.4%)  [35s, 3.39 games/s]
+      kept penta_net.npz (ckpt-v5-64000 handcrafted 58.3% <= 59.2%)
+=== v3 curve run complete Tue Aug 11 23:20:36 PDT 2026 ===
+=== stage-2/3 verdicts Tue Aug 11 23:55 ===
+      stage 2 (value training under the blend, 4 x 4000 from 48k): gates 52.5 / 58.8 / 55.0 / 58.3 vs bar 59.2 -- no promotion; plateau straddling the bar, not a rise; stopped at 4 chunks (2 more would be a noise lottery). Stability note: training under the blend held the 55-59 band, no collapse. Panic armor field report: 1 panicking game / 8000 (the known seed-7056769 game: 6 playout truncations + 1 dropped game; chunk-16 clean) -- no engine pin/bisect warranted.
+      stage 3 (w sweep on the certified pair, value ckpt-v3-48000 + dagger1 head): w=0.15 -> 60.0%/120 (LCB 51.1, best-ever 120-gate); w=0.25 -> 59.2%; w=0.35 -> 56.7%
+      confirm-400 at w=0.15: 229/400 + 1 draw -> 57.4% (LCB 52.4%) -- best certification yet
+      CERTIFIED PAIR UPDATED: penta_net.npz (ckpt-v3-48000 value) + policy_head.ckpt-dagger1.npz @ PENTA_POLICY_WEIGHT=0.15 (57.4%/400, LCB 52.4). Head artifacts versioned, nothing overwritten.
