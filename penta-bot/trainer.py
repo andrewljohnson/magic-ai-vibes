@@ -114,8 +114,17 @@ DECKS = tuple(os.environ.get(
 #   playout_epsilon  uniform-noise rate for playouts 2..n
 SearchConfig = namedtuple(
     "SearchConfig", "top_k playouts budget playout_max_eval playout_epsilon")
+# playout_max_eval 16 is the 2026-08-12 search-sweep promotion on the
+# certified pair: 120-gate 62.5%, confirm-400 60.1% (LCB 55.1%) vs the
+# pme8 reference's 60.0%/57.4% (LCB 52.4%), at ~15% speed cost (2.31 vs
+# ~2.7 games/s at gate) -- with the policy head feeding better
+# candidates into playouts, wider in-playout screens finally pay
+# (topk8 and 2-playout arms also confirmed above the old bar but lose
+# to pme16 on both strength and speed). Gates, scout, deck-sweep, the
+# play server, and future training inherit this default; gate numbers
+# before this point were measured at pme8.
 DEFAULT_SEARCH = SearchConfig(top_k=4, playouts=1, budget=120,
-                              playout_max_eval=8, playout_epsilon=0.10)
+                              playout_max_eval=16, playout_epsilon=0.10)
 # Fraction of exploration draws that follow the aggression prior instead
 # of the uniform draw (the rest keep full support over legal actions).
 PRIOR_FRACTION = 0.5

@@ -148,3 +148,11 @@
       gates: 120-gate 60.8% (LCB 51.9%, best-ever 120) | confirm-400 57.1% LCB 52.1% -- above the 50% certification line but BELOW dagger1's 57.4/52.4, so promotion rules are not met.
       CERTIFIED PAIR UNCHANGED: ckpt-v3-48000 + policy_head.ckpt-dagger1.npz @ w=0.15. dagger2 artifacts versioned (policy_head.ckpt-dagger2.npz, dagger2_archive.npz). Control-seat re-sweep grading the receipt patterns follows.
       DAgger-2 receipt-pattern grading (3x128 control seats, dagger2 vs dagger1 @ w=0.15): unspent castables The Deck 2.36->2.41/g, CB 0.84->0.86, JA 0.98->0.97 | counter-mana casts 0.84->0.89 / 0.46->0.44 / 0.47->0.49 | life lost unblocked 0.04->0.04 / 0.02->0.03 / 0.41->0.33. Wins 3->4 / 63->66 / 62->61. VERDICT: the scouted mistake patterns did NOT recede -- flat everywhere but Jeskai's blocks. Graded on the mistakes it should fix, DAgger-2 is null; with the confirm plateau (57.4->57.1) this closes DAgger iteration on the current value net: winner-imitation cannot remove patterns the winners themselves still exhibit. Certified pair stands: ckpt-v3-48000 + dagger1 @ w=0.15 (57.4%/400, LCB 52.4%).
+=== search-config sweep on the certified pair Wed Aug 12 (gates only, blend @ w=0.15) ===
+      reference topk4/p1/pme8: 60.0%/120, confirm 57.4 (LCB 52.4)
+      arm a topk8/p1/pme8: 60.8%/120 @2.72 g/s | confirm-400 59.2% (LCB 54.1) @1.94
+      arm b topk4/p2/pme8: 56.7%/120 @1.87 g/s | no confirm (below 60.0)
+      arm c topk8/p2/pme8: 61.7%/120 @1.42 g/s | confirm-400 59.1% (LCB 54.1) @1.29
+      arm d topk4/p1/pme16: 62.5%/120 @2.46 g/s | confirm-400 60.1% (LCB 55.1) @2.31 -- PROMOTED
+      All three confirmed arms beat the old certification; arm d wins on strength AND speed (~15% slower than reference, milliseconds per decision -- far under the 2s play-server budget). DEFAULT_SEARCH.playout_max_eval 8 -> 16 (gates/scout/play-server/training inherit; pre-promotion gate numbers were pme8). Verdict: search depth pays again now that the head feeds better candidates into playouts -- specifically WIDER IN-PLAYOUT SCREENS (pme), not more top-k or more playouts.
+      CERTIFIED CONFIG: ckpt-v3-48000 + policy_head.ckpt-dagger1.npz @ w=0.15, search topk4/p1/budget120/pme16 -- 60.1%/400, LCB 55.1%.
