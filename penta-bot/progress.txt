@@ -138,3 +138,12 @@
       stage 3 (w sweep on the certified pair, value ckpt-v3-48000 + dagger1 head): w=0.15 -> 60.0%/120 (LCB 51.1, best-ever 120-gate); w=0.25 -> 59.2%; w=0.35 -> 56.7%
       confirm-400 at w=0.15: 229/400 + 1 draw -> 57.4% (LCB 52.4%) -- best certification yet
       CERTIFIED PAIR UPDATED: penta_net.npz (ckpt-v3-48000 value) + policy_head.ckpt-dagger1.npz @ PENTA_POLICY_WEIGHT=0.15 (57.4%/400, LCB 52.4). Head artifacts versioned, nothing overwritten.
+=== certified-pair scout sweep Wed Aug 12 07:07 (1024 games, seed block 9200000, pair = ckpt-v3-48000 + dagger1 head @ w=0.15) ===
+      overall 522 -> 550/1024. per-deck: Sligh +15 (98), Goblins +9 (93), Counterburn +5 (63), Mono Black +4 (83), Jeskai +3 (62), Erhnam +1 (66), White Weenie -5 (82), The Deck -4 (3/128).
+      control-seat behavior (baseline -> pair): The Deck counters 0.24->0.43, spells 5.55->6.35, engines 0.17->0.32, land skips 2.89->0.11; Counterburn counters 0.08->0.14, spells 4.98->5.24, suicides 0.09->0.05; Jeskai ~flat. Behavior broadly better; The Deck seat still loses (plays better, deck looks structurally weak in this meta).
+      DAgger-2 grading targets (receipts): (1) UNSPENT CASTABLES, 647 turns/471 losses, The Deck-dominated (seeds 9202300, 9201612, 9202209 at 9-10/game); (2) CASTS INTO OPEN COUNTER MANA, 248, Deck mirrors (9201813: 13; 9203402: 12); (3) DECLINED BLOCKS / life lost unblocked, 284, Mono Black+Erhnam (9205303: 12 life; 9205401: 10). Suicide attacks minor (55).
+=== DAgger-2 verdict Wed Aug 12: ACCEPTED, NOT PROMOTED ===
+      archive: 1623 decisive w=0.15-blended games, 458741 rows / 128637 decisions; head rank-acc 71.1% (dagger1: 72.0)
+      behavior holds vs the pair sweep (The Deck wins 4/128, spells 6.3, engines 0.27; Counterburn wins 66/128, counters 0.13 -- all within noise)
+      gates: 120-gate 60.8% (LCB 51.9%, best-ever 120) | confirm-400 57.1% LCB 52.1% -- above the 50% certification line but BELOW dagger1's 57.4/52.4, so promotion rules are not met.
+      CERTIFIED PAIR UNCHANGED: ckpt-v3-48000 + policy_head.ckpt-dagger1.npz @ w=0.15. dagger2 artifacts versioned (policy_head.ckpt-dagger2.npz, dagger2_archive.npz). Control-seat re-sweep grading the receipt patterns follows.
