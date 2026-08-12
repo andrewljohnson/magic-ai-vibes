@@ -51,7 +51,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # trainer import. Explicit env from the caller wins (setdefault).
 os.environ.setdefault(
     "PENTA_POLICY_NET", os.path.join(HERE, "policy_head.ckpt-dagger1.npz"))
-os.environ.setdefault("PENTA_POLICY_WEIGHT", "0.25")
+os.environ.setdefault("PENTA_POLICY_WEIGHT", "0.15")
 
 import trainer  # noqa: E402  (env vars above must precede this import)
 from extractor import Extractor, import_penta  # noqa: E402
