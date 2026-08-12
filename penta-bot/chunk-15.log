@@ -1,389 +1,68 @@
-engine 0.5.0 protocol 2; features 840 (schema v3: 128 defs x 5 zones + 35 scalars + castability/race block + deployment block); decks 8; td-lambda 1.00
+engine 0.5.0 protocol 2; features 825 (schema v2: 128 defs x 5 zones + 35 scalars + castability/race block); decks 8; td-lambda 1.00
 search: SearchConfig(top_k=4, playouts=1, budget=120, playout_max_eval=8, playout_epsilon=0.1); prior-frac 0.50
-league: handcrafted 0.15, frozen 0.25 across 1 snapshot(s) ['penta_net.ckpt-v4-56000.npz']
+league: handcrafted 0.15, frozen 0.25 across 1 snapshot(s) ['penta_net.ckpt-v5-56000.npz']
 ring: resumed 150000 samples + momentum from penta_ring.npz
-games    64  eps 0.100  loss 0.3773  samples  8107  replay 150000  len 373.3  caps 5   1.06 games/s
-games   128  eps 0.100  loss 0.3709  samples  8606  replay 150000  len 377.8  caps 3   1.13 games/s
-games   192  eps 0.099  loss 0.3890  samples  7965  replay 150000  len 353.7  caps 4   1.07 games/s
-games   256  eps 0.099  loss 0.3909  samples  9375  replay 150000  len 378.9  caps 2   1.05 games/s
-games   320  eps 0.099  loss 0.3799  samples  8912  replay 150000  len 379.1  caps 2   1.06 games/s
-games   384  eps 0.098  loss 0.3978  samples  8834  replay 150000  len 360.6  caps 1   1.06 games/s
-games   448  eps 0.098  loss 0.3994  samples  8421  replay 150000  len 349.0  caps 1   1.05 games/s
-games   512  eps 0.098  loss 0.3921  samples  7699  replay 150000  len 361.0  caps 5   1.07 games/s
-games   576  eps 0.097  loss 0.3876  samples  8006  replay 150000  len 377.2  caps 4   1.09 games/s
-games   640  eps 0.097  loss 0.3986  samples  8777  replay 150000  len 369.1  caps 2   1.05 games/s
-games   704  eps 0.097  loss 0.3916  samples  8236  replay 150000  len 354.4  caps 2   1.06 games/s
-games   768  eps 0.096  loss 0.3903  samples  8204  replay 150000  len 384.3  caps 6   1.06 games/s
-games   832  eps 0.096  loss 0.3822  samples  8338  replay 150000  len 383.0  caps 3   1.05 games/s
-games   896  eps 0.096  loss 0.3855  samples  7723  replay 150000  len 373.8  caps 7   1.05 games/s
-games   960  eps 0.096  loss 0.3929  samples  8723  replay 150000  len 380.1  caps 3   1.03 games/s
-games  1024  eps 0.095  loss 0.3847  samples  8212  replay 150000  len 356.6  caps 1   1.04 games/s
-games  1088  eps 0.095  loss 0.3865  samples  8201  replay 150000  len 337.3  caps 1   1.05 games/s
-games  1152  eps 0.095  loss 0.3825  samples  8477  replay 150000  len 356.1  caps 1   1.07 games/s
-games  1216  eps 0.094  loss 0.3878  samples  8297  replay 150000  len 356.8  caps 3   1.07 games/s
-games  1280  eps 0.094  loss 0.3792  samples  7880  replay 150000  len 380.3  caps 6   1.07 games/s
-games  1344  eps 0.094  loss 0.3711  samples  8037  replay 150000  len 350.2  caps 4   1.07 games/s
-games  1408  eps 0.093  loss 0.3745  samples  7833  replay 150000  len 344.3  caps 2   1.09 games/s
-games  1472  eps 0.093  loss 0.3711  samples  8578  replay 150000  len 367.0  caps 3   1.08 games/s
-games  1536  eps 0.093  loss 0.3720  samples  9537  replay 150000  len 363.1  caps 0   1.08 games/s
-games  1600  eps 0.092  loss 0.3774  samples  8043  replay 150000  len 357.7  caps 3   1.08 games/s
-games  1664  eps 0.092  loss 0.3733  samples  9255  replay 150000  len 383.6  caps 3   1.08 games/s
-games  1728  eps 0.092  loss 0.3766  samples  7939  replay 150000  len 365.1  caps 4   1.09 games/s
-games  1792  eps 0.091  loss 0.3795  samples  7631  replay 150000  len 358.7  caps 4   1.09 games/s
-games  1856  eps 0.091  loss 0.3892  samples  8156  replay 150000  len 354.7  caps 4   1.09 games/s
-games  1920  eps 0.091  loss 0.3760  samples  7356  replay 150000  len 331.5  caps 1   1.11 games/s
-games  1984  eps 0.090  loss 0.3660  samples  8491  replay 150000  len 362.3  caps 2   1.11 games/s
-games  2048  eps 0.090  loss 0.3609  samples  8177  replay 150000  len 352.0  caps 2   1.12 games/s
-games  2112  eps 0.090  loss 0.3705  samples  9129  replay 150000  len 367.0  caps 2   1.11 games/s
-games  2176  eps 0.089  loss 0.3574  samples  8700  replay 150000  len 360.4  caps 2   1.11 games/s
-games  2240  eps 0.089  loss 0.3542  samples  7965  replay 150000  len 366.3  caps 3   1.10 games/s
-games  2304  eps 0.089  loss 0.3572  samples  8457  replay 150000  len 391.4  caps 5   1.10 games/s
-games  2368  eps 0.088  loss 0.3550  samples  8922  replay 150000  len 399.6  caps 4   1.08 games/s
-games  2432  eps 0.088  loss 0.3574  samples  7664  replay 150000  len 349.0  caps 4   1.08 games/s
-games  2496  eps 0.088  loss 0.3624  samples  9608  replay 150000  len 379.2  caps 1   1.08 games/s
-games  2560  eps 0.088  loss 0.3642  samples  8515  replay 150000  len 376.5  caps 5   1.09 games/s
-games  2624  eps 0.087  loss 0.3704  samples  8598  replay 150000  len 405.9  caps 6   1.09 games/s
-games  2688  eps 0.087  loss 0.3613  samples  8345  replay 150000  len 386.7  caps 6   1.08 games/s
-games  2752  eps 0.087  loss 0.3625  samples  8305  replay 150000  len 378.8  caps 5   1.07 games/s
-games  2816  eps 0.086  loss 0.3501  samples  7917  replay 150000  len 398.0  caps 8   1.07 games/s
-games  2880  eps 0.086  loss 0.3584  samples  9662  replay 150000  len 384.4  caps 0   1.07 games/s
-games  2944  eps 0.086  loss 0.3591  samples  7196  replay 150000  len 388.4  caps 9   1.06 games/s
-games  3008  eps 0.085  loss 0.3632  samples  8556  replay 150000  len 401.8  caps 6   1.03 games/s
-Process SpawnPoolWorker-4:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
+games    64  eps 0.100  loss 0.3712  samples  8542  replay 150000  len 379.3  caps 3   1.19 games/s
+games   128  eps 0.100  loss 0.3566  samples  7960  replay 150000  len 359.9  caps 5   1.04 games/s
+games   192  eps 0.099  loss 0.3635  samples  8597  replay 150000  len 370.8  caps 3   1.06 games/s
+games   256  eps 0.099  loss 0.3671  samples  8910  replay 150000  len 372.4  caps 2   1.06 games/s
+games   320  eps 0.099  loss 0.3835  samples  8670  replay 150000  len 357.3  caps 1   0.94 games/s
+games   384  eps 0.098  loss 0.3798  samples  8572  replay 150000  len 356.0  caps 1   0.97 games/s
+games   448  eps 0.098  loss 0.3803  samples  8070  replay 150000  len 358.9  caps 4   0.99 games/s
+games   512  eps 0.098  loss 0.3806  samples  8495  replay 150000  len 370.5  caps 4   0.97 games/s
+games   576  eps 0.097  loss 0.3937  samples  9530  replay 150000  len 373.8  caps 0   0.98 games/s
+games   640  eps 0.097  loss 0.3922  samples  8901  replay 150000  len 379.8  caps 4   0.99 games/s
+games   704  eps 0.097  loss 0.3772  samples  8908  replay 150000  len 357.5  caps 1   1.00 games/s
+games   768  eps 0.096  loss 0.3808  samples  8510  replay 150000  len 360.7  caps 3   0.99 games/s
 
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-8:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
+thread '<unnamed>' (31877663) panicked at /private/tmp/claude-501/-Users-andrewjohnson-proj-magic-ai-vibes/773a3e5f-c4a6-47cd-8be8-55cc39b3964c/scratchpad/penta-main/src/game/mod.rs:4499:14:
+a legal payment has a complete mana activation plan
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
 Process SpawnPoolWorker-1:
 Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
   File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
     self.run()
     ~~~~~~~~^^
   File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
     self._target(*self._args, **self._kwargs)
     ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-3:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-5:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-7:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-6:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-Process SpawnPoolWorker-2:
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 131, in worker
-    put((job, i, result))
-    ~~~^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 420, in _send_bytes
-    self._send(header)
-    ~~~~~~~~~~^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-
-During handling of the above exception, another exception occurred:
-
-Traceback (most recent call last):
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 313, in _bootstrap
-    self.run()
-    ~~~~~~~~^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/process.py", line 108, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 136, in worker
-    put((job, i, (False, wrapped)))
-    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/queues.py", line 397, in put
-    self._writer.send_bytes(obj)
-    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 200, in send_bytes
-    self._send_bytes(m[offset:offset + size])
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 427, in _send_bytes
-    self._send(header + buf)
-    ~~~~~~~~~~^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/connection.py", line 384, in _send
-    n = write(self._handle, buf)
-BrokenPipeError: [Errno 32] Broken pipe
-/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:301: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown: {'/mp-jsq4hjm1', '/mp-94xoeuxz', '/mp-mb1ig3an', '/mp-l7l62xuv', '/mp-f7vu8jre', '/mp-c97qwfsh'}
+  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ~~~~^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/pool.py", line 48, in mapstar
+    return list(map(*args))
+  File "/Users/andrewjohnson/proj/magic-ai-vibes/penta-bot/trainer.py", line 837, in _worker_play
+    rows, targets, stats = play_handcrafted_game(
+                           ~~~~~~~~~~~~~~~~~~~~~^
+        net, extractor, penta, d1, d2, seed, epsilon, rng,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        max_eval, learner_seat, lam=lam, search=search,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        prior_frac=prior_frac, turn_lam=turn_lam,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        collect_aux=collect_aux)
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/andrewjohnson/proj/magic-ai-vibes/penta-bot/trainer.py", line 785, in play_handcrafted_game
+    index, feats, value = choose(
+                          ~~~~~~^
+        make_fork(make_game, history, game), obs, net, extractor, rng,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        epsilon, max_eval, depth=len(history), search=search,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        prior_frac=prior_frac, aux_out=aux if collect_aux else None)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/andrewjohnson/proj/magic-ai-vibes/penta-bot/trainer.py", line 623, in choose
+    total += playout_value(
+             ~~~~~~~~~~~~~^
+        sim, seat, net, extractor, rng, turn0, was_pregame,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        search,
+        ^^^^^^^
+        epsilon=0.0 if p == 0 else search.playout_epsilon)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/andrewjohnson/proj/magic-ai-vibes/penta-bot/trainer.py", line 530, in playout_value
+    after.act(action["index"])
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^
+pyo3_runtime.PanicException: a legal payment has a complete mana activation plan
+/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:301: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown: {'/mp-1w5bxlwb', '/mp-26fweqn6', '/mp-_wwcfkqs', '/mp-rtanmlvf', '/mp-s6fdjdxd', '/mp-k55o3w1q'}
   warnings.warn(

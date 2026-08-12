@@ -67,6 +67,7 @@ import argparse
 import json
 import os
 import random
+import sys
 import time
 from collections import namedtuple
 from multiprocessing import Pool
@@ -75,6 +76,22 @@ import numpy as np
 
 from extractor import Extractor, import_penta
 from net import Net
+
+
+def _is_engine_panic(error):
+    """True for the engine's pyo3 PanicException, identified by class
+    identity (name + claimed module): pyo3 never registers an actual
+    `pyo3_runtime` module in sys.modules -- even after raising
+    (verified against the live panic) -- so the class cannot be
+    imported and except-clauses must catch BaseException and re-raise
+    everything that is not this. PanicException subclasses
+    BaseException deliberately; never swallow anything else. Seen from
+    engine 0.5.0: 'a legal payment has a complete mana activation
+    plan' (upstream issue lacker/penta#38, deterministic at seed
+    7056769) inside playout clones."""
+    cls = type(error)
+    return (cls.__name__ == "PanicException"
+            and cls.__module__ == "pyo3_runtime")
 
 # League decks: the four originals plus four more spanning archetypes
 # (aggro Goblins, midrange Erhnamgeddon, disruption Mono Black, tempo
@@ -285,20 +302,25 @@ def _settle_all_pass(copy, budget=PRUNE_SETTLE_STEPS):
     every priority with PassPriority (forced moves taken as-is). Returns
     True when settled; False FAILS CLOSED (terminal result, a branching
     decision with no pass available, or budget exhausted)."""
-    for _ in range(budget):
-        if copy.result() is not None:
-            return False
-        obs = json.loads(copy.observe())
-        if not obs.get("stack"):
-            return True
-        actions = obs["legalActions"]
-        if len(actions) == 1:
-            copy.act(actions[0]["index"])
-            continue
-        passes = [a for a in actions if a["type"] == "PassPriority"]
-        if not passes:
-            return False
-        copy.act(passes[0]["index"])
+    try:
+        for _ in range(budget):
+            if copy.result() is not None:
+                return False
+            obs = json.loads(copy.observe())
+            if not obs.get("stack"):
+                return True
+            actions = obs["legalActions"]
+            if len(actions) == 1:
+                copy.act(actions[0]["index"])
+                continue
+            passes = [a for a in actions if a["type"] == "PassPriority"]
+            if not passes:
+                return False
+            copy.act(passes[0]["index"])
+    except BaseException as error:
+        if not _is_engine_panic(error):
+            raise
+        return False  # panicked clone: fail closed, keep the action
     return False
 
 
@@ -404,7 +426,12 @@ def dominance_prune(fork, obs, actions, extractor):
             upside = (definition is None
                       or definition in extractor.invisible_upside_defs)
             copy = fork()
-            copy.act(action["index"])
+            try:
+                copy.act(action["index"])
+            except BaseException as error:
+                if not _is_engine_panic(error):
+                    raise
+                continue  # panicked clone: fail closed, keep the action
             if not _settle_all_pass(copy):
                 continue
             cand = _dominance_state(json.loads(copy.observe(seat)), seat)
@@ -421,7 +448,12 @@ def dominance_prune(fork, obs, actions, extractor):
             if action["type"] != "PlayLand":
                 continue
             copy = fork()
-            copy.act(action["index"])
+            try:
+                copy.act(action["index"])
+            except BaseException as error:
+                if not _is_engine_panic(error):
+                    raise
+                continue  # panicked clone: fail closed, keep Pass
             if not _settle_all_pass(copy):
                 continue
             cand = _dominance_state(json.loads(copy.observe(seat)), seat)
@@ -501,7 +533,22 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
     flagged for evaluation -- gates vs the scripted bots inherit the leak
     through the search policy. Upstream issue #11 tracks determinized
     clones for honest search-time evaluation.
+
+    ENGINE-PANIC ARMOR: the engine can panic inside CLONE acts (pyo3
+    PanicException, e.g. 'a legal payment has a complete mana
+    activation plan', chunk-15 of the v5 run). A panicked clone is
+    poisoned, so the playout is treated as TRUNCATED at the last good
+    observation, scored by the net exactly like a budget exhaustion;
+    a panicked candidate clone is skipped. Only clones are armored --
+    a panic on the real game still raises.
     """
+    def truncated(where, panic):
+        print(f"      warning: engine panic in {where} (playout "
+              f"truncated at turn {obs.get('turn')}, seat "
+              f"{obs.get('seat')}): {str(panic)[:90]}", flush=True)
+        v = net.value(extractor.features(obs))
+        return v if obs.get("seat") == seat else 1.0 - v
+
     for _ in range(search.budget):
         result = copy.result()
         if result is not None:
@@ -513,10 +560,20 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
             break
         actions = obs["legalActions"]
         if len(actions) == 1:
-            copy.act(actions[0]["index"])
+            try:
+                copy.act(actions[0]["index"])
+            except BaseException as panic:
+                if not _is_engine_panic(panic):
+                    raise
+                return truncated("playout forced act", panic)
             continue
         if epsilon > 0.0 and rng.random() < epsilon:
-            copy.act(rng.choice(actions)["index"])
+            try:
+                copy.act(rng.choice(actions)["index"])
+            except BaseException as panic:
+                if not _is_engine_panic(panic):
+                    raise
+                return truncated("playout epsilon act", panic)
             continue
         acting = obs["seat"]
         if len(actions) > search.playout_max_eval:
@@ -527,8 +584,16 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
         fixed = []  # (score, copy) for terminal candidates
         for action in actions:
             after = copy.clone()
-            after.act(action["index"])
-            result = after.result()
+            try:
+                after.act(action["index"])
+                result = after.result()
+            except BaseException as panic:
+                if not _is_engine_panic(panic):
+                    raise
+                print(f"      warning: engine panic on playout candidate "
+                      f"(skipped, turn {obs.get('turn')}): "
+                      f"{str(panic)[:90]}", flush=True)
+                continue
             if result is None:
                 pending_rows.append(
                     extractor.features(json.loads(after.observe(acting))))
@@ -541,6 +606,8 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
         if pending_rows:
             values = net.value_batch(np.stack(pending_rows))
             scored.extend(zip(values, pending_copies))
+        if not scored:  # every candidate clone panicked
+            return truncated("playout greedy step", "all candidates")
         copy = max(scored, key=lambda pair: pair[0])[1]
     result = copy.result()
     if result is not None:
@@ -580,7 +647,13 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
             picked = aggression_prior(actions, extractor, rng, obs=obs)
         else:
             picked = rng.choice(actions)
-        rows, terms = afterstate_rows(fork, seat, [picked], extractor)
+        try:
+            rows, terms = afterstate_rows(fork, seat, [picked], extractor)
+        except BaseException as panic:
+            if not _is_engine_panic(panic):
+                raise
+            raise ValueError(f"engine panic during exploration "
+                             f"afterstate: {str(panic)[:90]}") from None
         value = terms[0] if terms[0] is not None else net.value(rows[0])
         return picked["index"], rows[0], value
 
@@ -590,8 +663,18 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
     if dominance:
         # Always leaves >= 2 actions (pass plus at least one non-pass).
         actions = dominance_prune(fork, obs, actions, extractor)
-    rows, terms, copies = afterstate_rows(fork, seat, actions, extractor,
-                                          keep_copies=True)
+    try:
+        rows, terms, copies = afterstate_rows(fork, seat, actions,
+                                              extractor, keep_copies=True)
+    except BaseException as panic:
+        if not _is_engine_panic(panic):
+            raise
+        # A panicked SCREEN clone cannot produce a ranked decision;
+        # surface it as the existing engine-fault path (game dropped in
+        # training, 0.5-scored in gates). The real game's own act()
+        # stays unarmored by design.
+        raise ValueError(f"engine panic during afterstate screen: "
+                         f"{str(panic)[:90]}") from None
     values = net.value_batch(np.stack(rows))
     scores = [t if t is not None else v for t, v in zip(terms, values)]
     if POLICY_HEAD is not None and POLICY_WEIGHT > 0.0:
@@ -625,11 +708,15 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
                         search,
                         epsilon=0.0 if p == 0 else search.playout_epsilon)
                 refined[i] = total / search.playouts
-            except ValueError:
+            except BaseException as error:
+                if not (isinstance(error, ValueError)
+                        or _is_engine_panic(error)):
+                    raise
                 # Upstream engine fault inside a playout clone (the
                 # built-in handcrafted policy can return no action, seen
-                # on 0.3.0): the CLONE is stuck, not the real game, so
-                # fall back to this candidate's myopic screen value.
+                # on 0.3.0; pyo3 panics from clone-boundary edge cases
+                # are also survivable here): the CLONE is stuck, not the
+                # real game, so fall back to the myopic screen value.
                 refined[i] = float(scores[i])
         scores = refined
     best = int(np.argmax(scores))

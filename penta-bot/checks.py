@@ -1087,6 +1087,80 @@ def check_k_deploy_aux():
           f"{bad} violations")
 
 
+def check_l_panic_armor():
+    """Engine-panic armor: a pyo3 PanicException from a CLONE act inside
+    a playout truncates the playout (net-scored, no raise); the settle
+    path fails closed; a screen-clone panic surfaces as the existing
+    dropped-game ValueError; and NON-panic BaseExceptions are never
+    swallowed. Detection is by class identity (name + claimed module)
+    because pyo3 never registers a real pyo3_runtime module, so the
+    stand-in class replicates exactly that shape."""
+    panic_cls = type("PanicException", (BaseException,),
+                     {"__module__": "pyo3_runtime"})
+    game, history, make_game = rand_game_to_depth(41, 30)
+    if game is None:
+        check("L1 panic armor truncates playouts", False, "no state")
+        return
+    obs_json = game.observe()
+    obs = json.loads(obs_json)
+
+    class PanickyClone:
+        """Serves the real observation; panics on every act."""
+        def __init__(self, exc):
+            self.exc = exc
+
+        def result(self):
+            return None
+
+        def observe(self, seat=None):
+            return obs_json
+
+        def act(self, index):
+            raise self.exc("test panic: mana activation plan")
+
+        def clone(self):
+            return self
+
+    net = Net(EX.size, hidden=8, seed=23)
+    rng = random.Random(3)
+    value = playout_value(PanickyClone(panic_cls), obs["seat"], net, EX,
+                          rng, obs.get("turn", 0), False, DEFAULT_SEARCH)
+    check("L1 panic armor truncates playouts with a net score",
+          isinstance(value, float) and 0.0 <= value <= 1.0,
+          f"value {value:.3f}, no raise")
+    settle = trainer._settle_all_pass(PanickyClone(panic_cls))
+    expect = not json.loads(obs_json).get("stack")
+    check("L2 panicked settle clone fails closed",
+          settle is expect,
+          f"settle {settle} (stack "
+          f"{'empty' if expect else 'pending'}), no raise")
+
+    try:
+        choose(lambda: PanickyClone(panic_cls), obs, net, EX, rng,
+               epsilon=0.0, max_eval=8, depth=len(history))
+        screen_ok = False
+        detail = "no exception raised"
+    except ValueError as error:
+        screen_ok = "engine panic" in str(error)
+        detail = str(error)[:60]
+    except BaseException as error:
+        screen_ok = False
+        detail = f"leaked {type(error).__name__}"
+    check("L3 screen-clone panic surfaces as the dropped-game "
+          "ValueError", screen_ok, detail)
+
+    # Anything that is NOT the engine panic must pass straight through.
+    other = type("KeyboardInterrupt", (BaseException,), {})
+    try:
+        playout_value(PanickyClone(other), obs["seat"], net, EX,
+                      rng, obs.get("turn", 0), False, DEFAULT_SEARCH)
+        passed_through = False
+    except BaseException as error:
+        passed_through = type(error) is other
+    check("L4 non-panic BaseExceptions are never swallowed",
+          passed_through)
+
+
 def main():
     print("A. seat/perspective labels")
     check_a_observe_default_seat()
@@ -1122,6 +1196,8 @@ def main():
     check_j_schema_v3()
     print("K. deploy-axis aux loss")
     check_k_deploy_aux()
+    print("L. engine-panic armor")
+    check_l_panic_armor()
     print()
     print(f"{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
