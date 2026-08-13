@@ -660,6 +660,45 @@ training artifacts; safe to run beside an active training run.
 human) and re-derives the bot's moves offline to assert they match
 `trainer.choose()`.
 
+## Public hosted bot (hosted_bot.py, protocol 18)
+
+The bot is also on penta's public server
+(https://penta.lacker.workers.dev) as **"SPZ"**, registered with Sligh
+(our strongest pilot seat) per docs/bots.md's registry contract:
+`hosted_bot.py` registers once (persisted in `hosted_bot_state.json`),
+heartbeats every 10s (auto-reregisters on 4xx), and answers invites
+with the per-room opponent/command loop; per-game JSONL transcripts
+land in `hosted-games/` for later scouting.
+
+**Hosted play is observation-only** -- a room hands a bot redacted
+observations over the wire and never a game object, so `game.clone()`
+and the whole rollout-search recipe cannot run (upstream lacker/penta#57
+tracks state-import / server-side rollout support; #11 was the
+determinization half). `hosted_policy.py` is the honest fallback:
+
+- protocol-18 adapter over the PINNED feature layout
+  (`pinned-catalog.json` snapshot; definition IDs are append-only
+  upstream, verified a strict subset of the current 130 legal defs;
+  hybrid mana costs and unknown-definition tolerance in extractor.py);
+- approximate afterstates predicted in pure Python (the fields the 825
+  schema reads), scored by the certified pair -- measured near-exact
+  for casts (L1 ~0.1 vs real engine afterstates);
+- BUT without playouts the raw 1-ply blend reverts to pre-search
+  passivity (measured 0/12: 2 casts from 157 offers, zero attacks), so
+  the shipping policy is first_bot-SHAPED: land > cast > attack
+  category order with the NETS selecting within categories, plus the
+  land-drop rule, an x=0 junk-cast filter, and the land-count mulligan
+  rule. Shipped first_bot itself never casts on protocol 18 (objectId
+  fed to a definition-keyed catalog -- filed as lacker/penta#58).
+
+Honest strength, gated through exactly the hosted code path
+(`gate_hosted.py`, 120 games vs the current engine's handcrafted,
+head weight 0.5): **26.7% (LCB 19.6%)** -- far below the in-process
+certified 60.1%, and the gap IS the measured value of clone-based
+search; closing it needs #57, not tuning. Milliseconds per move
+against the room's 60s clock; a 10s move budget falls back to the
+bare shape ordering instantly.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->

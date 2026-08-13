@@ -117,6 +117,33 @@ N_EXTRA_SCALARS = 8  # keep in sync with _extra_scalars()
 N_V3_SCALARS = 15  # keep in sync with _v3_scalars()
 
 
+def pinned_catalog():
+    """The catalog that defines the FEATURE LAYOUT, independent of any
+    importable engine. Prefers the pinned-catalog.json snapshot (written
+    from the vendored protocol-2 penta.so; definition IDs are
+    append-only upstream, so the 128-slot layout stays valid against
+    newer engines), else falls back to importing the pinned module.
+    Hosted bots featurize protocol-18 observations against this exact
+    layout without importing any engine at all."""
+    snapshot = os.path.join(LOCAL_DIR, "pinned-catalog.json")
+    if os.path.exists(snapshot):
+        with open(snapshot) as f:
+            return json.load(f)
+    return json.loads(import_penta().catalog())
+
+
+def converted_cost(cost):
+    """Total printed cost from a mana-cost object, protocol-tolerant:
+    protocol <=7 used a numeric whiteRedHybrid field, protocol 8+ a
+    sparse `hybrid` array; X counts 0; null cost -> 0."""
+    cost = cost or {}
+    hybrid = sum(h.get("count", 0) for h in (cost.get("hybrid") or ()))
+    return (cost.get("generic", 0) + cost.get("white", 0)
+            + cost.get("blue", 0) + cost.get("black", 0)
+            + cost.get("red", 0) + cost.get("green", 0)
+            + cost.get("whiteRedHybrid", 0) + hybrid)
+
+
 class Extractor:
     """Turns one observation dict into a fixed-length float32 vector."""
 
@@ -124,8 +151,7 @@ class Extractor:
         if version not in (1, 2, 3):
             raise ValueError(f"unknown feature schema version {version}")
         self.version = version
-        penta = import_penta()
-        catalog = json.loads(penta.catalog())
+        catalog = pinned_catalog()
         self.engine_version = catalog["engineVersion"]
         self.protocol_version = catalog["protocolVersion"]
         # Deterministic definition -> slot mapping, sorted by definition id.
@@ -154,12 +180,8 @@ class Extractor:
         # granters ("R: Gains flying...") are correctly excluded.
         self.flying_defs = set()
         for card in catalog["cards"]:
-            cost = card.get("manaCost") or {}
-            self.card_cost[card["definition"]] = (
-                cost.get("generic", 0) + cost.get("white", 0)
-                + cost.get("blue", 0) + cost.get("black", 0)
-                + cost.get("red", 0) + cost.get("green", 0)
-                + cost.get("whiteRedHybrid", 0))
+            self.card_cost[card["definition"]] = converted_cost(
+                card.get("manaCost"))
             if (card.get("power") is not None
                     and (card.get("rulesText") or "").startswith("Flying")):
                 self.flying_defs.add(card["definition"])
@@ -328,7 +350,9 @@ class Extractor:
                 continue
             seen_instances.add(inst)
             castable_defs.append(definition)
-            vec[base + self.def_slot[definition]] += 0.25
+            i = self.def_slot.get(definition)
+            if i is not None:
+                vec[base + i] += 0.25
             vec[base + C + N_COST_BUCKETS
                 + self._cost_bucket(definition)] += 0.25
 
@@ -432,18 +456,31 @@ class Extractor:
         C = self.defs
         vec = np.zeros(self.size, dtype=np.float32)
 
+        # def_slot lookups are defensive: a newer engine's observation can
+        # contain definitions outside the pinned layout (tokens, cards
+        # added after the pin); they contribute to the scalar aggregates
+        # but have no count slot.
+        slot = self.def_slot.get
         for card in obs.get("hand", ()):
-            vec[self.def_slot[card["definition"]]] += 0.25
+            i = slot(card["definition"])
+            if i is not None:
+                vec[i] += 0.25
 
         for perm in obs.get("battlefield", ()):
             base = C if perm["controller"] == seat_names[me] else 2 * C
-            vec[base + self.def_slot[perm["definition"]]] += 0.25
+            i = slot(perm["definition"])
+            if i is not None:
+                vec[base + i] += 0.25
 
         graveyards = obs.get("graveyards", ((), ()))
         for card in graveyards[me]:
-            vec[3 * C + self.def_slot[card["definition"]]] += 0.25
+            i = slot(card["definition"])
+            if i is not None:
+                vec[3 * C + i] += 0.25
         for card in graveyards[opp]:
-            vec[4 * C + self.def_slot[card["definition"]]] += 0.25
+            i = slot(card["definition"])
+            if i is not None:
+                vec[4 * C + i] += 0.25
 
         vec[5 * C:self.v1_size] = self._scalars(obs, me, opp)
         if self.version >= 2:
