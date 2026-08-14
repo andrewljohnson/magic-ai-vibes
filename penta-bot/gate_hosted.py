@@ -24,7 +24,7 @@ from multiprocessing import Pool
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from hosted_policy import HostedPolicy  # noqa: E402
+from hosted_policy import DeterminizedPolicy, HostedPolicy  # noqa: E402
 
 DECKS = ("Sligh", "White Weenie", "The Deck", "Counterburn",
          "Goblins", "Erhnamgeddon", "Mono Black", "Jeskai Aggro")
@@ -43,23 +43,40 @@ def load_penta18():
 _WORKER = {}
 
 
-def _init(deck_name, head, weight):
+def _init(deck_name, head, weight, determinized=False, k_worlds=6):
     _WORKER["penta"] = load_penta18()
-    _WORKER["policy"] = HostedPolicy(head_path=head, weight=weight)
+    if determinized:
+        _WORKER["policy"] = DeterminizedPolicy(
+            _WORKER["penta"], our_deck="Sligh", k_worlds=k_worlds,
+            weight=weight, head_path=head,
+            fail_log=os.environ.get("RECON_FAIL_LOG"))
+    else:
+        _WORKER["policy"] = HostedPolicy(head_path=head, weight=weight)
 
 
 def _play(task):
     my_seat, d1, d2, seed = task
     penta = _WORKER["penta"]
     policy = _WORKER["policy"]
+    if hasattr(policy, "our_deck"):
+        policy.our_deck = d1 if my_seat == "p1" else d2
     opponent_seat = "p2" if my_seat == "p1" else "p1"
     game = penta.Game(d1, d2, opponent="handcrafted",
                       opponent_seat=opponent_seat, seed=seed)
     moves = 0
+    slowest = 0.0
     while game.result() is None and moves < 3000:
-        obs = json.loads(game.observe())
-        game.act(policy.choose(obs))
+        raw = game.observe()
+        obs = json.loads(raw)
+        t0 = time.time()
+        if hasattr(policy, "our_deck"):
+            index = policy.choose(obs, raw_json=raw)
+        else:
+            index = policy.choose(obs)
+        slowest = max(slowest, time.time() - t0)
+        game.act(index)
         moves += 1
+    _WORKER["slowest"] = max(_WORKER.get("slowest", 0.0), slowest)
     result = game.result()
     if result == my_seat:
         return 1.0
@@ -85,6 +102,11 @@ def main():
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--head", default="policy_head.ckpt-dagger1.npz")
     parser.add_argument("--weight", type=float, default=0.15)
+    parser.add_argument("--determinized", action="store_true",
+                        help="Game.from_observation K-world search "
+                             "(lacker/penta#57) instead of the shaped "
+                             "observation-only policy")
+    parser.add_argument("--k-worlds", type=int, default=6)
     args = parser.parse_args()
 
     pairs = [(a, b) for a in DECKS for b in DECKS if a != b]
@@ -95,7 +117,8 @@ def main():
         tasks.append((my_seat, d1, d2, args.seed_base + g))
     t0 = time.time()
     with Pool(args.workers, initializer=_init,
-              initargs=("", args.head, args.weight)) as pool:
+              initargs=("", args.head, args.weight, args.determinized,
+                        args.k_worlds)) as pool:
         scores = pool.map(_play, tasks)
     took = time.time() - t0
     wins = sum(1 for s in scores if s == 1.0)

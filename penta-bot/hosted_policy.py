@@ -26,6 +26,7 @@ through exactly this code path.
 """
 
 import copy
+import json
 import os
 
 import numpy as np
@@ -268,3 +269,186 @@ class HostedPolicy:
         # Everything else (decisions, discards, activations, passes):
         # the blend over the full list, tie-ordered.
         return self._pick(obs, list(actions))
+
+
+class DeterminizedPolicy:
+    """Full search on hypothesis worlds via Game.from_observation
+    (lacker/penta#57): at each observation, sample K hidden-zone
+    hypotheses (opponent hand/library from their deck's unseen pool,
+    our library from our own known list minus seen zones), reconstruct
+    each into a live local game, run the CERTIFIED in-process search
+    (trainer.choose: value net + policy head blend, dominance prunes,
+    rollout playouts at DEFAULT_SEARCH) in every world, and act on the
+    majority vote (ties broken by the shaped observation-only blend).
+
+    Fail-closed everywhere: a world whose reconstruction or search
+    fails is dropped (the observation JSON is logged -- reconstruction
+    failures on ordinary observations are exactly the reopen evidence
+    #57 asks for); when no world survives, the shaped observation-only
+    policy answers, so the move clock is never at risk. A per-decision
+    time budget stops sampling worlds early and votes among those
+    finished.
+
+    After local randomness fires (shuffles, random discards) or a
+    hypothesized card is revealed, each world is a sample rather than a
+    replica -- the documented, intended semantics of determinized
+    search.
+    """
+
+    def __init__(self, engine, our_deck, k_worlds=6, weight=0.15,
+                 value_path="penta_net.npz",
+                 head_path="policy_head.ckpt-dagger1.npz",
+                 decklists_path="builtin-decklists.json",
+                 time_budget=20.0, fail_log=None):
+        import os as _os
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        # trainer's blend loads from env at import; pin it before.
+        _os.environ.setdefault("PENTA_POLICY_NET",
+                               _os.path.join(here, head_path))
+        _os.environ.setdefault("PENTA_POLICY_WEIGHT", str(weight))
+        import trainer as _trainer  # noqa: PLC0415
+        self.trainer = _trainer
+        self.engine = engine
+        self.our_deck = our_deck
+        self.k = k_worlds
+        self.time_budget = time_budget
+        self.fail_log = fail_log
+        self.fallback = HostedPolicy(value_path=value_path,
+                                     head_path=head_path, weight=weight)
+        self.net = self.fallback.net
+        self.extractor = self.fallback.extractor
+        with open(_os.path.join(here, decklists_path)) as f:
+            raw = json.load(f)
+        self.decks = {name: {int(d): c for d, c in zone["main"].items()}
+                      for name, zone in raw.items()}
+        self.worlds_used = []  # per-decision survivor counts (telemetry)
+
+    # -- hypothesis construction ----------------------------------------
+
+    def _seen_defs(self, obs, seat_name, seat_idx, include_hand):
+        seen = []
+        if include_hand:
+            seen += [c["definition"] for c in obs.get("hand", ())]
+        seen += [p["definition"] for p in obs.get("battlefield", ())
+                 if p.get("controller") == seat_name]
+        for zone in ("graveyards", "exiles"):
+            piles = obs.get(zone) or ((), ())
+            if len(piles) > seat_idx:
+                seen += [c["definition"] for c in piles[seat_idx]]
+        return seen
+
+    def _pool(self, deck_name, seen):
+        pool = []
+        for d, c in self.decks.get(deck_name, {}).items():
+            pool += [d] * c
+        for d in seen:
+            if d in pool:
+                pool.remove(d)
+        return pool
+
+    def classify_opponent(self, obs):
+        """Best-overlap guess at the opponent's (built-in) deck from
+        every card of theirs we have seen."""
+        opp = "p2" if obs.get("seat") == "p1" else "p1"
+        oi = 0 if opp == "p1" else 1
+        seen = self._seen_defs(obs, opp, oi, include_hand=False)
+        if not seen:
+            return None
+        best, best_score = None, -1.0
+        for name, deck in self.decks.items():
+            pool = dict(deck)
+            hits = 0
+            for d in seen:
+                if pool.get(d, 0) > 0:
+                    pool[d] -= 1
+                    hits += 1
+            score = hits / len(seen)
+            if score > best_score:
+                best, best_score = name, score
+        return best
+
+    def build_hidden(self, obs, rng, opp_deck):
+        me = obs["seat"]
+        opp = "p2" if me == "p1" else "p1"
+        mi, oi = (0, 1) if me == "p1" else (1, 0)
+        my_pool = self._pool(self.our_deck,
+                             self._seen_defs(obs, me, mi, True))
+        opp_pool = self._pool(opp_deck,
+                              self._seen_defs(obs, opp, oi, False))
+        rng.shuffle(my_pool)
+        rng.shuffle(opp_pool)
+        need_opp = obs.get("opponentHandSize", 0) + obs["librarySizes"][oi]
+        if len(my_pool) < obs["librarySizes"][mi] or \
+                len(opp_pool) < need_opp:
+            return None  # hypothesis cannot cover the observation
+        opp_hand = opp_pool[:obs.get("opponentHandSize", 0)]
+        opp_lib = opp_pool[len(opp_hand):len(opp_hand)
+                           + obs["librarySizes"][oi]]
+        return {
+            "hands": {opp: opp_hand},
+            "libraries": {me: my_pool[:obs["librarySizes"][mi]],
+                          opp: opp_lib},
+            "outsideGame": {"p1": [], "p2": []},
+        }
+
+    # -- choice ----------------------------------------------------------
+
+    def choose(self, obs, raw_json=None):
+        import time as _time
+        actions = obs.get("legalActions") or ()
+        if not actions:
+            return 0
+        if len(actions) == 1:
+            return actions[0]["index"]
+        if "checkpoint" not in obs:
+            # Server predates reconstruction.checkpoint.v2: shaped
+            # observation-only play, no K futile exceptions per move.
+            return self.fallback.choose(obs)
+        raw = raw_json if raw_json is not None else json.dumps(obs)
+        opp_deck = self.classify_opponent(obs) or self.our_deck
+        votes = {}
+        t0 = _time.time()
+        survivors = 0
+        for k in range(self.k):
+            if _time.time() - t0 > self.time_budget and votes:
+                break
+            rng = np.random.default_rng()  # sampling entropy per world
+            py_rng = __import__("random").Random(int(rng.integers(2**31)))
+            hidden = self.build_hidden(obs, py_rng, opp_deck)
+            if hidden is None:
+                continue
+            try:
+                world = self.engine.Game.from_observation(
+                    raw, json.dumps(hidden), int(rng.integers(2**31)))
+            except Exception as error:
+                self._log_failure(obs, raw, error)
+                continue
+            try:
+                index, _, _ = self.trainer.choose(
+                    world.clone, obs, self.net, self.extractor, py_rng,
+                    epsilon=0.0, max_eval=16, depth=0,
+                    search=self.trainer.DEFAULT_SEARCH)
+            except Exception:
+                continue  # panicked/stuck world: drop it
+            votes[index] = votes.get(index, 0) + 1
+            survivors += 1
+        self.worlds_used.append(survivors)
+        if not votes:
+            return self.fallback.choose(obs)
+        top = max(votes.values())
+        tied = [i for i, v in votes.items() if v == top]
+        if len(tied) == 1:
+            return tied[0]
+        # Tie: shaped observation-only blend decides among the tied.
+        tied_actions = [a for a in actions if a["index"] in tied]
+        return self.fallback._pick(obs, tied_actions)
+
+    def _log_failure(self, obs, raw, error):
+        if not self.fail_log:
+            return
+        try:
+            with open(self.fail_log, "a") as f:
+                f.write(json.dumps({"error": str(error)[:300],
+                                    "observation": obs}) + "\n")
+        except OSError:
+            pass

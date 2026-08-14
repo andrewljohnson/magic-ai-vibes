@@ -151,7 +151,12 @@ def main():
     parser.add_argument("--name", default="SPZ")
     parser.add_argument("--deck", default="Sligh")
     parser.add_argument("--weight", type=float, default=0.15)
-    parser.add_argument("--move-budget", type=float, default=10.0)
+    parser.add_argument("--engine-dir", default="",
+                        help="penta-py build dir for Game.from_observation "
+                             "determinized search (lacker/penta#57); empty "
+                             "= shaped observation-only policy")
+    parser.add_argument("--k-worlds", type=int, default=4)
+    parser.add_argument("--move-budget", type=float, default=20.0)
     parser.add_argument("--heartbeat", type=float, default=10.0)
     args = parser.parse_args()
 
@@ -163,7 +168,24 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
-    policy = HostedPolicy(weight=args.weight)
+    if args.engine_dir:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "penta", os.path.join(args.engine_dir, "penta.so"))
+        engine = importlib.util.module_from_spec(spec)
+        sys.modules["penta"] = engine
+        spec.loader.exec_module(engine)
+        from hosted_policy import DeterminizedPolicy
+        policy = DeterminizedPolicy(
+            engine, our_deck=args.deck, k_worlds=args.k_worlds,
+            weight=args.weight,
+            fail_log=os.path.join(HERE, "recon-failures.jsonl"),
+            time_budget=args.move_budget)
+        print(f"determinized brain: engine "
+              f"{engine.engine_version()}/p{engine.protocol_version()}, "
+              f"K={args.k_worlds}", flush=True)
+    else:
+        policy = HostedPolicy(weight=args.weight)
     state = load_or_register(args.server, args.name, args.deck)
     done = []
     beats = 0
