@@ -160,6 +160,7 @@ fn playout_at(
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn stream_rows(
+    py: Python<'_>,
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, top_k: usize, budget: usize, k_worlds: usize,
     decklists_path: String,
@@ -170,16 +171,53 @@ fn stream_rows(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let decks = decks::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    // Multithreaded: the policy and decks are read-only, so play the
+    // games across `threads` OS threads with the GIL released, then
+    // concatenate in spec order. One PyO3 call per round.
+    let threads = std::thread::available_parallelism()
+        .map(|n| n.get()).unwrap_or(8).min(specs.len().max(1));
+    let policy = std::sync::Arc::new(policy);
+    let decks = std::sync::Arc::new(decks);
+    let specs = std::sync::Arc::new(specs);
+    let results: Vec<(Vec<f32>, Vec<f32>, usize, usize)> =
+        py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..threads {
+            let policy = policy.clone();
+            let decks = decks.clone();
+            let specs = specs.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut i = t;
+                while i < specs.len() {
+                    let (d1, d2, seed, hc, lp1) = &specs[i];
+                    let learner = if *lp1 { penta::PlayerId::One }
+                                  else { penta::PlayerId::Two };
+                    let mut x = Vec::new();
+                    let mut y = Vec::new();
+                    let c = det_runner::play_game(&policy, &policy.tables,
+                        &decks, d1, d2, *seed, k_worlds, *hc, learner,
+                        &mut x, &mut y);
+                    out.push((x, y, i, c));
+                    i += threads;
+                }
+                out
+            }));
+        }
+        let mut all = Vec::new();
+        for h in handles { all.extend(h.join().unwrap()); }
+        all
+    });
+    // reorder by spec index for determinism
+    let mut ordered = results;
+    ordered.sort_by_key(|r| r.2);
     let mut x = Vec::new();
     let mut y = Vec::new();
-    let mut counts = Vec::new();
-    for (d1, d2, seed, handcrafted, learner_p1) in &specs {
-        let learner = if *learner_p1 { penta::PlayerId::One }
-                      else { penta::PlayerId::Two };
-        let c = det_runner::play_game(&policy, &policy.tables, &decks,
-            d1, d2, *seed, k_worlds, *handcrafted, learner,
-            &mut x, &mut y);
-        counts.push(c);
+    let mut counts = vec![0usize; specs.len()];
+    for (gx, gy, i, c) in ordered {
+        x.extend_from_slice(&gx);
+        y.extend_from_slice(&gy);
+        counts[i] = c;
     }
     Ok((x, y, counts))
 }

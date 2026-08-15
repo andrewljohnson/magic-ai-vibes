@@ -1096,6 +1096,18 @@ def load_ring(path, replay_X, replay_y, capacity, net):
     return size, size % capacity
 
 
+def _export_spzw(net, path):
+    """Write net to the flat LE binary spz_core.net reads (u64 hidden,
+    u64 inputs, then w1/b1/w2/b2 f64)."""
+    hidden, inputs = net.w1.shape
+    with open(path, "wb") as f:
+        f.write(np.array([hidden, inputs], dtype="<u8").tobytes())
+        f.write(np.ascontiguousarray(net.w1, dtype="<f8").tobytes())
+        f.write(np.ascontiguousarray(net.b1, dtype="<f8").tobytes())
+        f.write(np.ascontiguousarray(net.w2, dtype="<f8").tobytes())
+        f.write(np.array([net.b2], dtype="<f8").tobytes())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--games", type=int, default=3000)
@@ -1188,6 +1200,17 @@ def main():
                         metavar="FRACTION",
                         help="fraction of games played vs the built-in "
                              "handcrafted bot")
+    parser.add_argument("--native-rows", action="store_true",
+                        help="generate self-play rows with the native "
+                             "spz_core determinized runner (row-lockstep "
+                             "verified vs this Python path); Python keeps "
+                             "SGD/ring/league/promotion. Requires "
+                             "--determinized-k, PENTA_ENGINE_DIR, and the "
+                             "policy-head env vars. Greedy + handcrafted-"
+                             "league only (no epsilon/frozen yet).")
+    parser.add_argument("--native-value-spzw", default="_native_value.spzw",
+                        help="scratch path the current net is exported to "
+                             "each round for the native runner")
     args = parser.parse_args()
 
     if args.init:
@@ -1269,6 +1292,86 @@ def main():
 
     played = 0
     t_start = time.time()
+
+    if args.native_rows:
+        # Native determinized row generation (spz_core). Python still owns
+        # SGD, the replay ring, league scheduling, save, and gating; Rust
+        # only plays determinized games and returns (features, targets)
+        # rows -- row-lockstep verified bit-for-bit vs the Python path.
+        import json as _json  # noqa: PLC0415
+        import spz_core  # noqa: PLC0415
+        from extractor import pinned_catalog  # noqa: PLC0415
+        catalog_json = _json.dumps(pinned_catalog())
+        head_npz = os.environ["PENTA_POLICY_NET"]
+        weight = float(os.environ.get("PENTA_POLICY_WEIGHT", "0.15"))
+        head_spzw = args.native_value_spzw + ".head"
+        _export_spzw(Net.load(head_npz), head_spzw)
+        print(f"native-rows: spz_core determinized runner, K="
+              f"{args.determinized_k}, head {os.path.basename(head_npz)} "
+              f"@ w={weight}, search topk {args.search_topk} budget "
+              f"{args.playout_budget}", flush=True)
+        while played < args.games:
+            round_n = min(args.round_games, args.games - played)
+            specs = []
+            for g in range(round_n):
+                number = played + g
+                if args.seat_oversample:
+                    d1, d2 = matchup_train(number)
+                    ls = learner_seat_for(number, period=len(TRAIN_PAIRS))
+                else:
+                    d1, d2 = matchup(number)
+                    ls = learner_seat_for(number)
+                seed = args.seed_base + number
+                mode, _ = league_roll(seed, args.league_handcrafted, 0)
+                specs.append((d1, d2, seed, mode == "handcrafted",
+                              ls == "p1"))
+            _export_spzw(net, args.native_value_spzw)
+            x_flat, y_flat, counts = spz_core.stream_rows(
+                catalog_json, args.native_value_spzw, head_spzw, weight,
+                args.search_topk, args.playout_budget,
+                args.determinized_k, "builtin-decklists.json", specs)
+            new = len(y_flat)
+            if new:
+                rows = np.asarray(x_flat, dtype=np.float32).reshape(
+                    new, extractor.size)
+                targets = np.asarray(y_flat, dtype=np.float32)
+                for i in range(new):
+                    replay_X[replay_cursor] = rows[i]
+                    replay_y[replay_cursor] = targets[i]
+                    replay_cursor = (replay_cursor + 1) % args.replay_capacity
+                replay_size = min(replay_size + new, args.replay_capacity)
+            played += round_n
+            caps = sum(1 for c in counts if c == 0)
+            steps = max(1, 2 * new // args.batch)
+            losses = []
+            for _ in range(steps):
+                lr = args.lr
+                if args.lr_warmup > 0:
+                    lr *= min(1.0, (updates_done + 1) / args.lr_warmup)
+                pick = train_rng.integers(0, max(1, replay_size),
+                                          size=args.batch)
+                losses.append(net.train_batch(
+                    replay_X[pick], replay_y[pick], lr))
+                updates_done += 1
+            net.save(args.out, engine_version=extractor.engine_version,
+                     protocol_version=extractor.protocol_version,
+                     hidden=args.hidden, games=played,
+                     search_topk=args.search_topk,
+                     feature_schema=extractor.version,
+                     td_lambda_per_turn=args.td_lambda_per_turn,
+                     seat_oversample=int(args.seat_oversample),
+                     determinized_k=args.determinized_k,
+                     native_rows=1)
+            rate = played / (time.time() - t_start)
+            print(f"games {played:5d}  loss {np.mean(losses):.4f}  "
+                  f"samples {new:5d}  replay {replay_size:6d}  "
+                  f"caps {caps}  {rate:5.2f} games/s", flush=True)
+        if args.ring:
+            save_ring(args.ring, replay_X, replay_y, replay_size,
+                      replay_cursor, args.replay_capacity, net)
+        print(f"done: {played} games -> {args.out}")
+        return
+
     with Pool(args.workers, initializer=_worker_init,
               initargs=(args.hidden, tuple(args.league_frozen),
                         extractor.version, args.determinized_k)) as pool:
