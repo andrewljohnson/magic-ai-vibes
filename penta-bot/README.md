@@ -699,6 +699,26 @@ search; closing it needs #57, not tuning. Milliseconds per move
 against the room's 60s clock; a 10s move budget falls back to the
 bare shape ordering instantly.
 
+**Determinized search shipped (2026-08-14, lacker/penta#57 landed
+upstream).** `DeterminizedPolicy` builds K=4 hypothesis worlds per
+decision with `Game.from_observation` (opponent hand/library sampled
+from the unseen pool of a best-overlap deck classification, our
+library from our known list minus seen zones) and runs the certified
+in-process search in each, acting on the majority vote; fail-closed
+worlds, checkpoint capability guard, shaped fallback. Reconstruction
+is FREE (0.3-0.6ms/world vs 116-405ms for our search inside it) and
+FLAWLESS: zero failures across 776 worlds in the E2E game and all 520
+certification games. Mean 636ms/move, worst 4.4s vs the 60s clock.
+Hosted certification (0.7.0 handcrafted): 120-gate 28.7% (LCB 21.0),
+confirm-400 **31.6% (LCB 26.9)** -- a real recovery over
+observation-only 26.7%, far short of the in-process 60.1% because
+that number was measured on TRUE-STATE clones (the long-acknowledged
+leak): determinization removed our unfair advantage, and what remains
+is the honest price of hidden information plus nets trained on 0.5.0
+true-state self-play playing 0.7.0 rules. The hosted bot is NOT
+certified better-than-handcrafted online; the in-process pair
+certification stands. SPZ plays the determinized brain publicly.
+
 ## Honest assessment: what a full port needs
 
 This spike proves the plumbing: observation -> features -> value net ->
