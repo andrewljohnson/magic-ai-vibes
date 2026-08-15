@@ -5,3 +5,4 @@ recon-failures.jsonl
 spz_core.so
 spz-core/target/
 vendor/penta/target/
+*.spzw
