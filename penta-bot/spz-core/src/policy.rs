@@ -71,7 +71,7 @@ impl Policy {
             return 0;
         }
         let actions = protocol_actions(&obs);
-        let keep = self.dominance_keep(g, &obs, &actions, seat);
+        let keep = self.dominance_keep(g, &obs, &actions, seat, g.in_pregame());
         // Score survivors: terminal -> exact, else blended afterstate.
         let mut scored: Vec<(usize, f64, Option<Game>)> = Vec::new();
         for &i in &keep {
@@ -99,7 +99,7 @@ impl Policy {
         order.sort_by(|&a, &b| scored[b].1.total_cmp(&scored[a].1));
         order.truncate(self.search.top_k);
         let turn0 = obs.turn;
-        let was_pregame = obs.turn == 0;
+        let was_pregame = g.in_pregame();
         let mut best_i = scored[order[0]].0;
         let mut best_v = f64::NEG_INFINITY;
         for &oi in &order {
@@ -125,8 +125,12 @@ impl Policy {
             }
             let Some(acting) = g.decision_player() else { break };
             let obs = g.observe(acting);
-            // boundary: seat's next turn start
-            if acting == seat && !obs_pregame(&obs)
+            // boundary: the deciding seat's next TURN start -- our seat is
+            // the ACTIVE player (not merely holding priority) on a later
+            // turn. Matches trainer.playout_boundary (activeSeat==seat),
+            // NOT "we have priority", which also fires on the opponent's
+            // turn and would truncate the playout early.
+            if !g.in_pregame() && obs.active_player == seat
                 && (was_pregame || obs.turn > turn0)
             {
                 break;
@@ -169,26 +173,230 @@ impl Policy {
     }
 
     // -- dominance prune (land-drop + no-upside vs pass) ----------------
-    // Returns the indices (into `actions`) that survive.
-    fn dominance_keep(&self, _g: &Game, obs: &PlayerObservation,
-                      actions: &[Action], seat: PlayerId) -> Vec<usize> {
-        // Fail-closed on any non-empty stack / pregame -> keep all.
+    // A faithful port of trainer.dominance_prune. Returns the indices
+    // (into `actions`) that survive. `pregame` is threaded from the
+    // caller (Game::in_pregame).
+    fn dominance_keep(&self, g: &Game, obs: &PlayerObservation,
+                      actions: &[Action], seat: PlayerId,
+                      pregame: bool) -> Vec<usize> {
         let all: Vec<usize> = (0..actions.len()).collect();
-        if !obs.stack.is_empty() {
+        if pregame || !obs.stack.is_empty() {
             return all;
         }
-        // NOTE: this cut ports only the land-drop rule half (the biggest
-        // behavioral lever); the no-upside-vs-pass settle prune stays in
-        // Python for now, so the Rust greedy path is a SUPERSET-safe
-        // approximation -- lockstep tolerates it only where both agree.
-        // Full parity is the next milestone.
-        all
+        let passes: Vec<usize> = actions.iter().enumerate()
+            .filter(|(_, a)| matches!(a, Action::PassPriority))
+            .map(|(i, _)| i).collect();
+        if passes.is_empty() {
+            return all;
+        }
+        let non_pass: Vec<usize> = actions.iter().enumerate()
+            .filter(|(_, a)| !matches!(a, Action::PassPriority))
+            .map(|(i, _)| i).collect();
+        let base = DomState::of(obs, seat, &self.tables);
+        let mut pruned: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+
+        // (a) candidates strictly dominated by standing pat.
+        let testable: Vec<usize> = non_pass.iter().copied()
+            .filter(|&i| matches!(actions[i],
+                Action::CastSpell { .. } | Action::ActivateAbility { .. }))
+            .collect();
+        if non_pass.len() >= 2 && !testable.is_empty() {
+            // instance -> definition (hand + battlefield), for the
+            // invisible-upside guard.
+            let mut inst_def: std::collections::HashMap<u32, u16> =
+                std::collections::HashMap::new();
+            for (id, d) in &obs.hand { inst_def.insert(id.0, d.0); }
+            for perm in &obs.battlefield {
+                inst_def.insert(perm.id.0, perm.definition.0);
+            }
+            for &i in &testable {
+                let def = match &actions[i] {
+                    Action::CastSpell { card, .. } => inst_def.get(&card.0),
+                    Action::ActivateAbility { source, .. } =>
+                        inst_def.get(&source.0),
+                    _ => None,
+                };
+                // Unmappable id -> treat as invisible-upside (fail closed).
+                let upside = def.map_or(true,
+                    |d| self.tables.invisible_upside.contains(d));
+                let mut copy = g.clone();
+                if copy.apply(seat, actions[i].clone()).is_err() {
+                    continue; // fail closed, keep the action
+                }
+                if !settle_all_pass(&mut copy) {
+                    continue;
+                }
+                let cand = DomState::of(&copy.observe(seat), seat,
+                                        &self.tables);
+                if cand.dominated_by_pass(&base, upside) {
+                    pruned.insert(i);
+                }
+            }
+            if pruned.len() == non_pass.len() {
+                pruned.clear(); // never sweep every non-pass action
+            }
+        }
+
+        // (b) Pass dominated by a free land drop (our main phase only).
+        let main = obs.active_player == seat
+            && MAIN_STEPS.contains(&obs.step);
+        if main {
+            for &i in &non_pass {
+                if !matches!(actions[i], Action::PlayLand { .. }) {
+                    continue;
+                }
+                let mut copy = g.clone();
+                if copy.apply(seat, actions[i].clone()).is_err() {
+                    continue;
+                }
+                if !settle_all_pass(&mut copy) {
+                    continue;
+                }
+                let cand = DomState::of(&copy.observe(seat), seat,
+                                        &self.tables);
+                if cand.land_dominates_pass(&base) {
+                    for &pi in &passes { pruned.insert(pi); }
+                    break;
+                }
+            }
+        }
+
+        if pruned.is_empty() {
+            return all;
+        }
+        all.into_iter().filter(|i| !pruned.contains(i)).collect()
     }
 }
 
-fn obs_pregame(_obs: &PlayerObservation) -> bool {
-    // In-process external games are past mulligans by turn 1; the
-    // boundary check also guards on turn, so this is a conservative
-    // stand-in until pregame is threaded through.
+/// Settle a clone to an empty stack by answering every priority with
+/// PassPriority (forced moves taken as-is). False FAILS CLOSED
+/// (terminal, a branching decision with no pass, or budget exhausted).
+fn settle_all_pass(g: &mut Game) -> bool {
+    const BUDGET: usize = 24;
+    for _ in 0..BUDGET {
+        if g.result().is_some() {
+            return false;
+        }
+        let Some(seat) = g.decision_player() else { return false };
+        let obs = g.observe(seat);
+        if obs.stack.is_empty() {
+            return true;
+        }
+        let actions = protocol_actions(&obs);
+        if actions.len() == 1 {
+            if g.apply(seat, actions[0].clone()).is_err() { return false; }
+            continue;
+        }
+        match actions.iter().position(|a| matches!(a, Action::PassPriority)) {
+            None => return false,
+            Some(pi) => {
+                if g.apply(seat, actions[pi].clone()).is_err() {
+                    return false;
+                }
+            }
+        }
+    }
     false
+}
+
+/// The comparable slice of one observation, from `seat`'s view --
+/// trainer._dominance_state. Battlefield keys carry (def, power,
+/// toughness) so a stat-changed permanent is incomparable, never equal.
+struct DomState {
+    turn: u32,
+    step: penta::Step,
+    my_hand: usize,
+    my_life: i16,
+    my_lib: usize,
+    my_bf: std::collections::HashMap<(u16, i16, i16), u32>,
+    my_mana: u16,
+    opp_hand: usize,
+    opp_life: i16,
+    opp_bf: std::collections::HashMap<(u16, i16, i16), u32>,
+    opp_gy: std::collections::HashMap<u16, u32>,
+    opp_exile: std::collections::HashMap<u16, u32>,
+}
+
+fn bf_key(perm: &penta::PermanentObservation) -> (u16, i16, i16) {
+    (perm.definition.0, perm.power.unwrap_or(i16::MIN),
+     perm.toughness.unwrap_or(i16::MIN))
+}
+
+fn multiset<T: std::hash::Hash + Eq>(it: impl Iterator<Item = T>)
+    -> std::collections::HashMap<T, u32> {
+    let mut m = std::collections::HashMap::new();
+    for k in it { *m.entry(k).or_insert(0) += 1; }
+    m
+}
+
+fn covered<T: std::hash::Hash + Eq>(
+    a: &std::collections::HashMap<T, u32>,
+    b: &std::collections::HashMap<T, u32>) -> bool {
+    a.iter().all(|(k, n)| b.get(k).copied().unwrap_or(0) >= *n)
+}
+
+impl DomState {
+    fn of(obs: &PlayerObservation, seat: PlayerId, _t: &Tables) -> Self {
+        let mi = if seat == PlayerId::One { 0 } else { 1 };
+        let oi = 1 - mi;
+        let mut my_bf = std::collections::HashMap::new();
+        let mut opp_bf = std::collections::HashMap::new();
+        for perm in &obs.battlefield {
+            let m = if perm.controller == seat { &mut my_bf } else { &mut opp_bf };
+            *m.entry(bf_key(perm)).or_insert(0) += 1;
+        }
+        let pool = &obs.mana_pools[mi];
+        DomState {
+            turn: obs.turn, step: obs.step,
+            my_hand: obs.hand.len(),
+            my_life: obs.life_totals[mi],
+            my_lib: obs.library_sizes[mi],
+            my_bf,
+            my_mana: pool.white + pool.blue + pool.black + pool.red
+                + pool.green + pool.colorless,
+            opp_hand: obs.opponent_hand_size,
+            opp_life: obs.life_totals[oi],
+            opp_bf,
+            opp_gy: multiset(obs.graveyards[oi].iter().map(|(_, d)| d.0)),
+            opp_exile: multiset(obs.exiles[oi].iter().map(|(_, d)| d.0)),
+        }
+    }
+
+    fn dominated_by_pass(&self, base: &DomState, invisible_upside: bool) -> bool {
+        if self.turn != base.turn || self.step != base.step { return false; }
+        if self.opp_hand < base.opp_hand { return false; }
+        if self.opp_life < base.opp_life { return false; }
+        if !covered(&base.opp_bf, &self.opp_bf) { return false; }
+        if !covered(&base.opp_gy, &self.opp_gy) { return false; }
+        if !covered(&base.opp_exile, &self.opp_exile) { return false; }
+        if self.my_hand > base.my_hand { return false; }
+        if self.my_life > base.my_life { return false; }
+        if self.my_lib > base.my_lib { return false; }
+        if !covered(&self.my_bf, &base.my_bf) { return false; }
+        if self.my_mana > base.my_mana { return false; }
+        let strict = self.my_hand < base.my_hand
+            || self.my_life < base.my_life
+            || self.my_lib < base.my_lib
+            || self.my_bf != base.my_bf;
+        if !strict { return false; }
+        !invisible_upside
+    }
+
+    fn land_dominates_pass(&self, base: &DomState) -> bool {
+        if self.turn != base.turn || self.step != base.step { return false; }
+        if self.my_hand != base.my_hand.wrapping_sub(1) { return false; }
+        if self.my_life < base.my_life || self.my_lib < base.my_lib {
+            return false;
+        }
+        if !covered(&base.my_bf, &self.my_bf) { return false; }
+        let cand_bf: u32 = self.my_bf.values().sum();
+        let base_bf: u32 = base.my_bf.values().sum();
+        if cand_bf <= base_bf { return false; }
+        self.opp_hand == base.opp_hand
+            && self.opp_life == base.opp_life
+            && self.opp_bf == base.opp_bf
+            && self.opp_gy == base.opp_gy
+            && self.opp_exile == base.opp_exile
+    }
 }
