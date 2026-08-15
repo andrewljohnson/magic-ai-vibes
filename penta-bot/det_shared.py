@@ -31,6 +31,9 @@ class SplitMix64:
     def below(self, n):
         return self.next_u64() % n
 
+    def next_f64(self):
+        return (self.next_u64() >> 11) / 9007199254740992.0
+
     def shuffle(self, v):
         for i in range(len(v) - 1, 0, -1):
             j = self.below(i + 1)
@@ -108,8 +111,31 @@ def det_choose(penta, real, seat, net, ex, decks, my_deck, opp_deck, k,
     return max(tied, key=lambda i: (sval[i] / votes[i], -i))
 
 
+def _explore_pick(obs, acts, ex, prior_frac, prng):
+    v = prng.next_f64()
+    if v < prior_frac:
+        lands = [i for i, a in enumerate(acts) if a["type"] == "PlayLand"]
+        if lands:
+            return lands[prng.below(len(lands))]
+        hand_def = {c.get("objectId", c.get("instance")): c["definition"]
+                    for c in obs.get("hand", ())}
+        casts = [i for i, a in enumerate(acts) if a["type"] == "CastSpell"]
+        if casts:
+            best, bestp = casts[0], -10**9
+            for i in casts:
+                d = hand_def.get(acts[i].get("card"))
+                p = ex.card_power.get(d, 0) if d is not None else 0
+                if p > bestp:
+                    bestp, best = p, i
+            return best
+        atk = [i for i, a in enumerate(acts) if a["type"] == "DeclareAttacker"]
+        if atk:
+            return atk[prng.below(len(atk))]
+    return prng.below(len(acts))
+
+
 def play_game(penta, net, ex, decks, d1, d2, seed, k, handcrafted,
-              learner, search):
+              learner, search, epsilon=0.0, prior_frac=0.5):
     opp_seat = "p2" if learner == "p1" else "p1"
     if handcrafted:
         game = penta.Game(d1, d2, opponent="handcrafted",

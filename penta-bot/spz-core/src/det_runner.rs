@@ -92,6 +92,51 @@ fn sample_hidden(obs: &PlayerObservation, prng: &mut SplitMix64,
         seat_name(me), arr(my_lib), seat_name(opp), arr(opp_lib)))
 }
 
+/// Shared exploration draw (splitmix64) -- an explicit spec mirrored in
+/// det_shared.py so exploration rows lockstep. First_bot-shaped prior:
+/// land > biggest-power castable > attacker > uniform. Draw counts are
+/// deterministic per branch, keeping the PRNG stream aligned with Python.
+fn explore_pick(obs: &PlayerObservation, actions: &[penta::Action],
+                tables: &Tables, prior_frac: f64,
+                prng: &mut SplitMix64) -> usize {
+    use penta::Action;
+    let v = prng.next_f64();
+    if v < prior_frac {
+        // aggression prior over the FULL protocol action list
+        let lands: Vec<usize> = actions.iter().enumerate()
+            .filter(|(_, a)| matches!(a, Action::PlayLand { .. }))
+            .map(|(i, _)| i).collect();
+        if !lands.is_empty() {
+            return lands[prng.below(lands.len())];
+        }
+        let mut hand_def = std::collections::HashMap::new();
+        for (id, d) in &obs.hand { hand_def.insert(id.0, d.0); }
+        let casts: Vec<usize> = actions.iter().enumerate()
+            .filter(|(_, a)| matches!(a, Action::CastSpell { .. }))
+            .map(|(i, _)| i).collect();
+        if !casts.is_empty() {
+            // biggest printed power, first on tie (no draw)
+            let mut best = casts[0]; let mut bestp = i64::MIN;
+            for &i in &casts {
+                let p = if let Action::CastSpell { card, .. } = &actions[i] {
+                    hand_def.get(&card.0)
+                        .and_then(|d| tables.power.get(d)).copied()
+                        .unwrap_or(0)
+                } else { 0 };
+                if p > bestp { bestp = p; best = i; }
+            }
+            return best;
+        }
+        let atk: Vec<usize> = actions.iter().enumerate()
+            .filter(|(_, a)| matches!(a, Action::DeclareAttacker { .. }))
+            .map(|(i, _)| i).collect();
+        if !atk.is_empty() {
+            return atk[prng.below(atk.len())];
+        }
+    }
+    prng.below(actions.len())  // uniform
+}
+
 /// Consensus index over K hypothesis worlds; None when no world
 /// survived (caller then plays the first legal action, matching the
 /// Python DET_FALLBACK path's greedy degenerate case at epsilon 0).
@@ -167,7 +212,8 @@ pub fn trace_game(policy: &Policy, decks: &Decks, d1: &str, d2: &str,
 #[allow(clippy::too_many_arguments)]
 pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
                  d1: &str, d2: &str, seed: u64, k: usize,
-                 handcrafted: bool, learner: PlayerId,
+                 handcrafted: bool, learner: PlayerId, epsilon: f64,
+                 prior_frac: f64,
                  x_out: &mut Vec<f32>, y_out: &mut Vec<f32>) -> usize {
     let opp_seat = if learner == PlayerId::One { PlayerId::Two }
                    else { PlayerId::One };
@@ -190,11 +236,14 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
         }
         let (my_deck, opp_deck) = if seat == PlayerId::One { (d1, d2) }
                                   else { (d2, d1) };
-        let idx = det_choose(&game, seat, policy, decks, my_deck, opp_deck,
-                             k, &mut prng)
-            .unwrap_or(0);
-        // map the consensus index (into protocol_actions of `seat`) to the
-        // BotGame act index (identical ordering) and apply on the real game
+        let e = prng.next_f64();
+        let idx = if epsilon > 0.0 && e < epsilon {
+            let acts = protocol_actions(&obs);
+            explore_pick(&obs, &acts, tables, prior_frac, &mut prng)
+        } else {
+            det_choose(&game, seat, policy, decks, my_deck, opp_deck, k,
+                       &mut prng).unwrap_or(0)
+        };
         if game.act(idx).is_err() { break; }
         n += 1;
         // record the redacted afterstate for the acting seat

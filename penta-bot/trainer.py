@@ -1312,6 +1312,9 @@ def main():
               f"{args.playout_budget}", flush=True)
         while played < args.games:
             round_n = min(args.round_games, args.games - played)
+            frac = played / max(1, args.games)
+            epsilon = (args.epsilon_start
+                       + (args.epsilon_final - args.epsilon_start) * frac)
             specs = []
             for g in range(round_n):
                 number = played + g
@@ -1329,7 +1332,8 @@ def main():
             x_flat, y_flat, counts = spz_core.stream_rows(
                 catalog_json, args.native_value_spzw, head_spzw, weight,
                 args.search_topk, args.playout_budget,
-                args.determinized_k, "builtin-decklists.json", specs)
+                args.determinized_k, "builtin-decklists.json",
+                epsilon, args.prior_frac, specs)
             new = len(y_flat)
             if new:
                 rows = np.asarray(x_flat, dtype=np.float32).reshape(
@@ -1363,7 +1367,8 @@ def main():
                      determinized_k=args.determinized_k,
                      native_rows=1)
             rate = played / (time.time() - t_start)
-            print(f"games {played:5d}  loss {np.mean(losses):.4f}  "
+            print(f"games {played:5d}  eps {epsilon:.3f}  "
+                  f"loss {np.mean(losses):.4f}  "
                   f"samples {new:5d}  replay {replay_size:6d}  "
                   f"caps {caps}  {rate:5.2f} games/s", flush=True)
         if args.ring:

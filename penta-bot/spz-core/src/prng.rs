@@ -21,6 +21,10 @@ impl SplitMix64 {
     pub fn below(&mut self, n: usize) -> usize {
         (self.next_u64() % (n as u64)) as usize
     }
+    /// Uniform f64 in [0, 1), 53-bit -- identical to the Python mirror.
+    pub fn next_f64(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / 9_007_199_254_740_992.0
+    }
     /// In-place Fisher-Yates, from the end, index = below(i+1).
     pub fn shuffle<T>(&mut self, v: &mut [T]) {
         for i in (1..v.len()).rev() {
