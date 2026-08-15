@@ -5,3 +5,19 @@ data/*.labels.tsv
 !data/old-school-probe-dev-v3-k64-h8-c17-j1.labels.tsv
 __pycache__/
 *.py[cod]
+
+# --- penta-bot: training artifacts & build output (code only in git) ---
+penta-bot/spz-core/target/
+penta-bot/**/*.npz
+penta-bot/chunk-*.log
+penta-bot/*-run.log
+penta-bot/hosted_daemon.log
+penta-bot/hosted_bot.log
+penta-bot/penta_ring*.npz
+penta-bot/_native_value.spzw*
+penta-bot/hosted_bot_state.json
+penta-bot/hosted-games/
+penta-bot/recon-failures.jsonl
+# trained value/policy nets & rings are artifacts, not source
+data/spz-*.txt
+data/*.txt.ckpt-*.txt
