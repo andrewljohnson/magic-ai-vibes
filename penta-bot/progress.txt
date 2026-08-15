@@ -172,3 +172,8 @@
 === EVALUATE-ALL policy + native parity Thu Aug 14 ===
       Decision #1 APPROVED+SHIPPED: max_eval/playout_max_eval caps RETIRED; greedy screen and in-playout 1-ply now evaluate ALL candidates (trainer.EVAL_ALL=True, Rust matches). Deterministic, deletes the CPython rng.sample reproduction problem. DEPLOYED CONFIG CHANGED -> re-gate required before any promotion/redeploy; the next determinized curve re-establishes the baseline under this policy.
       Native lockstep vs Python reference (spz-core): extractor 0.00e+00, net 5.55e-16, screen+prune 443/443 = 100%, FULL PLAYOUT 1210/1210 = 100.00% (4 deck-pairs). Climb: 38.3 -> 47.5 (argmax first-max) -> 50.8 (playout boundary = active-player not priority-holder) -> 100.0 (evaluate-all + index-order argmax tie-break). Two structural playout bugs found via per-candidate diff: boundary semantics, and final argmax tie-break must be np.argmax position-order.
+=== throughput benchmark Thu Aug 14 (true-state greedy self-play, evaluate-all, topk4/budget120; K-factor identical both sides so the ratio holds for determinized) ===
+                       1 proc        8 proc/worker
+      Python           0.0139 g/s    0.14 g/s
+      Native (Rust)    0.064  g/s    0.424 g/s (Sligh/The Deck, the long matchup)
+      per-core native/python = 4.6x; 8-way native/python = 3.0x (native ran the HARD deck pair, python a mixed rotation, so native's real edge is >=3x). Native scales 6.6x across 8 procs. Determinized K=2 curve projection: ~0.12 g/s (python) -> ~0.4-0.6 g/s (native). VERDICT: native path is worth wiring for training; ~3-5x, bounded because Python's work is already Rust engine calls under PyO3 -- the win is deleting per-ply JSON/PyO3/GIL overhead (profile's ~34% glue + clean multicore).
