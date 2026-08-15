@@ -728,9 +728,16 @@ def _cast_targets(action):
             for t in sel.get("targets", ())]
 
 
+# The scouted trajectories were recorded before the 2026-08-12 search
+# promotion; replaying them requires the era-accurate config (pme8).
+SCOUT_ERA_SEARCH = trainer.SearchConfig(
+    top_k=4, playouts=1, budget=120, playout_max_eval=8,
+    playout_epsilon=0.10)
+
+
 def _replay_to(net, ex, our_deck, their_deck, my_seat, seed, pred):
-    """Re-drive a scout game (greedy, DEFAULT_SEARCH, prune off) to the
-    first decision where pred(obs) is truthy; returns (obs, fork)."""
+    """Re-drive a scout game (greedy, scout-era search, prune off) to
+    the first decision where pred(obs) is truthy; returns (obs, fork)."""
     opponent_seat = "p2" if my_seat == "p1" else "p1"
     d1, d2 = ((our_deck, their_deck) if my_seat == "p1"
               else (their_deck, our_deck))
@@ -749,7 +756,7 @@ def _replay_to(net, ex, our_deck, their_deck, my_seat, seed, pred):
             return obs, fork
         index, _, _ = choose(fork, obs, net, ex, rng, epsilon=0.0,
                              max_eval=16, depth=len(history),
-                             search=DEFAULT_SEARCH, dominance=False)
+                             search=SCOUT_ERA_SEARCH, dominance=False)
         game.act(index)
         history.append(index)
     return None, None

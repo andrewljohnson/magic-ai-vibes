@@ -909,13 +909,17 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
 _WORKER = {}
 
 
-def _worker_init(hidden, frozen_paths, schema_version=2):
+def _worker_init(hidden, frozen_paths, schema_version=2, det_k=0):
     penta = import_penta()
     extractor = Extractor(version=schema_version)
     _WORKER["penta"] = penta
     _WORKER["extractor"] = extractor
     _WORKER["net"] = Net(extractor.size, hidden=hidden, seed=0)
     _WORKER["frozen"] = [Net.load(path) for path in frozen_paths]
+    _WORKER["det_k"] = det_k
+    if det_k > 0:
+        from hosted_policy import load_decklists  # noqa: PLC0415
+        _WORKER["decks"] = load_decklists()
 
 
 def _worker_play(task):
@@ -929,7 +933,28 @@ def _worker_play(task):
     for d1, d2, seed, epsilon, mode, frozen_idx, learner_seat in games:
         rng = random.Random(seed * 2654435761 % (2**31))
         try:
-            if mode == "handcrafted":
+            det_k = _WORKER.get("det_k", 0)
+            if det_k > 0:
+                import det_selfplay  # noqa: PLC0415
+                if mode == "handcrafted":
+                    rows, targets, stats = \
+                        det_selfplay.play_det_handcrafted_game(
+                            net, extractor, penta, _WORKER["decks"],
+                            d1, d2, seed, epsilon, rng, det_k,
+                            learner_seat, lam=lam, search=search,
+                            prior_frac=prior_frac, turn_lam=turn_lam)
+                else:
+                    opponent_net = (_WORKER["frozen"][frozen_idx]
+                                    if mode == "frozen" else None)
+                    rows, targets, stats = \
+                        det_selfplay.play_det_selfplay_game(
+                            net, extractor, penta, _WORKER["decks"],
+                            d1, d2, seed, epsilon, rng, det_k,
+                            opponent_net=opponent_net,
+                            learner_seat=learner_seat, lam=lam,
+                            search=search, prior_frac=prior_frac,
+                            turn_lam=turn_lam)
+            elif mode == "handcrafted":
                 rows, targets, stats = play_handcrafted_game(
                     net, extractor, penta, d1, d2, seed, epsilon, rng,
                     max_eval, learner_seat, lam=lam, search=search,
@@ -1122,6 +1147,12 @@ def main():
                         help="weighted TRAINING deck schedule (The Deck "
                              "~1.8x, Counterburn/Jeskai ~1.4x seat share); "
                              "gates keep the uniform rotation")
+    parser.add_argument("--determinized-k", type=int, default=0,
+                        metavar="K",
+                        help="determinized self-play: both seats search "
+                             "K hypothesis worlds via Game.from_observation "
+                             "(no true-state clones anywhere); 0 = the "
+                             "closed true-state era's behavior")
     parser.add_argument("--deploy-aux-weight", type=float, default=0.0,
                         metavar="W",
                         help="counterfactual deploy-axis aux loss: the "
@@ -1197,7 +1228,9 @@ def main():
           + f"); decks {len(DECKS)}"
           + (" (seat-oversampled: The Deck ~1.8x, CB/JA ~1.4x)"
              if args.seat_oversample else "")
-          + f"; td-lambda {td_desc}")
+          + f"; td-lambda {td_desc}"
+          + (f"; DETERMINIZED K={args.determinized_k} (no true-state "
+             f"clones)" if args.determinized_k else ""))
     print(f"search: {search if search else 'off (1-ply afterstates)'}; "
           f"prior-frac {args.prior_frac:.2f}")
     if args.league_handcrafted or args.league_frozen:
@@ -1229,7 +1262,7 @@ def main():
     t_start = time.time()
     with Pool(args.workers, initializer=_worker_init,
               initargs=(args.hidden, tuple(args.league_frozen),
-                        extractor.version)) as pool:
+                        extractor.version, args.determinized_k)) as pool:
         while played < args.games:
             round_n = min(args.round_games, args.games - played)
             frac = played / max(1, args.games)
@@ -1311,7 +1344,11 @@ def main():
                      feature_schema=extractor.version,
                      td_lambda_per_turn=args.td_lambda_per_turn,
                      seat_oversample=int(args.seat_oversample),
-                     deploy_aux_weight=args.deploy_aux_weight)
+                     deploy_aux_weight=args.deploy_aux_weight,
+                     determinized_k=args.determinized_k,
+                     engine_fingerprint=getattr(
+                         import_penta(), "simulation_fingerprint",
+                         lambda: "")())
             rate = played / (time.time() - t_start)
             print(f"games {played:5d}  eps {epsilon:.3f}  "
                   f"loss {np.mean(losses):.4f}  "

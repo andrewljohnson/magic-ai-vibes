@@ -81,8 +81,16 @@ PENTA_PY_DIR = os.environ.get(
 
 
 def import_penta():
-    """Import the penta module, pinned copy first (idempotent)."""
-    for path in (LOCAL_DIR, PENTA_PY_DIR):
+    """Import the penta module, pinned copy first (idempotent).
+
+    PENTA_ENGINE_DIR selects an era's engine explicitly (e.g.
+    engine-0.7.0/ for the determinized era); without it the original
+    0.5.0 penta.so in this directory keeps winning, so every closed-era
+    artifact behaves exactly as it always did."""
+    override = os.environ.get("PENTA_ENGINE_DIR")
+    candidates = ((override,) if override else ()) + (LOCAL_DIR,
+                                                      PENTA_PY_DIR)
+    for path in candidates:
         if os.path.exists(os.path.join(path, "penta.so")):
             if path not in sys.path:
                 sys.path.insert(0, path)

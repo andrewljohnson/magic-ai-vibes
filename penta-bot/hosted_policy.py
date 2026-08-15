@@ -271,6 +271,64 @@ class HostedPolicy:
         return self._pick(obs, list(actions))
 
 
+def load_decklists(path=None):
+    """Built-in decklists as {display name: {definition: count}}."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(path or os.path.join(here, "builtin-decklists.json")) as f:
+        raw = json.load(f)
+    return {name: {int(d): c for d, c in zone["main"].items()}
+            for name, zone in raw.items()}
+
+
+def seen_defs(obs, seat_name, seat_idx, include_hand):
+    """Definitions of `seat_name`'s cards visible in this observation."""
+    seen = []
+    if include_hand:
+        seen += [c["definition"] for c in obs.get("hand", ())]
+    seen += [p["definition"] for p in obs.get("battlefield", ())
+             if p.get("controller") == seat_name]
+    for zone in ("graveyards", "exiles"):
+        piles = obs.get(zone) or ((), ())
+        if len(piles) > seat_idx:
+            seen += [c["definition"] for c in piles[seat_idx]]
+    return seen
+
+
+def unseen_pool(decks, deck_name, seen):
+    pool = []
+    for d, c in decks.get(deck_name, {}).items():
+        pool += [d] * c
+    for d in seen:
+        if d in pool:
+            pool.remove(d)
+    return pool
+
+
+def sample_hidden(obs, rng, decks, our_deck, opp_deck):
+    """One hidden-zone hypothesis for Game.from_observation, or None
+    when the deck hypothesis cannot cover the observation."""
+    me = obs["seat"]
+    opp = "p2" if me == "p1" else "p1"
+    mi, oi = (0, 1) if me == "p1" else (1, 0)
+    my_pool = unseen_pool(decks, our_deck, seen_defs(obs, me, mi, True))
+    opp_pool = unseen_pool(decks, opp_deck,
+                           seen_defs(obs, opp, oi, False))
+    rng.shuffle(my_pool)
+    rng.shuffle(opp_pool)
+    need_opp = obs.get("opponentHandSize", 0) + obs["librarySizes"][oi]
+    if len(my_pool) < obs["librarySizes"][mi] or len(opp_pool) < need_opp:
+        return None
+    opp_hand = opp_pool[:obs.get("opponentHandSize", 0)]
+    opp_lib = opp_pool[len(opp_hand):len(opp_hand)
+                       + obs["librarySizes"][oi]]
+    return {
+        "hands": {opp: opp_hand},
+        "libraries": {me: my_pool[:obs["librarySizes"][mi]],
+                      opp: opp_lib},
+        "outsideGame": {"p1": [], "p2": []},
+    }
+
+
 class DeterminizedPolicy:
     """Full search on hypothesis worlds via Game.from_observation
     (lacker/penta#57): at each observation, sample K hidden-zone
@@ -317,34 +375,17 @@ class DeterminizedPolicy:
                                      head_path=head_path, weight=weight)
         self.net = self.fallback.net
         self.extractor = self.fallback.extractor
-        with open(_os.path.join(here, decklists_path)) as f:
-            raw = json.load(f)
-        self.decks = {name: {int(d): c for d, c in zone["main"].items()}
-                      for name, zone in raw.items()}
+        self.decks = load_decklists(
+            _os.path.join(here, decklists_path))
         self.worlds_used = []  # per-decision survivor counts (telemetry)
 
     # -- hypothesis construction ----------------------------------------
 
     def _seen_defs(self, obs, seat_name, seat_idx, include_hand):
-        seen = []
-        if include_hand:
-            seen += [c["definition"] for c in obs.get("hand", ())]
-        seen += [p["definition"] for p in obs.get("battlefield", ())
-                 if p.get("controller") == seat_name]
-        for zone in ("graveyards", "exiles"):
-            piles = obs.get(zone) or ((), ())
-            if len(piles) > seat_idx:
-                seen += [c["definition"] for c in piles[seat_idx]]
-        return seen
+        return seen_defs(obs, seat_name, seat_idx, include_hand)
 
     def _pool(self, deck_name, seen):
-        pool = []
-        for d, c in self.decks.get(deck_name, {}).items():
-            pool += [d] * c
-        for d in seen:
-            if d in pool:
-                pool.remove(d)
-        return pool
+        return unseen_pool(self.decks, deck_name, seen)
 
     def classify_opponent(self, obs):
         """Best-overlap guess at the opponent's (built-in) deck from
@@ -368,28 +409,8 @@ class DeterminizedPolicy:
         return best
 
     def build_hidden(self, obs, rng, opp_deck):
-        me = obs["seat"]
-        opp = "p2" if me == "p1" else "p1"
-        mi, oi = (0, 1) if me == "p1" else (1, 0)
-        my_pool = self._pool(self.our_deck,
-                             self._seen_defs(obs, me, mi, True))
-        opp_pool = self._pool(opp_deck,
-                              self._seen_defs(obs, opp, oi, False))
-        rng.shuffle(my_pool)
-        rng.shuffle(opp_pool)
-        need_opp = obs.get("opponentHandSize", 0) + obs["librarySizes"][oi]
-        if len(my_pool) < obs["librarySizes"][mi] or \
-                len(opp_pool) < need_opp:
-            return None  # hypothesis cannot cover the observation
-        opp_hand = opp_pool[:obs.get("opponentHandSize", 0)]
-        opp_lib = opp_pool[len(opp_hand):len(opp_hand)
-                           + obs["librarySizes"][oi]]
-        return {
-            "hands": {opp: opp_hand},
-            "libraries": {me: my_pool[:obs["librarySizes"][mi]],
-                          opp: opp_lib},
-            "outsideGame": {"p1": [], "p2": []},
-        }
+        return sample_hidden(obs, rng, self.decks, self.our_deck,
+                             opp_deck)
 
     # -- choice ----------------------------------------------------------
 
