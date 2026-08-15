@@ -6,3 +6,5 @@ spz_core.so
 spz-core/target/
 vendor/penta/target/
 *.spzw
+vendor/penta/bindings/penta-py/target/
+vendor/penta/bindings/penta-ffi/

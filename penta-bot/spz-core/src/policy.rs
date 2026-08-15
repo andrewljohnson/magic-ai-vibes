@@ -64,13 +64,23 @@ impl Policy {
     /// Greedy choice on a live game for the seat to move. Returns the
     /// action index into the CURRENT observation's protocol_actions.
     pub fn choose(&self, g: &Game) -> usize {
+        self.choose_scored(g).0
+    }
+
+    /// As `choose`, plus the refined value of the chosen action (the
+    /// consensus tie-break needs it). Value is the playout/terminal
+    /// score of the winner, or its blended screen score with search off.
+    pub fn choose_scored(&self, g: &Game) -> (usize, f64) {
         let seat = g.decision_player().expect("choose on a finished game");
         let obs = g.observe(seat);
-        let n = obs.legal_actions.len();
-        if n == 1 {
-            return 0;
-        }
+        // COUNT via protocol_actions, not the typed legal_actions: a
+        // single typed action can project to several protocol entries
+        // (a spell with N targets) or vice versa. The whole policy
+        // indexes into protocol_actions, so the forced check must too.
         let actions = protocol_actions(&obs);
+        if actions.len() == 1 {
+            return (0, 0.5);
+        }
         let keep = self.dominance_keep(g, &obs, &actions, seat, g.in_pregame());
         // Score survivors: terminal -> exact, else blended afterstate.
         let mut scored: Vec<(usize, f64, Option<Game>)> = Vec::new();
@@ -92,7 +102,7 @@ impl Policy {
             for &(i, v, _) in &scored {  // first-max (numpy argmax)
                 if v > bv { bv = v; bi = i; }
             }
-            return bi;
+            return (bi, bv);
         }
         // Top-k by screen -> playout refine; argmax over refined only.
         // Top-k by screen; refine those by playout. The final argmax is
@@ -122,7 +132,7 @@ impl Policy {
                 best_pos = pos;
             }
         }
-        scored[best_pos].0
+        (scored[best_pos].0, best_v)
     }
 
     /// Refined playout value for ONE candidate action index, for

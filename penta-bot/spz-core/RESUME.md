@@ -1,34 +1,45 @@
-# spz-core resume state (throughput campaign)
+# spz-core resume state (throughput campaign -> native training runner)
 
-[x] profile pie; [x] crate compiles; [x] extractor lockstep 0.00e+00 (184)
-[x] net lockstep 5.55e-16 (120)
-[x] dominance prune ported (land-drop + no-upside-vs-pass, fail-closed guards)
-[~] policy lockstep:
-    - SCREEN + PRUNE (search off): 99.3% (440/443). The 3 misses are all
-      >16-action sets (35/18/17) where Python rng.sample subsamples to
-      max_eval=16. This is the ONLY screen/prune divergence = the RNG trap,
-      now isolated + quantified (~0.7% of decisions).
-    - FULL PLAYOUT (search on): 50.8%. Boundary bug fixed (active-player,
-      not priority-holder). A SECOND structural playout bug REMAINS:
-      disagreements are systematic small-set (n=3, turn 2, py=0 vs rust=2),
-      NOT sampling (no-sample config was also ~48%). NOT the prune (99.3%).
-[ ] games/s multicore benchmark -- BLOCKED on playout parity
-[ ] training integration -- BLOCKED on playout parity
+[x] extractor lockstep 0.00 ; net 5.55e-16 ; prune ported
+[x] FULL policy lockstep 100% (1210/1210) -- evaluate-all + argmax fixes
+[x] throughput: native 4.6x/core, ~3-5x @8 cores vs Python
+[x] native row-emitting runner (det_runner.rs) + stream_rows PyO3 bulk entry
+[x] shared splitmix64 PRNG (prng.rs) mirrored in Python (det_shared.py);
+    prng + shuffle verified bit-identical
+[x] fingerprint unified: rebuilt engine-0.7.0/penta.so FROM vendor/penta
+    (with the accessor patch) so the crate and the Python binding share
+    sha256-fca6... -- from_observation cross-accepts, lockstep is possible
+[x] BUG FOUND+FIXED: native used typed obs.legal_actions.len() for the
+    forced/single-action check but indexes via protocol_actions (a
+    targeted spell = 1 typed action -> N protocol entries); fixed to
+    protocol_actions().len() in policy.choose + det_runner. Was the
+    2x-rows trajectory divergence.
+[~] ROW LOCKSTEP: re-measuring after the fix (scratchpad/rowlock.log).
+    GATE: native stream_rows == Python det_shared rows bit-for-bit
+    (feature + target) on identical seeds before any native training row
+    counts.
 
-## Two decisions to surface (coordinator)
-1. RNG (screen sampling on >16-action sets): reproducing CPython
-   random.sample bit-for-bit is the intractable trap. Clean shared-algorithm
-   fix: DROP the max_eval/playout_max_eval cap in the GREEDY path and
-   evaluate ALL candidates on both sides -- native afterstates are ~free,
-   it is strictly more thorough, fully deterministic, removes the RNG.
-   COST: changes the deployed policy (screens all vs 16) -> re-gate. Needs
-   sign-off.
-2. Playout second bug: localize with a per-candidate playout-value diff.
-   NEXT ACTION: add a Rust `playout_at(action_index)->f64` hook, pick one
-   n=3 disagreeing state (seed 6000000, the turn-2 states), compare Rust
-   playout value vs Python playout_value for each of the 3 candidates.
-   The one that differs points at the bug (candidate afterstate handoff,
-   greedy tie-break, or terminal-perspective sign).
+## NEXT once row-lockstep passes
+1. end-to-end trainer integration: a --native-rows mode in trainer.py
+   that calls spz_core.stream_rows per round (specs from matchup/league/
+   learner_seat scheduling), reshapes into the replay ring, and runs the
+   existing SGD/promotion. Python owns SGD/ring/league/promotion; Rust
+   only plays + emits. Batched (one call/round), no per-ply crossing.
+2. end-to-end trainer games/s benchmark (native-rows vs 8-worker python
+   det, K=2) -> confirm the multiplier survives integration.
+3. relaunch determinized curve on the native runner: det2 prefix,
+   evaluate-all, K=2, bar 31.6%/400 LCB 26.9, hosted-path confirm-400,
+   SPZ-redeploy hook, ~hourly chunks, detached, telemetry, early-stop.
+   This is also the clean evaluate-all baseline.
+
+## Scope notes / honest gaps
+- native runner is GREEDY (epsilon 0) determinized self-play + handcrafted
+  league. Epsilon exploration + frozen-snapshot league are NOT yet in the
+  native runner (Python det path has them). First native curve runs
+  greedy + handcrafted-league; add exploration/frozen next if the curve
+  needs more data diversity.
+- vendor/penta carries the engine (ac6cd4d) + the into_core_game/core_game
+  accessor patch (SPZ VENDOR PATCH) -- candidate upstream PR.
 
 ## Reload
 cd spz-core && cargo build --release && cp target/release/libspz_core.dylib ../spz_core.so

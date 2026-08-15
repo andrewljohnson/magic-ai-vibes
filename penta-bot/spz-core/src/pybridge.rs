@@ -7,6 +7,8 @@ use pyo3::prelude::*;
 
 use crate::extract::features;
 use crate::net::Mlp;
+use crate::decks;
+use crate::det_runner;
 use crate::policy::{Policy, SearchConfig};
 use crate::tables::Tables;
 
@@ -152,6 +154,82 @@ fn playout_at(
     Ok(policy.playout_candidate(&game, action_index))
 }
 
+/// Play a batch of determinized games natively and return their
+/// training rows as flat arrays: (x_flat, y, row_counts_per_game).
+/// `specs` is one (d1, d2, seed, handcrafted, learner_p1) per game.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn stream_rows(
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, top_k: usize, budget: usize, k_worlds: usize,
+    decklists_path: String,
+    specs: Vec<(String, String, u64, bool, bool)>,
+) -> PyResult<(Vec<f32>, Vec<f32>, Vec<usize>)> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, top_k, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let mut x = Vec::new();
+    let mut y = Vec::new();
+    let mut counts = Vec::new();
+    for (d1, d2, seed, handcrafted, learner_p1) in &specs {
+        let learner = if *learner_p1 { penta::PlayerId::One }
+                      else { penta::PlayerId::Two };
+        let c = det_runner::play_game(&policy, &policy.tables, &decks,
+            d1, d2, *seed, k_worlds, *handcrafted, learner,
+            &mut x, &mut y);
+        counts.push(c);
+    }
+    Ok((x, y, counts))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn trace_game(catalog_json: String, value_path: String, head_path: String,
+              weight: f64, budget: usize, k_worlds: usize,
+              decklists_path: String, d1: String, d2: String, seed: u64,
+              handcrafted: bool, learner_p1: bool, max_moves: usize)
+              -> PyResult<Vec<i64>> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 4, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let learner = if learner_p1 { penta::PlayerId::One } else { penta::PlayerId::Two };
+    Ok(det_runner::trace_game(&policy, &decks, &d1, &d2, seed, k_worlds,
+                              handcrafted, learner, max_moves))
+}
+
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn choose_world(catalog_json: String, value_path: String, head_path: String,
+                weight: f64, top_k: usize, budget: usize,
+                raw_obs: String, hidden: String, rollout: u64)
+                -> PyResult<usize> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, top_k, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let world = penta::protocol::BotGame::from_observation_json(
+        &raw_obs, &hidden, rollout)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(policy.choose(world.core_game()))
+}
+
+#[pyfunction]
+fn prng_probe(seed: u64, count: usize) -> Vec<u64> {
+    let mut p = crate::prng::SplitMix64::new(seed);
+    (0..count).map(|_| p.next_u64()).collect()
+}
+
+#[pyfunction]
+fn shuffle_probe(seed: u64, n: usize) -> Vec<usize> {
+    let mut p = crate::prng::SplitMix64::new(seed);
+    let mut v: Vec<usize> = (0..n).collect();
+    p.shuffle(&mut v);
+    v
+}
+
 #[pymodule]
 fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lockstep_trace, m)?)?;
@@ -159,5 +237,10 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bench_native_selfplay, m)?)?;
     m.add_function(wrap_pyfunction!(choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
+    m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
+    m.add_function(wrap_pyfunction!(prng_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(shuffle_probe, m)?)?;
+    m.add_function(wrap_pyfunction!(choose_world, m)?)?;
+    m.add_function(wrap_pyfunction!(trace_game, m)?)?;
     Ok(())
 }
