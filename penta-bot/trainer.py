@@ -141,6 +141,14 @@ LEAGUE_FROZEN_FRACTION = 0.25
 # flattening the value net (both 2026-08 curve collapses, lambda 0.9 and
 # 1.0, shared this). True engine draws still score 0.5.
 MAX_DECISIONS = 600
+# EVALUATE-ALL policy (2026-08, approved): the greedy screen and the
+# in-playout greedy 1-ply evaluate EVERY legal candidate rather than a
+# random max_eval/playout_max_eval subsample. Native afterstates are
+# ~free, it is strictly more thorough, and being deterministic it lets
+# the Rust port lockstep bit-for-bit (no CPython rng.sample to
+# reproduce). The max_eval / playout_max_eval caps are retired; the
+# args remain for provenance but no longer gate the greedy path.
+EVAL_ALL = True
 
 # Policy-head decision-time blend (winner-imitation prototype).
 # PENTA_POLICY_NET names a head trained by train_policy_head.py on the
@@ -585,7 +593,7 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
                 return truncated("playout epsilon act", panic)
             continue
         acting = obs["seat"]
-        if len(actions) > search.playout_max_eval:
+        if not EVAL_ALL and len(actions) > search.playout_max_eval:
             actions = rng.sample(actions, search.playout_max_eval)
         # Greedy 1-ply step: clone-per-candidate afterstates, keep the
         # best candidate's copy as the next playout state (saves re-acting).
@@ -666,9 +674,10 @@ def choose(fork, obs, net, extractor, rng, epsilon, max_eval, depth,
         value = terms[0] if terms[0] is not None else net.value(rows[0])
         return picked["index"], rows[0], value
 
-    budget = eval_budget(depth, max_eval)
-    if len(actions) > budget:
-        actions = rng.sample(actions, budget)
+    if not EVAL_ALL:
+        budget = eval_budget(depth, max_eval)
+        if len(actions) > budget:
+            actions = rng.sample(actions, budget)
     if dominance:
         # Always leaves >= 2 actions (pass plus at least one non-pass).
         actions = dominance_prune(fork, obs, actions, extractor)

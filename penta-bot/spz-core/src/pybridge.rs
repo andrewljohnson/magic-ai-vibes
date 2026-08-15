@@ -126,11 +126,38 @@ fn choose_at(
     Ok(policy.choose(&game))
 }
 
+/// Rust refined playout value for one candidate at a replayed state.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn playout_at(
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, budget: usize, d1: String, d2: String, seed: u64,
+    history: Vec<usize>, action_index: usize,
+) -> PyResult<f64> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 4, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let mut game = penta::protocol::BotGame::new(
+        &d1, &d2, penta::protocol::Opponent::External,
+        penta::PlayerId::Two, seed,
+    ).map_err(pyo3::exceptions::PyValueError::new_err)?
+     .into_core_game();
+    for idx in history {
+        let seat = game.decision_player().unwrap();
+        let obs = game.observe(seat);
+        let actions = penta::protocol::protocol_actions(&obs);
+        game.apply(seat, actions[idx].clone())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    }
+    Ok(policy.playout_candidate(&game, action_index))
+}
+
 #[pymodule]
 fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lockstep_trace, m)?)?;
     m.add_function(wrap_pyfunction!(net_value, m)?)?;
     m.add_function(wrap_pyfunction!(bench_native_selfplay, m)?)?;
     m.add_function(wrap_pyfunction!(choose_at, m)?)?;
+    m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     Ok(())
 }

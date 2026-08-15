@@ -95,25 +95,51 @@ impl Policy {
             return bi;
         }
         // Top-k by screen -> playout refine; argmax over refined only.
+        // Top-k by screen; refine those by playout. The final argmax is
+        // over the refined vector in POSITION order with -1.0 for
+        // non-top-k -- exactly np.argmax(refined) in trainer.choose,
+        // which returns the FIRST maximum on ties (position = index).
         let mut order: Vec<usize> = (0..scored.len()).collect();
+        // stable sort desc by screen, matching Python's sorted(..., key,
+        // reverse=True)[:top_k] (stable, ties keep ascending position).
         order.sort_by(|&a, &b| scored[b].1.total_cmp(&scored[a].1));
         order.truncate(self.search.top_k);
         let turn0 = obs.turn;
         let was_pregame = g.in_pregame();
-        let mut best_i = scored[order[0]].0;
-        let mut best_v = f64::NEG_INFINITY;
+        let mut refined = vec![-1.0f64; scored.len()];
         for &oi in &order {
-            let (idx, screen, ref copy) = scored[oi];
-            let refined = match copy {
+            let (_, screen, ref copy) = scored[oi];
+            refined[oi] = match copy {
                 None => screen, // terminal keeps its exact outcome
                 Some(c) => self.playout(c, seat, turn0, was_pregame),
             };
-            if refined > best_v {
-                best_v = refined;
-                best_i = idx;
+        }
+        let mut best_pos = 0usize;
+        let mut best_v = f64::NEG_INFINITY;
+        for (pos, &v) in refined.iter().enumerate() {
+            if v > best_v {  // first-max = lowest position (np.argmax)
+                best_v = v;
+                best_pos = pos;
             }
         }
-        best_i
+        scored[best_pos].0
+    }
+
+    /// Refined playout value for ONE candidate action index, for
+    /// per-candidate lockstep diffing vs trainer.playout_value.
+    pub fn playout_candidate(&self, g: &Game, action_index: usize) -> f64 {
+        let seat = g.decision_player().expect("finished game");
+        let obs = g.observe(seat);
+        let actions = protocol_actions(&obs);
+        let mut copy = g.clone();
+        copy.apply(seat, actions[action_index].clone())
+            .expect("candidate apply");
+        if let Some(t) = terminal_value(&copy, seat) {
+            return t;
+        }
+        let turn0 = obs.turn;
+        let was_pregame = g.in_pregame();
+        self.playout(&copy, seat, turn0, was_pregame)
     }
 
     fn playout(&self, start: &Game, seat: PlayerId, turn0: u32,
@@ -140,8 +166,9 @@ impl Policy {
                 let _ = g.apply(acting, actions[0].clone());
                 continue;
             }
-            // greedy 1-ply for the acting seat, capped at playout_max_eval
-            let limit = actions.len().min(self.search.playout_max_eval);
+            // greedy 1-ply for the acting seat -- EVALUATE-ALL policy
+            // (playout_max_eval cap retired; matches trainer.EVAL_ALL).
+            let limit = actions.len();
             let mut best = 0usize;
             let mut best_v = f64::NEG_INFINITY;
             for i in 0..limit {
