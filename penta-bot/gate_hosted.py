@@ -43,25 +43,27 @@ def load_penta18():
 _WORKER = {}
 
 
-def _init(deck_name, head, weight, determinized=False, k_worlds=6):
+def _init(deck_name, head, weight, determinized=False, k_worlds=6,
+          value_net="penta_net.npz"):
     _WORKER["penta"] = load_penta18()
     if determinized:
         _WORKER["policy"] = DeterminizedPolicy(
             _WORKER["penta"], our_deck="Sligh", k_worlds=k_worlds,
-            weight=weight, head_path=head,
+            weight=weight, head_path=head, value_path=value_net,
             fail_log=os.environ.get("RECON_FAIL_LOG"))
     else:
-        _WORKER["policy"] = HostedPolicy(head_path=head, weight=weight)
+        _WORKER["policy"] = HostedPolicy(head_path=head, weight=weight,
+                                         value_path=value_net)
 
 
 def _play(task):
-    my_seat, d1, d2, seed = task
+    my_seat, d1, d2, seed, opponent = task
     penta = _WORKER["penta"]
     policy = _WORKER["policy"]
     if hasattr(policy, "our_deck"):
         policy.our_deck = d1 if my_seat == "p1" else d2
     opponent_seat = "p2" if my_seat == "p1" else "p1"
-    game = penta.Game(d1, d2, opponent="handcrafted",
+    game = penta.Game(d1, d2, opponent=opponent,
                       opponent_seat=opponent_seat, seed=seed)
     moves = 0
     slowest = 0.0
@@ -107,6 +109,10 @@ def main():
                              "(lacker/penta#57) instead of the shaped "
                              "observation-only policy")
     parser.add_argument("--k-worlds", type=int, default=6)
+    parser.add_argument("--value-net", default="penta_net.npz",
+                        help="value net for the policy (arm evaluation)")
+    parser.add_argument("--opponent", default="handcrafted",
+                        choices=("handcrafted", "random"))
     args = parser.parse_args()
 
     pairs = [(a, b) for a in DECKS for b in DECKS if a != b]
@@ -114,17 +120,19 @@ def main():
     for g in range(args.games):
         my_seat = "p1" if g % 2 == 0 else "p2"
         d1, d2 = pairs[(g // 2) % len(pairs)]
-        tasks.append((my_seat, d1, d2, args.seed_base + g))
+        tasks.append((my_seat, d1, d2, args.seed_base + g,
+                      args.opponent))
     t0 = time.time()
     with Pool(args.workers, initializer=_init,
               initargs=("", args.head, args.weight, args.determinized,
-                        args.k_worlds)) as pool:
+                        args.k_worlds, args.value_net)) as pool:
         scores = pool.map(_play, tasks)
     took = time.time() - t0
     wins = sum(1 for s in scores if s == 1.0)
     draws = sum(1 for s in scores if s == 0.5)
     rate = sum(scores) / len(scores)
-    print(f"hosted policy vs handcrafted (engine 18): {args.games} games: "
+    print(f"hosted policy vs {args.opponent} (current engine): "
+          f"{args.games} games: "
           f"{wins} wins, {draws} draws -> {100 * rate:.1f}% "
           f"(LCB {100 * wilson_lcb(wins, args.games):.1f}%)  "
           f"[{took:.0f}s, {args.games / took:.2f} games/s]")

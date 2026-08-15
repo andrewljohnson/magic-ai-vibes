@@ -156,6 +156,9 @@ def main():
                              "determinized search (lacker/penta#57); empty "
                              "= shaped observation-only policy")
     parser.add_argument("--k-worlds", type=int, default=4)
+    parser.add_argument("--value-net", default="penta_net.npz",
+                        help="value net (.npz); the determinized-era "
+                             "deliverable when promoted")
     parser.add_argument("--move-budget", type=float, default=20.0)
     parser.add_argument("--heartbeat", type=float, default=10.0)
     args = parser.parse_args()
@@ -178,14 +181,15 @@ def main():
         from hosted_policy import DeterminizedPolicy
         policy = DeterminizedPolicy(
             engine, our_deck=args.deck, k_worlds=args.k_worlds,
-            weight=args.weight,
+            weight=args.weight, value_path=args.value_net,
             fail_log=os.path.join(HERE, "recon-failures.jsonl"),
             time_budget=args.move_budget)
         print(f"determinized brain: engine "
               f"{engine.engine_version()}/p{engine.protocol_version()}, "
               f"K={args.k_worlds}", flush=True)
     else:
-        policy = HostedPolicy(weight=args.weight)
+        policy = HostedPolicy(weight=args.weight,
+                              value_path=args.value_net)
     state = load_or_register(args.server, args.name, args.deck)
     done = []
     beats = 0
