@@ -200,7 +200,8 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
         // record the redacted afterstate for the acting seat
         if !handcrafted || seat == learner {
             let after = game.core_game().observe(seat);
-            rows[seat_idx(seat)].push(features(&after, false, tables));
+            let pg = game.core_game().in_pregame();
+            rows[seat_idx(seat)].push(features(&after, pg, tables));
         }
     }
     let result = game.result();

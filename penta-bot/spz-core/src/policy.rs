@@ -91,7 +91,7 @@ impl Policy {
                     if let Some(t) = terminal_value(&copy, seat) {
                         scored.push((i, t, None));
                     } else {
-                        let f = features(&after, false, &self.tables);
+                        let f = features(&after, copy.in_pregame(), &self.tables);
                         scored.push((i, self.blended(&f), Some(copy)));
                     }
                 }
@@ -189,8 +189,8 @@ impl Policy {
                 let v = match terminal_value(&copy, acting) {
                     Some(t) => t,
                     None => {
-                        let f = features(&copy.observe(acting), false,
-                                         &self.tables);
+                        let f = features(&copy.observe(acting),
+                                         copy.in_pregame(), &self.tables);
                         self.value.value(&f)
                     }
                 };
@@ -204,7 +204,7 @@ impl Policy {
             Some(t) => t,
             None => {
                 let obs = g.observe(seat);
-                self.value.value(&features(&obs, false, &self.tables))
+                self.value.value(&features(&obs, g.in_pregame(), &self.tables))
             }
         }
     }
