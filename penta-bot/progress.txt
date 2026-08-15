@@ -177,3 +177,5 @@
       Python           0.0139 g/s    0.14 g/s
       Native (Rust)    0.064  g/s    0.424 g/s (Sligh/The Deck, the long matchup)
       per-core native/python = 4.6x; 8-way native/python = 3.0x (native ran the HARD deck pair, python a mixed rotation, so native's real edge is >=3x). Native scales 6.6x across 8 procs. Determinized K=2 curve projection: ~0.12 g/s (python) -> ~0.4-0.6 g/s (native). VERDICT: native path is worth wiring for training; ~3-5x, bounded because Python's work is already Rust engine calls under PyO3 -- the win is deleting per-ply JSON/PyO3/GIL overhead (profile's ~34% glue + clean multicore).
+=== ROW-LOCKSTEP PASSED Thu Aug 14 22:xx ===
+      native stream_rows == Python det_shared reference: feature max|diff| 0.00e+00, target max|diff| 0.00e+00, counts identical (98/87/80) across 265 rows / 3 handcrafted determinized games. Two bugs fixed to get here: forced-check must use protocol_actions count (not typed legal_actions), and pregame flag must be threaded into features (was hardcoded false). Native training rows now count. Next: --native-rows trainer integration, end-to-end games/s, det2 evaluate-all curve.
