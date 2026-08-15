@@ -1,0 +1,568 @@
+use super::{
+    AbilityDef, AbilityId, AbilityOrigin, Action, ActionError, CardBehavior, CardType,
+    CharacteristicContext, CombatDamageStage, CounterKind, DecisionVisibility, EmblemObservation,
+    Game, GameEvent, GameObjectId, GameResult, KeywordAbility, ManaColor, PermanentObservation,
+    PlayerId, PlayerObservation, Pregame, StackObservation, Step, WinReason, ZoneKind,
+    combinations, public_cards,
+};
+
+impl Game {
+    #[must_use]
+    pub const fn result(&self) -> Option<GameResult> {
+        self.result
+    }
+
+    /// Whether the first-strike combat-damage step has finished and the
+    /// regular combat-damage step will begin after priority passes.
+    #[must_use]
+    pub fn regular_combat_damage_pending(&self) -> bool {
+        self.result.is_none()
+            && self.step == Step::CombatDamage
+            && self.pending_combat_attackers.is_empty()
+            && matches!(
+                &self.combat_damage_stage,
+                CombatDamageStage::FirstStrike { .. }
+            )
+    }
+
+    /// Returns the player expected to make the engine's next decision.
+    ///
+    /// This may differ from the player with priority during pregame choices,
+    /// turn-based actions such as declaring blockers, and other mandatory
+    /// choices. Bot runners should observe this player and submit one of that
+    /// observation's legal actions.
+    #[must_use]
+    pub fn decision_player(&self) -> Option<PlayerId> {
+        if self.result.is_some() {
+            return None;
+        }
+        if let Some(decision) = self.pending_decisions.first() {
+            return Some(decision.observation.player);
+        }
+        if let Some(attacker) = self.pending_combat_attackers.first().copied() {
+            return Some(self.combat_damage_assigner(attacker));
+        }
+        if let Some(pregame) = self.pregame {
+            return Some(match pregame {
+                Pregame::Mulligan(player) | Pregame::Bottom(player) => player,
+            });
+        }
+        if self.cleanup_pending || self.untap_pending {
+            return Some(self.active_player);
+        }
+        if self.step == Step::DeclareAttackers && !self.attackers_declared {
+            return Some(self.active_player);
+        }
+        if self.step == Step::DeclareBlockers && !self.blockers_declared {
+            return Some(self.active_player.opponent());
+        }
+        Some(self.priority)
+    }
+
+    /// Whether the game is still settling opening hands.
+    ///
+    /// The first turn has not begun during mulligans, so a client should not
+    /// be describing a step or a turn yet.
+    #[must_use]
+    pub const fn in_pregame(&self) -> bool {
+        self.pregame.is_some()
+    }
+
+    #[must_use]
+    /// Returns the omniscient event trace.
+    ///
+    /// This is intended for replays and debugging. Give bots
+    /// [`PlayerObservation`] rather than this event stream.
+    /// The raw event log, seed and all. This is not safe to hand to a seat:
+    /// see [`Self::events_for`], which is.
+    pub fn events(&self) -> &[GameEvent] {
+        &self.events
+    }
+
+    /// A mark in the event log, for asking what has happened since.
+    ///
+    /// Opaque: it indexes the raw log, not the projection, so a seat cannot
+    /// read anything out of the number itself.
+    #[must_use]
+    pub fn event_cursor(&self) -> usize {
+        self.events.len()
+    }
+
+    /// The events one seat may see since `cursor`. This is the windowed form
+    /// of [`Self::events_for`], for a caller that wants only what one action
+    /// caused.
+    #[must_use]
+    pub fn events_for_since(&self, viewer: PlayerId, cursor: usize) -> Vec<GameEvent> {
+        let tail = self.events.get(cursor..).unwrap_or_default();
+        Self::project_events(tail, viewer)
+    }
+
+    /// The events one seat may see.
+    ///
+    /// The raw log opens with [`GameEvent::GameStarted`], and that carries the
+    /// seed the libraries were shuffled from. Decklists are public, so a seat
+    /// holding the seed can reconstruct both libraries in order -- the
+    /// opponent's hand and every draw either player will make. It is dropped
+    /// here rather than redacted, because a client already knows a game
+    /// started; [`Self::seed`] is how a local viewer, or a finished game,
+    /// gets it deliberately.
+    #[must_use]
+    pub fn events_for(&self, viewer: PlayerId) -> Vec<GameEvent> {
+        Self::project_events(&self.events, viewer)
+    }
+
+    /// The one place that decides what a seat may see. Everything a seat is
+    /// handed goes through here, so a newly leaky event has exactly one
+    /// function to be caught in.
+    pub(super) fn project_events(events: &[GameEvent], _viewer: PlayerId) -> Vec<GameEvent> {
+        events
+            .iter()
+            .filter(|event| !matches!(event, GameEvent::GameStarted { .. }))
+            .cloned()
+            .collect()
+    }
+
+    #[must_use]
+    #[allow(clippy::too_many_lines)]
+    pub fn legal_actions(&self, player: PlayerId) -> Vec<Action> {
+        if self.result.is_some() {
+            return Vec::new();
+        }
+
+        let mut actions = vec![Action::Concede];
+        if let Some(decision) = self.pending_decisions.first() {
+            if decision.observation.player == player {
+                // Bounded selections are represented by the decision observation rather
+                // than by an eagerly-expanded Cartesian product. Callers submit the
+                // selected option IDs through `ChooseDecision`; `apply` validates the
+                // selection directly against this schema.
+                actions.push(Action::ChooseDecision {
+                    decision: decision.observation.id,
+                    options: Vec::new(),
+                });
+                if decision.observation.cancellable {
+                    actions.push(Action::CancelDecision {
+                        decision: decision.observation.id,
+                    });
+                }
+            }
+            return actions;
+        }
+        if let Some(attacker) = self.pending_combat_attackers.first().copied() {
+            if player == self.combat_damage_assigner(attacker) {
+                actions.extend(self.combat_assignment_actions(attacker));
+            }
+            return actions;
+        }
+        if let Some(pregame) = self.pregame {
+            match pregame {
+                Pregame::Mulligan(deciding) if player == deciding => {
+                    actions.push(Action::KeepHand);
+                    actions.push(Action::TakeMulligan);
+                }
+                Pregame::Bottom(deciding) if player == deciding => {
+                    let count = usize::from(self.mulligans[player.index()])
+                        .min(self.players[player.index()].hand.len());
+                    actions.extend(
+                        combinations(
+                            &self.players[player.index()]
+                                .hand
+                                .iter()
+                                .map(|card| card.id)
+                                .collect::<Vec<_>>(),
+                            count,
+                        )
+                        .into_iter()
+                        .map(|cards| Action::BottomCards { cards }),
+                    );
+                }
+                Pregame::Mulligan(_) | Pregame::Bottom(_) => {}
+            }
+            return actions;
+        }
+        if self.cleanup_pending {
+            if player == self.active_player {
+                let state = &self.players[player.index()];
+                let count = state.hand.len().saturating_sub(7);
+                actions.extend(
+                    combinations(
+                        &state.hand.iter().map(|card| card.id).collect::<Vec<_>>(),
+                        count,
+                    )
+                    .into_iter()
+                    .map(|cards| Action::DiscardCards { cards }),
+                );
+            }
+            return actions;
+        }
+        if self.untap_pending {
+            if player == self.active_player {
+                actions.extend(self.untap_actions(player));
+            }
+            return actions;
+        }
+        if self.step == Step::DeclareAttackers && !self.attackers_declared {
+            if player == self.active_player {
+                let moat_active = self.count_behavior(CardBehavior::Moat) > 0;
+                // A creature that attacks each combat if able is only
+                // required to when it actually can, so the same conditions
+                // that offer it as an attacker are what make it compulsory.
+                let a_creature_must_attack = self.battlefield.iter().any(|permanent| {
+                    permanent.controller == player
+                        && !permanent.tapped
+                        && !permanent.attacking
+                        && self.can_attack_with_moat(permanent, moat_active)
+                        && self.permanent_has_executable_keyword(
+                            permanent,
+                            KeywordAbility::AttacksEachCombatIfAble,
+                        )
+                });
+                if !a_creature_must_attack {
+                    actions.push(Action::FinishDeclaringAttackers);
+                }
+                actions.extend(self.attacker_actions(player, moat_active));
+            }
+            return actions;
+        }
+        if self.step == Step::DeclareBlockers && !self.blockers_declared {
+            if player == self.active_player.opponent() {
+                actions.push(Action::FinishDeclaringBlockers);
+                actions.extend(self.blocker_actions(player));
+            }
+            return actions;
+        }
+        if player != self.priority {
+            return actions;
+        }
+
+        actions.push(Action::PassPriority);
+        self.add_mana_actions(player, &mut actions);
+        if self.channel_active[player.index()] && self.players[player.index()].life > 1 {
+            actions.push(Action::PayLifeForMana);
+        }
+        self.add_land_actions(player, &mut actions);
+        self.add_spell_actions(player, &mut actions);
+        self.add_ability_actions(player, &mut actions);
+        actions
+    }
+
+    /// Applies one engine-enumerated action for a player.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ActionError`] when the game is over or the action is not
+    /// currently legal for that player.
+    pub fn apply(&mut self, player: PlayerId, action: Action) -> Result<(), ActionError> {
+        if self.result.is_some() {
+            return Err(ActionError::GameAlreadyFinished);
+        }
+        if !self.is_legal_action(player, &action) {
+            return Err(ActionError::NotLegal { player, action });
+        }
+
+        self.apply_legal_action(player, action);
+        Ok(())
+    }
+
+    /// Applies an action chosen from an observation made immediately before
+    /// this call. Synchronous engine runners can reuse that observation's
+    /// enumerated actions instead of regenerating them in [`Self::apply`].
+    ///
+    /// This stays crate-private because its validity depends on the caller not
+    /// mutating the game between observing it and submitting the action.
+    pub(crate) fn apply_observed_action(
+        &mut self,
+        observation: &PlayerObservation,
+        action: Action,
+    ) -> Result<(), ActionError> {
+        if self.result.is_some() {
+            return Err(ActionError::GameAlreadyFinished);
+        }
+        let player = observation.viewer;
+        let legal = if matches!(action, Action::ChooseDecision { .. }) {
+            // Decision observations expose a bounded selection schema rather
+            // than every combination, so the submitted options still need
+            // direct validation against the current pending decision.
+            self.is_legal_action(player, &action)
+        } else {
+            observation.legal_actions.contains(&action)
+        };
+        if !legal {
+            return Err(ActionError::NotLegal { player, action });
+        }
+
+        self.apply_legal_action(player, action);
+        Ok(())
+    }
+
+    fn apply_legal_action(&mut self, player: PlayerId, action: Action) {
+        match action {
+            Action::KeepHand => self.keep_hand(player),
+            Action::TakeMulligan => self.take_mulligan(player),
+            Action::BottomCards { cards } => self.bottom_cards(player, &cards),
+            Action::DiscardCards { cards } => self.discard_cards(player, &cards),
+            Action::ChooseDecision { decision, options } => {
+                self.choose_decision(player, decision, &options);
+            }
+            Action::CancelDecision { decision } => self.cancel_decision(decision),
+            Action::ChooseUntap { permanents } => self.choose_untap(player, &permanents),
+            Action::PassPriority => self.pass_priority(player),
+            Action::PlayLand { card, option } => self.play_land(player, card, option),
+            Action::ActivateManaAbility {
+                source,
+                ability,
+                color,
+            } => {
+                self.activate_mana_source(player, source, ability, color);
+            }
+            Action::PayLifeForMana => {
+                self.players[player.index()].life -= 1;
+                self.add_unrestricted_mana(player, ManaColor::Colorless, 1);
+                self.consecutive_passes = 0;
+            }
+            Action::CastSpell {
+                card,
+                choices,
+                sacrifices,
+            } => self.cast_spell(player, card, &choices, &sacrifices),
+            Action::ActivateAbility {
+                source,
+                ability,
+                targets,
+                cost_object,
+                x,
+            } => self.activate_ability(player, source, ability, targets, cost_object, x),
+            Action::DeclareAttacker { attacker, defender } => {
+                self.declare_attacker(attacker, defender);
+            }
+            Action::FinishDeclaringAttackers => self.finish_declaring_attackers(),
+            Action::DeclareBlocker { blocker, attacker } => {
+                self.declare_blocker(blocker, attacker);
+            }
+            Action::FinishDeclaringBlockers => self.finish_declaring_blockers(),
+            Action::AssignCombatDamage {
+                attacker,
+                assignments,
+            } => self.assign_combat_damage(attacker, assignments),
+            Action::Concede => self.finish(GameResult::Winner {
+                winner: player.opponent(),
+                reason: WinReason::OpponentConceded,
+            }),
+        }
+        if self.result.is_none() {
+            self.finish_rules_procedure();
+        }
+    }
+
+    /// Ends the game because `player` ran out of time.
+    ///
+    /// This is not an action, because losing on time is not something a
+    /// player does -- it is imposed by whatever is holding the clock, and it
+    /// does not require that player to hold priority. Hosts with no clock
+    /// never call it.
+    pub fn lose_on_time(&mut self, player: PlayerId) {
+        if self.result.is_some() {
+            return;
+        }
+        self.finish(GameResult::Winner {
+            winner: player.opponent(),
+            reason: WinReason::OpponentRanOutOfTime,
+        });
+    }
+
+    /// Validates an action against the current state without mutating the game.
+    ///
+    /// Unlike [`legal_actions`], this also validates the option IDs supplied to
+    /// a bounded [`Action::ChooseDecision`] selection without expanding every
+    /// possible combination into a vector.
+    #[must_use]
+    pub fn is_legal_action(&self, player: PlayerId, action: &Action) -> bool {
+        if let Action::ChooseDecision { decision, options } = action {
+            let Some(pending) = self.pending_decisions.first() else {
+                return false;
+            };
+            let observation = &pending.observation;
+            if observation.player != player || observation.id != *decision {
+                return false;
+            }
+            let available = observation
+                .options
+                .iter()
+                .map(|option| option.id)
+                .collect::<std::collections::HashSet<_>>();
+            let unique = options
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>();
+            options.len() == unique.len()
+                && options.len() >= observation.minimum
+                && options.len() <= observation.maximum
+                && options.iter().all(|option| available.contains(option))
+        } else {
+            self.legal_actions(player).contains(action)
+        }
+    }
+
+    #[must_use]
+    /// The command-zone emblems as a client sees them: who owns each one, what
+    /// to call it, and the text of every clause it grants.
+    pub(super) fn observed_emblems(&self) -> Vec<EmblemObservation> {
+        self.emblems
+            .iter()
+            .map(|emblem| EmblemObservation {
+                id: emblem.card.id,
+                controller: emblem.controller,
+                name: self.catalog.get(emblem.card.definition).map_or_else(
+                    || "Unknown emblem".to_owned(),
+                    |definition| definition.name.clone(),
+                ),
+                source_ability: emblem.emblem_source.unwrap_or(AbilityOrigin::Printed {
+                    definition: emblem.card.definition,
+                    part: emblem.presented,
+                    ability: AbilityId::PRIMARY,
+                }),
+                ability_texts: self
+                    .catalog
+                    .get(emblem.card.definition)
+                    .and_then(|definition| definition.part(emblem.presented))
+                    .into_iter()
+                    .flat_map(|part| part.rules.ability_clauses().iter())
+                    .map(|ability| ability.text.to_owned())
+                    .collect(),
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn observe(&self, viewer: PlayerId) -> PlayerObservation {
+        let player = &self.players[viewer.index()];
+        let opponent = &self.players[viewer.opponent().index()];
+        let moat_active = self.count_behavior(CardBehavior::Moat) > 0;
+        PlayerObservation {
+            viewer,
+            turn: self.turn,
+            active_turn: self.turns_started[self.active_player.index()],
+            active_player: self.active_player,
+            priority: self.priority,
+            step: self.step,
+            regular_combat_damage_pending: self.regular_combat_damage_pending(),
+            life_totals: [self.players[0].life, self.players[1].life],
+            poison_counters: [self.players[0].poison, self.players[1].poison],
+            mana_pools: [self.players[0].mana_pool, self.players[1].mana_pool],
+            hand: player
+                .hand
+                .iter()
+                .map(|card| (card.id, card.definition))
+                .collect(),
+            opponent_hand_size: opponent.hand.len(),
+            last_seen_hand: self.last_seen_hands[viewer.index()].clone(),
+            library_sizes: [self.players[0].library.len(), self.players[1].library.len()],
+            graveyards: [
+                public_cards(&self.players[0].graveyard),
+                public_cards(&self.players[1].graveyard),
+            ],
+            exiles: [
+                public_cards(&self.players[0].exile),
+                public_cards(&self.players[1].exile),
+            ],
+            battlefield: self
+                .battlefield
+                .iter()
+                .map(|permanent| {
+                    let types = self.permanent_types(permanent).unwrap_or_default();
+                    let stats = self.creature_stats(permanent);
+                    let (power, toughness) = stats.map_or((None, None), |stats| {
+                        (Some(stats.power), Some(stats.toughness))
+                    });
+                    let flying = self.has_flying(permanent);
+                    PermanentObservation {
+                        id: permanent.card.id,
+                        definition: permanent.card.definition,
+                        presented: permanent.presented,
+                        controller: permanent.controller,
+                        types,
+                        chosen_creature_type: permanent.chosen_creature_type.clone(),
+                        chosen_card_name: permanent.chosen_card_name.clone(),
+                        tapped: permanent.tapped,
+                        power,
+                        toughness,
+                        damage: permanent.damage,
+                        loyalty: types
+                            .contains(CardType::Planeswalker)
+                            .then(|| permanent.counters(CounterKind::Loyalty)),
+                        loyalty_ability_used_this_turn: permanent.activated_loyalty_this_turn,
+                        attack_defender: permanent.attack_defender,
+                        attacking: permanent.attacking,
+                        blocked_this_combat: permanent.blocked,
+                        blocking: permanent.blocking,
+                        flying,
+                        can_attack: stats.is_some()
+                            && self.can_attack_creature(permanent, moat_active, flying),
+                        entered_this_turn: self.turns_started[permanent.controller.index()]
+                            == permanent.entered_controller_turn,
+                    }
+                })
+                .collect(),
+            emblems: self.observed_emblems(),
+            stack: self
+                .stack
+                .iter()
+                .map(|object| StackObservation {
+                    id: object.id,
+                    kind: object.kind,
+                    source: object.source,
+                    ability: object.ability_origin(),
+                    ability_text: object.ability_text().map(str::to_owned),
+                    definition: object.presentation_definition(),
+                    controller: object.controller,
+                    counterable: self.can_be_countered(object),
+                    signature: object.signature.clone(),
+                    targets: object.targets(),
+                    chosen_permanents: object.chosen_permanents.clone(),
+                    x: object.x(),
+                })
+                .collect(),
+            decision: self.pending_decisions.first().and_then(|decision| {
+                (decision.observation.visibility == DecisionVisibility::Public
+                    || decision.observation.player == viewer)
+                    .then(|| decision.observation.clone())
+            }),
+            result: self.result,
+            legal_actions: self.legal_actions(viewer),
+            checkpoint: self.checkpoint_json(viewer),
+        }
+    }
+
+    /// Returns the exact ability currently represented by `origin` on
+    /// `source`, including copied, intrinsic, and continuously granted
+    /// battlefield abilities. Printed abilities activated from another zone
+    /// are resolved in that zone's characteristic context.
+    #[must_use]
+    pub fn ability_for_origin(
+        &self,
+        source: GameObjectId,
+        origin: AbilityOrigin,
+    ) -> Option<AbilityDef> {
+        if let Some(permanent) = self
+            .battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == source)
+        {
+            return self
+                .find_effective_ability(permanent, |effective| effective.origin == origin)
+                .map(|effective| effective.ability);
+        }
+
+        let (zone, card) = self.card_in_nonbattlefield_zone(source)?;
+        let context = match zone {
+            ZoneKind::Library => CharacteristicContext::Library,
+            ZoneKind::Hand => CharacteristicContext::Hand,
+            ZoneKind::Graveyard => CharacteristicContext::Graveyard,
+            ZoneKind::Exile => CharacteristicContext::Exile,
+            ZoneKind::Command => CharacteristicContext::Command,
+            ZoneKind::Battlefield | ZoneKind::Stack => return None,
+        };
+        self.find_printed_card_ability(card, &context, |effective| effective.origin == origin)
+            .map(|effective| effective.ability)
+    }
+}

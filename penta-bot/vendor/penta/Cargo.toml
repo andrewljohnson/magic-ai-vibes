@@ -1,0 +1,22 @@
+# Vendored penta engine crate, pinned at lacker/penta ac6cd4d (engine
+# 0.7.0 / protocol 22) -- the determinized era's training engine, kept
+# in-tree so spz-core builds against exactly the pinned rules. The ONLY
+# local modification is BotGame::into_core_game (see bot_game.rs, marked
+# SPZ VENDOR PATCH); proposed upstream as a native-search accessor.
+[package]
+name = "penta"
+version = "0.7.0"
+edition = "2024"
+license = "Apache-2.0"
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+sha2 = "0.10"
+toml = "0.9"

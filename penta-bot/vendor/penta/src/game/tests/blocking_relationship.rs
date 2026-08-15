@@ -1,0 +1,144 @@
+//! "Whenever this creature blocks or becomes blocked by ..."
+//!
+//! One printed clause covering both sides of a block, so the same card has to
+//! fire whether it attacked or blocked, and "that creature" is whichever one
+//! is on the other side. What these check is both directions, the predicate
+//! that narrows which blocks count, and that end of combat is earlier than
+//! the end step.
+
+use super::*;
+use crate::ImplementationStatus;
+
+/// Puts `attacker` and `blocker` into a committed block and runs the triggers.
+fn block(game: &mut Game, attacker: GameObjectId, blocker: GameObjectId) {
+    game.step = Step::DeclareBlockers;
+    game.attackers_declared = true;
+    for permanent in &mut game.battlefield {
+        if permanent.card.id == attacker {
+            permanent.attacking = true;
+            permanent.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
+        }
+        if permanent.card.id == blocker {
+            permanent.blocking = Some(attacker);
+        }
+    }
+    game.finish_declaring_blockers();
+    drain_pending(game);
+}
+
+fn on_battlefield(game: &Game, id: GameObjectId) -> bool {
+    game.battlefield
+        .iter()
+        .any(|permanent| permanent.card.id == id)
+}
+
+/// Reaching the end of combat is what resolves the delayed destruction.
+fn end_combat(game: &mut Game) {
+    game.step = Step::EndOfCombat;
+    game.advance_step();
+    drain_pending(game);
+}
+
+#[test]
+fn a_basilisk_kills_what_blocks_it_and_what_it_blocks() {
+    // It attacked and was blocked.
+    let mut attacking = ready_game();
+    let basilisk = creature(10_000, cards::THICKET_BASILISK, PlayerId::One);
+    let basilisk_id = basilisk.card.id;
+    attacking.battlefield.push(basilisk);
+    let blocker = creature(10_001, cards::SEDGE_TROLL, PlayerId::Two);
+    let blocker_id = blocker.card.id;
+    attacking.battlefield.push(blocker);
+    block(&mut attacking, basilisk_id, blocker_id);
+    assert!(
+        on_battlefield(&attacking, blocker_id),
+        "still alive during combat"
+    );
+    end_combat(&mut attacking);
+    assert!(
+        !on_battlefield(&attacking, blocker_id),
+        "the creature that blocked it dies at end of combat"
+    );
+
+    // It blocked. Same clause, other direction.
+    let mut blocking = ready_game();
+    let attacker = creature(10_000, cards::SEDGE_TROLL, PlayerId::One);
+    let attacker_id = attacker.card.id;
+    blocking.battlefield.push(attacker);
+    let basilisk = creature(10_001, cards::THICKET_BASILISK, PlayerId::Two);
+    let basilisk_id = basilisk.card.id;
+    blocking.battlefield.push(basilisk);
+    block(&mut blocking, attacker_id, basilisk_id);
+    end_combat(&mut blocking);
+    assert!(
+        !on_battlefield(&blocking, attacker_id),
+        "the creature it blocked dies just the same"
+    );
+}
+
+/// Abomination names green or white, so the predicate has to both admit and
+/// refuse. Checking only the refusal would pass even if nothing fired at all.
+#[test]
+fn the_predicate_narrows_which_blocks_count() {
+    for (blocker_definition, survives) in [
+        // Sedge Troll is red, which is neither colour named.
+        (cards::SEDGE_TROLL, true),
+        (cards::THICKET_BASILISK, false),
+    ] {
+        let mut game = ready_game();
+        let abomination = creature(10_000, cards::ABOMINATION, PlayerId::One);
+        let abomination_id = abomination.card.id;
+        game.battlefield.push(abomination);
+        let blocker = creature(10_001, blocker_definition, PlayerId::Two);
+        let blocker_id = blocker.card.id;
+        game.battlefield.push(blocker);
+
+        block(&mut game, abomination_id, blocker_id);
+        end_combat(&mut game);
+        assert_eq!(
+            on_battlefield(&game, blocker_id),
+            survives,
+            "colour decides whether Abomination's clause applies"
+        );
+    }
+}
+
+/// Aisling Leprechaun repaints rather than destroys, which is the other
+/// consumer of the same trigger and reads "that creature" as its recipient.
+#[test]
+fn the_leprechaun_repaints_what_it_meets() {
+    let mut game = ready_game();
+    let leprechaun = creature(10_000, cards::AISLING_LEPRECHAUN, PlayerId::One);
+    let leprechaun_id = leprechaun.card.id;
+    game.battlefield.push(leprechaun);
+    let blocker = creature(10_001, cards::SEDGE_TROLL, PlayerId::Two);
+    let blocker_id = blocker.card.id;
+    game.battlefield.push(blocker);
+
+    block(&mut game, leprechaun_id, blocker_id);
+
+    assert_eq!(
+        game.object_colors(blocker_id),
+        [false, false, false, false, true],
+        "the creature it met is green and nothing else"
+    );
+}
+
+#[test]
+fn every_blocking_relationship_identity_reports_complete_coverage() {
+    let catalog = poc::catalog().expect("catalog builds");
+    for definition in [
+        cards::COCKATRICE,
+        cards::THICKET_BASILISK,
+        cards::ABOMINATION,
+        cards::AISLING_LEPRECHAUN,
+    ] {
+        let card = catalog.get(definition).expect("the card is cataloged");
+        assert_eq!(
+            card.rules.implementation_status(),
+            ImplementationStatus::Complete,
+            "{} should be fully executable",
+            card.name,
+        );
+    }
+}

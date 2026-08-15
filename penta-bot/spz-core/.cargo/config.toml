@@ -1,0 +1,4 @@
+# Python extension modules leave Python's own symbols unresolved until the
+# interpreter loads them (same note as penta-py's config).
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-undefined", "-C", "link-arg=dynamic_lookup"]

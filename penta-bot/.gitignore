@@ -2,3 +2,6 @@ hosted_bot_state.json
 hosted-games/
 hosted_bot.log
 recon-failures.jsonl
+spz_core.so
+spz-core/target/
+vendor/penta/target/

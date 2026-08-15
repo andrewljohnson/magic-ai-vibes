@@ -1,0 +1,212 @@
+use crate::{CardDefinitionId, GameObjectId, PlayerId, Target};
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Step {
+    Upkeep,
+    Draw,
+    PrecombatMain,
+    BeginningOfCombat,
+    DeclareAttackers,
+    DeclareBlockers,
+    CombatDamage,
+    EndOfCombat,
+    PostcombatMain,
+    End,
+    Cleanup,
+}
+
+impl Step {
+    pub(super) const fn is_main(self) -> bool {
+        matches!(self, Self::PrecombatMain | Self::PostcombatMain)
+    }
+
+    pub(super) const fn ends_phase(self) -> bool {
+        matches!(
+            self,
+            Self::Draw
+                | Self::PrecombatMain
+                | Self::EndOfCombat
+                | Self::PostcombatMain
+                | Self::Cleanup
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameResult {
+    Winner { winner: PlayerId, reason: WinReason },
+    Draw,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WinReason {
+    OpponentConceded,
+    OpponentLostAllLife,
+    OpponentTriedToDrawFromEmptyLibrary,
+    /// An effect said the opponent loses the game, with no life total or
+    /// empty library involved.
+    OpponentLostToAnEffect,
+    /// The opponent did not act inside the time their host allowed. Distinct
+    /// from conceding: nobody chose this, it was imposed by a clock.
+    OpponentRanOutOfTime,
+    /// The opponent had ten or more poison counters. This is a state-based
+    /// action rather than an effect, so it is not
+    /// [`Self::OpponentLostToAnEffect`].
+    OpponentPoisoned,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StackObjectKind {
+    Spell,
+    ActivatedAbility,
+    TriggeredAbility,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GameEvent {
+    GameStarted {
+        seed: u64,
+    },
+    CardDrawn {
+        player: PlayerId,
+        card: GameObjectId,
+    },
+    CardRevealed {
+        player: PlayerId,
+        card: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    CardsDiscarded {
+        player: PlayerId,
+        cards: Vec<(GameObjectId, CardDefinitionId)>,
+    },
+    LandPlayed {
+        player: PlayerId,
+        card: GameObjectId,
+        /// Immutable identity for logs after the permanent leaves play.
+        definition: CardDefinitionId,
+    },
+    ManaAdded {
+        player: PlayerId,
+        source: GameObjectId,
+    },
+    SpellCast {
+        player: PlayerId,
+        /// The spell's game object on the stack.
+        card: GameObjectId,
+        /// Immutable identity for logs after the spell leaves the stack.
+        definition: CardDefinitionId,
+        targets: Vec<Target>,
+    },
+    SpellResolved {
+        /// The spell's former game object on the stack.
+        card: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    /// A targeted spell resolved with every target gone, so it did nothing.
+    SpellFizzled {
+        /// The spell's former game object on the stack.
+        card: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    AbilityActivated {
+        player: PlayerId,
+        /// The activated ability's own game object on the stack.
+        object: GameObjectId,
+        /// The permanent object that created the ability.
+        source: GameObjectId,
+        /// Immutable source definition for logs after the source leaves play.
+        definition: CardDefinitionId,
+        chosen_permanents: Vec<GameObjectId>,
+    },
+    AbilityResolved {
+        /// The activated ability's former game object on the stack.
+        object: GameObjectId,
+        /// The permanent object that created the ability.
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    /// An activated ability resolved with every target illegal, so it did
+    /// nothing even though its activation costs remain paid.
+    AbilityFizzled {
+        object: GameObjectId,
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    AbilityTriggered {
+        player: PlayerId,
+        trigger: u32,
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    TriggeredAbilityPutOnStack {
+        player: PlayerId,
+        trigger: u32,
+        object: GameObjectId,
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    TriggeredAbilityResolved {
+        object: GameObjectId,
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    /// A triggered ability resolved with every target illegal.
+    TriggeredAbilityFizzled {
+        object: GameObjectId,
+        source: GameObjectId,
+        definition: CardDefinitionId,
+    },
+    AttackDeclared {
+        player: PlayerId,
+        attackers: Vec<GameObjectId>,
+    },
+    BlockDeclared {
+        player: PlayerId,
+        assignments: Vec<(GameObjectId, GameObjectId)>,
+    },
+    DamageDealt {
+        player: PlayerId,
+        amount: u16,
+    },
+    /// Life paid or drained rather than dealt. Kept apart from damage because
+    /// nothing that triggers on damage may see it, and prevention never
+    /// applies.
+    LifeLost {
+        player: PlayerId,
+        amount: u16,
+    },
+    ManaBurn {
+        player: PlayerId,
+        amount: u16,
+    },
+    StepChanged {
+        turn: u32,
+        active_player: PlayerId,
+        step: Step,
+    },
+    /// A permanent left the battlefield. Emitted from the three functions that
+    /// can remove one, so nothing leaves play without the log seeing it. The
+    /// definition travels with the event because the card is by then in a zone
+    /// the observing player may not be able to read.
+    PermanentLeftBattlefield {
+        controller: PlayerId,
+        card: GameObjectId,
+        definition: CardDefinitionId,
+        destination: BattlefieldExit,
+    },
+    GameEnded {
+        result: GameResult,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BattlefieldExit {
+    Graveyard,
+    Exile,
+    Hand,
+    /// On top of its owner's library.
+    LibraryTop,
+    /// On the bottom of its owner's library.
+    LibraryBottom,
+}

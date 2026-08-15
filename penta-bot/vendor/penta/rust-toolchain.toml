@@ -1,0 +1,12 @@
+# One Rust version for everybody: contributors, maintainers, and CI.
+#
+# `cargo clippy` runs with `-D warnings` and pedantic lints on, so a newer
+# toolchain can fail a build that passes on an older one. Pinning here means
+# rustup installs the same compiler for everyone, and upgrading is a commit
+# rather than a surprise. The wasm target and the two components are listed
+# so a fresh clone needs no `rustup` commands at all.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]
