@@ -21,3 +21,4 @@ penta-bot/recon-failures.jsonl
 # trained value/policy nets & rings are artifacts, not source
 data/spz-*.txt
 data/*.txt.ckpt-*.txt
+web/penta-telemetry.json

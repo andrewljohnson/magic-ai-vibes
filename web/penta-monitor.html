@@ -37,18 +37,18 @@
 </head>
 <body>
 <main>
-  <h1>Penta bot — live training <span style="font-size:.55em;opacity:.7">(determinized era: engine 0.7.0, leak-free K-world self-play; hosted-path gates are the yardstick — pre-era gates measured true-state search)</span></h1>
+  <h1>Penta bot — belief-feature curve <span style="font-size:.55em;opacity:.7">(replicating the old honest C++ bot's hidden-pool recipe: engine 0.7.0, leak-free K-world self-play, warm from the 31.6% baseline grown with belief features)</span></h1>
   <p class="sub" id="status">Waiting for penta-telemetry.json…</p>
 
-  <h2>Gate win rates</h2>
-  <p class="desc">After each 2,000-game chunk: fixed-seed gates against
-    penta's built-in bots (60 games vs random, 120 vs handcrafted).
-    Each training run is its own pair of lines &mdash; earlier runs fade,
-    the latest run is bright. The gray line is 50%.</p>
+  <h2>Honest gate win rate vs handcrafted</h2>
+  <p class="desc">After each 1,500-game chunk, leak-free hosted-path gates:
+    a cheap K=2/60 tracking gate every chunk, and the honest K=4/120 gate
+    when the tracker nears the bar. The dashed line is the 31.6% baseline
+    to beat; 57.7% is the old C++ bot's honest mark.</p>
   <svg id="gates" viewBox="0 0 960 300"></svg>
   <div class="legend">
-    <span style="--c: var(--s2)">vs random</span>
-    <span style="--c: var(--s1)">vs handcrafted</span>
+    <span style="--c: var(--s2)">cheap K2/60 (tracking)</span>
+    <span style="--c: var(--s1)">honest K4/120</span>
   </div>
   <div id="gate-table"></div>
 
@@ -116,7 +116,8 @@ async function poll() {
     const train = data.train ?? [];
     const maxGames = Math.max(
       ...gates.map(g => g.games), ...train.map(t => t.games), 5000);
-    const xd = [3000, maxGames];
+    const xd = [0, maxGames];
+    const baseline = data.baseline ?? 31.6;
 
     // The gate history can span several training runs that revisit the
     // same cumulative-games positions (a restart begins a new run).
@@ -131,7 +132,7 @@ async function poll() {
       }
     }
     const gatesSvg = document.getElementById("gates");
-    let gateArt = axes(gatesSvg, xd, [0, 100], v => v.toFixed(0) + "%", 50);
+    let gateArt = axes(gatesSvg, xd, [0, 100], v => v.toFixed(0) + "%", baseline);
     runs.forEach((run, index) => {
       const latest = index === runs.length - 1;
       const alpha = latest ? "" : "66";
