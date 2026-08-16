@@ -779,47 +779,148 @@ def _prune_case(name, obs, fork, blunder, survivors, ex):
           f"{len(survivors) - len(missing)}/{len(survivors)} legit kept")
 
 
+def _drive_simple(make_game, pred, limit=1500):
+    """Drive a scripted-opponent game with a fixed, net-free policy (play a
+    land, else cast a spell, else declare an attacker, else pass) to the
+    first decision where pred(obs) holds. Deterministic and card-agnostic,
+    so a blunder decision is REACHED on the current engine without leaning
+    on a replay corpus captured against an older era. Returns (obs, fork)
+    -- fork clones the game AT the decision -- or (None, None)."""
+    game = make_game()
+    while game.result() is None and limit > 0:
+        limit -= 1
+        obs = json.loads(game.observe())
+        if pred(obs):
+            return obs, make_fork(make_game, [], game)
+        by_type = {}
+        for a in obs["legalActions"]:
+            by_type.setdefault(a["type"], []).append(a)
+        for kind in ("PlayLand", "CastSpell", "DeclareAttacker"):
+            if by_type.get(kind):
+                game.act(by_type[kind][0]["index"])
+                break
+        else:
+            passes = by_type.get("PassPriority") or obs["legalActions"]
+            game.act(passes[0]["index"])
+    return None, None
+
+
+def _prune_case_multi(name, obs, fork, blunders, survivors, ex):
+    """Like _prune_case but for a decision with several blunder actions
+    (e.g. every self-targeting Strip Mine crack): all blunders must be
+    dropped, every legitimate survivor kept."""
+    if obs is None:
+        check(name, False, "driver never reached the decision")
+        return
+    kept = trainer.dominance_prune(fork, obs, obs["legalActions"], ex)
+    kept_idx = {a["index"] for a in kept}
+    blunder_kept = [a["index"] for a in blunders if a["index"] in kept_idx]
+    missing = [a["index"] for a in survivors if a["index"] not in kept_idx]
+    check(name, not blunder_kept and not missing,
+          f"pruned {len(obs['legalActions']) - len(kept)}/"
+          f"{len(obs['legalActions'])}; "
+          f"{len(blunders) - len(blunder_kept)}/{len(blunders)} blunders "
+          f"pruned; {len(survivors) - len(missing)}/{len(survivors)} "
+          f"legit kept")
+
+
 def check_i_scouted_blunders():
     import os
-    if not os.path.exists(SCOUT_NET):
-        check("I1-I3 scouted blunder regressions", False,
-              f"{SCOUT_NET} missing")
-        return
-    net = Net.load(SCOUT_NET)
-    ex = Extractor.for_inputs(net.inputs)
 
-    # I1: Ancestral Recall cast AT THE OPPONENT (The Deck vs Counterburn,
-    # seat p1, seed 9101102, turn 13 Draw). Aiming it at ourselves is the
-    # legitimate line and must survive.
+    # I1 and I3 are reached by a net-free deterministic driver on the
+    # CURRENT engine (0.7.0 / protocol 22): the 0.5.0-captured scout seeds
+    # no longer replay to their decisions, and the prune's own guards --
+    # not any net -- are what these regressions exercise, so EX (any
+    # schema) suffices. I2 still replays its scout seed, which reaches on
+    # 0.7.0, so it keeps the scout-net choose-driver.
+    _MAIN = ("PrecombatMain", "PostcombatMain")
+
     def hand_name(obs, action):
         names = {c["instance"]: c["name"] for c in obs.get("hand", ())}
         return names.get(action.get("card"))
 
+    # I1: Ancestral Recall cast AT THE OPPONENT (they draw three) is pure
+    # self-sabotage -- strictly dominated by passing. Aiming it at
+    # ourselves is the legitimate line and must survive. The Deck (seat
+    # p1) vs Sligh, seed 7, reaches turn 3 with both casts enumerated.
     def ancestral_casts(obs):
-        out = {"blunder": None, "legit": []}
+        out = {"blunder": [], "legit": []}
         for a in obs["legalActions"]:
-            if a["type"] != "CastSpell" or hand_name(obs, a) != \
-                    "Ancestral Recall":
+            if a["type"] != "CastSpell" or \
+                    hand_name(obs, a) != "Ancestral Recall":
                 continue
-            for t in _cast_targets(a):
-                if t.get("type") == "player" and t.get("seat") == "p2":
-                    out["blunder"] = a
-                elif t.get("type") == "player" and t.get("seat") == "p1":
+            for t in a.get("targets") or ():
+                if t.get("type") != "player":
+                    continue
+                if t.get("seat") == obs["seat"]:
                     out["legit"].append(a)
+                else:
+                    out["blunder"].append(a)
         return out
 
     def pred1(obs):
-        if obs.get("turn") != 13 or obs.get("step") != "Draw" \
-                or obs.get("stack"):
+        if obs.get("stack") or obs.get("pregame") \
+                or obs.get("activeSeat") != obs["seat"]:
             return False
-        return ancestral_casts(obs)["blunder"] is not None
+        casts = ancestral_casts(obs)
+        return bool(casts["blunder"]) and bool(casts["legit"])
 
-    obs, fork = _replay_to(net, ex, "The Deck", "Counterburn", "p1",
-                           9101102, pred1)
-    found = ancestral_casts(obs) if obs else {"blunder": None, "legit": []}
-    _prune_case("I1 Ancestral Recall at the opponent is pruned "
-                "(cast at self survives)", obs, fork,
-                found["blunder"] or {"index": -1}, found["legit"], ex)
+    obs, fork = _drive_simple(
+        lambda: penta.Game("The Deck", "Sligh", opponent="handcrafted",
+                           opponent_seat="p2", seed=7), pred1)
+    found = ancestral_casts(obs) if obs else {"blunder": [], "legit": []}
+    _prune_case_multi("I1 Ancestral Recall at the opponent is pruned "
+                      "(cast at self survives)", obs, fork,
+                      found["blunder"], found["legit"], EX)
+
+    # I3: Strip Mine cracked on ANY of our OWN permanents (its own land, or
+    # our Mountain -- pure card/mana loss) is pruned, while cracking an
+    # OPPOSING land survives. Sligh (seat p1) vs The Deck, seed 52, reaches
+    # turn 3 with a self-target crack, an opposing-land crack, AND (unlike
+    # the old scout seed) a scripted-opponent reaction on the settle -- the
+    # exact protocol-22 shape that defeated a static-observation baseline.
+    def stripmine_acts(obs):
+        perms = {p["instance"]: p for p in obs.get("battlefield", ())}
+        out = {"blunder": [], "legit": []}
+        for a in obs["legalActions"]:
+            if a["type"] != "ActivateAbility":
+                continue
+            source = perms.get(a.get("source"))
+            if source is None or source["name"] != "Strip Mine":
+                continue
+            target = perms.get((a.get("target") or {}).get("instance"))
+            if target is None:
+                continue
+            if target["controller"] == obs["seat"]:
+                out["blunder"].append(a)  # any of OUR permanents
+            else:
+                out["legit"].append(a)    # an opposing land
+        return out
+
+    def pred3(obs):
+        if obs.get("stack") or obs.get("pregame") \
+                or obs.get("activeSeat") != obs["seat"] \
+                or obs.get("step") not in _MAIN:
+            return False
+        acts = stripmine_acts(obs)
+        return bool(acts["blunder"]) and bool(acts["legit"])
+
+    obs3, fork3 = _drive_simple(
+        lambda: penta.Game("Sligh", "The Deck", opponent="handcrafted",
+                           opponent_seat="p2", seed=52), pred3)
+    found3 = stripmine_acts(obs3) if obs3 else {"blunder": [], "legit": []}
+    _prune_case_multi("I3 Strip Mine on our own permanent is pruned "
+                      "(opposing-land targets survive)", obs3, fork3,
+                      found3["blunder"], found3["legit"], EX)
+
+    # I2 still replays its scout seed (reaches on 0.7.0).
+    if not os.path.exists(SCOUT_NET):
+        check("I2 Fireball at our own creature is pruned "
+              "(land/creature plays survive)", False,
+              f"{SCOUT_NET} missing")
+        return
+    net = Net.load(SCOUT_NET)
+    ex = Extractor.for_inputs(net.inputs)
 
     # I2: Fireball aimed at our own Goblin Balloon Brigade (Sligh vs
     # White Weenie, seat p2, seed 9100103, turn 20 PrecombatMain). The
@@ -858,40 +959,6 @@ def check_i_scouted_blunders():
     found = fireball_casts(obs) if obs else {"blunder": None, "legit": []}
     _prune_case("I2 Fireball at our own creature is pruned (land/creature "
                 "plays survive)", obs, fork,
-                found["blunder"] or {"index": -1}, found["legit"], ex)
-
-    # I3: Strip Mine cracked on our OWN Mountain (Sligh vs The Deck, seat
-    # p1, seed 9100200, turn 3 PostcombatMain). Strip Mine pointed at any
-    # opposing land must survive (when the engine offers one).
-    def stripmine_acts(obs):
-        perms = {p["instance"]: p for p in obs.get("battlefield", ())}
-        out = {"blunder": None, "legit": []}
-        for a in obs["legalActions"]:
-            if a["type"] != "ActivateAbility":
-                continue
-            source = perms.get(a.get("source"))
-            if source is None or source["name"] != "Strip Mine":
-                continue
-            target = perms.get((a.get("target") or {}).get("instance"))
-            if target is None:
-                continue
-            if target["controller"] == "p1" and target["name"] == "Mountain":
-                out["blunder"] = a
-            elif target["controller"] == "p2":
-                out["legit"].append(a)
-        return out
-
-    def pred3(obs):
-        if obs.get("turn") != 3 or obs.get("step") != "PostcombatMain" \
-                or obs.get("stack"):
-            return False
-        return stripmine_acts(obs)["blunder"] is not None
-
-    obs, fork = _replay_to(net, ex, "Sligh", "The Deck", "p1",
-                           9100200, pred3)
-    found = stripmine_acts(obs) if obs else {"blunder": None, "legit": []}
-    _prune_case("I3 Strip Mine on our own Mountain is pruned (opposing-"
-                "land targets survive)", obs, fork,
                 found["blunder"] or {"index": -1}, found["legit"], ex)
 
 

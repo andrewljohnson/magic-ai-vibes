@@ -341,6 +341,31 @@ def _settle_all_pass(copy, budget=PRUNE_SETTLE_STEPS):
     return False
 
 
+def _settled_pass_state(fork, pass_action, seat):
+    """The status-quo afterstate: the PASS branch, forked and settled the
+    same way every candidate is (`_settle_all_pass`). None when the pass
+    branch cannot be settled (fail closed -- no honest baseline).
+
+    Its purpose is symmetry. On the from_observation search worlds used in
+    training and hosted play the opponent seat merely passes, so this
+    equals the current observation and the baseline is unchanged. On a
+    SCRIPTED-opponent clone under protocol 22, however, passing priority
+    hands the opponent an inline discretionary window; whatever reaction
+    it makes with our (or its own) turn still in progress lands HERE too,
+    so a candidate that only baited that reaction no longer looks like an
+    opponent-side gain when compared against this branch."""
+    copy = fork()
+    try:
+        copy.act(pass_action["index"])
+    except BaseException as error:
+        if not _is_engine_panic(error):
+            raise
+        return None  # panicked clone: fail closed, no baseline
+    if not _settle_all_pass(copy):
+        return None
+    return _dominance_state(json.loads(copy.observe(seat)), seat)
+
+
 def _dominated_by_pass(cand, base, invisible_upside):
     """True when the settled candidate state is strictly dominated by the
     status-quo (pass) state. See the prune commentary for the guards."""
@@ -430,6 +455,29 @@ def dominance_prune(fork, obs, actions, extractor):
     # (a) Candidates strictly dominated by standing pat.
     testable = [a for a in non_pass if a["type"] in _PRUNABLE_TYPES]
     if len(non_pass) >= 2 and testable:
+        # Baseline for the dominated-by-pass test. The current observation
+        # is normally the honest no-op reference. But a candidate spell or
+        # ability sits on the stack while priority is passed to settle it,
+        # and on a scripted-opponent clone (protocol 22) that inline window
+        # lets the opponent react -- their reaction is folded into the
+        # candidate afterstate but not into the static current observation,
+        # so a purely self-destructive activation looks non-dominated only
+        # because the opponent "got worse" answering it. Settling the PASS
+        # branch the same way surfaces that reaction as common to both
+        # branches, but only when it stays in the SAME turn/step (the
+        # opponent acted in-window); a pass that merely advances the step
+        # is no baseline at all, so we keep the current observation. (The
+        # from_observation search worlds of training and hosted play settle
+        # with the opponent simply passing, so the two baselines coincide
+        # there.) The land rule (b) always keeps the current-observation
+        # baseline: a land drop is a turn-based action that yields no such
+        # priority window.
+        dom_base = base
+        settled_pass = _settled_pass_state(fork, passes[0], seat)
+        if (settled_pass is not None
+                and settled_pass["turn"] == base["turn"]
+                and settled_pass["step"] == base["step"]):
+            dom_base = settled_pass
         # Candidate card definitions: CastSpell carries the hand
         # instance, ActivateAbility the battlefield source instance.
         # Unmappable ids count as invisible-upside (fail closed).
@@ -452,7 +500,7 @@ def dominance_prune(fork, obs, actions, extractor):
             if not _settle_all_pass(copy):
                 continue
             cand = _dominance_state(json.loads(copy.observe(seat)), seat)
-            if _dominated_by_pass(cand, base, upside):
+            if _dominated_by_pass(cand, dom_base, upside):
                 pruned.add(action["index"])
         if len(pruned) == len(non_pass):
             # Never remove every non-pass action (fail closed on a sweep).
