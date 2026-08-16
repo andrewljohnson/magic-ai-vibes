@@ -127,11 +127,25 @@ def play_room(server, room, token, policy, move_budget):
             if took > move_budget:
                 log.write(json.dumps({"t": "slow-move",
                                       "seconds": round(took, 2)}) + "\n")
+            # Chosen action detail + reconstruction survivor count so live
+            # blunders are reproducible and attributable to a path: worlds=0
+            # means every hypothesis reconstruction failed and the move came
+            # from the UNPRUNED shaped fallback (HostedPolicy.choose), not the
+            # dominance-pruned determinized search.
+            acts = obs.get("legalActions") or ()
+            chosen = next((a for a in acts if a.get("index") == index), None)
+            worlds = getattr(policy, "worlds_used", None)
             log.write(json.dumps({
                 "t": "move", "turn": obs.get("turn"),
                 "step": obs.get("step"), "index": index,
-                "n_actions": len(obs.get("legalActions") or ()),
-                "ms": round(1000 * took)}) + "\n")
+                "action": ({"type": chosen.get("type"),
+                            "name": chosen.get("name"),
+                            "target": chosen.get("target")}
+                           if chosen else None),
+                "worlds": worlds[-1] if worlds else None,
+                "n_actions": len(acts),
+                "ms": round(1000 * took),
+                "obs": obs}) + "\n")
             try:
                 _request(f"{server}/_game/{room}/command",
                          {"t": "botAct", "index": index}, headers=headers)
