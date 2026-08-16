@@ -49,9 +49,9 @@ cp "$START_NET" "$LATEST"
 echo "=== DET3 v2 curve $(date) | resume from $START_NET (cum=$START_TOTAL) | Python det, K_train=$K_TRAIN, ${GAMES}-game chunks | gate: none<${GATE_AFTER}g, cheap K2/80, honest K4/120 when cheap>=${HONEST_AT}%, promo ${PROMO_BAR}% ===" >> "$PROGRESS"
 TOTAL=$START_TOTAL
 for CHUNK in ${=CHUNKS}; do
-  PENTA_ENGINE_DIR=$ENGINE python3 trainer.py \
+  PENTA_ENGINE_DIR=$ENGINE python3 trainer.py --native-rows \
     --determinized-k $K_TRAIN --games $GAMES --init "$LATEST" \
-    --out "$LATEST" --workers $WORKERS \
+    --out "$LATEST" \
     --search-topk 4 --playout-budget 120 \
     --league-handcrafted 0.15 --ring "$RING" --lr-warmup $LR_WARMUP \
     --seed-base $((12000000 + TOTAL)) > "chunk-det3-${CHUNK}.log" 2>&1
