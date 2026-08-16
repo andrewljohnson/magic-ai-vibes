@@ -25,11 +25,17 @@ PROMO_BAR=${PROMO_BAR:-31.6}
 RING=${RING:-penta_ring_det3.npz}
 LR_WARMUP=${LR_WARMUP:-200}
 WORKERS=${WORKERS:-8}
-START_NET=${START_NET:-penta_net.ckpt-det3-1000.npz}  # resume v1 chunk-1
-START_TOTAL=${START_TOTAL:-1000}
-GATE_AFTER=${GATE_AFTER:-5000}   # no gating below this cumulative-games
-HONEST_AT=${HONEST_AT:-22}       # cheap %>= this -> run the honest K=4 gate
-CHEAP_TIMEOUT=${CHEAP_TIMEOUT:-2400}   # 40m hard cap on a tracking gate
+# WARM-start from the honest-31.6% 825 net (head-compatible + deployable).
+# The prior fresh run trained an 840 net that couldn't blend with the 825
+# head -> every gate crashed. 825 = the proven schema (the 840 extras are the
+# proven-null deployment block). Warm from baseline + exploration is the
+# untested, sample-efficient path to beating 31.6% (det2's plateau was the
+# greedy native runner, not warm-start).
+START_NET=${START_NET:-penta_net.npz}   # honest 31.6% baseline, 825 feats
+START_TOTAL=${START_TOTAL:-0}
+GATE_AFTER=${GATE_AFTER:-0}       # already at baseline -> gate every chunk
+HONEST_AT=${HONEST_AT:-28}        # cheap K2 %>= this -> run honest K=4 gate
+CHEAP_TIMEOUT=${CHEAP_TIMEOUT:-1800}   # 30m hard cap on a tracking gate
 HONEST_TIMEOUT=${HONEST_TIMEOUT:-4800} # 80m hard cap on an honest gate
 RUN_BEST=0
 BELOW=0
@@ -55,9 +61,9 @@ for CHUNK in ${=CHUNKS}; do
     echo "$(date +%H:%M) cumulative-games=$TOTAL | warmup (no gate < ${GATE_AFTER}g)" >> "$PROGRESS"
     continue
   fi
-  CHEAP=$(gate 2 80 "$CHEAP_TIMEOUT")
+  CHEAP=$(gate 2 60 "$CHEAP_TIMEOUT")
   CP=$(hc_pct "$CHEAP"); [[ -z "$CP" ]] && CP=0
-  echo "$(date +%H:%M) cumulative-games=$TOTAL | cheap K2/80: $CHEAP" >> "$PROGRESS"
+  echo "$(date +%H:%M) cumulative-games=$TOTAL | cheap K2/60: $CHEAP" >> "$PROGRESS"
   # honest gate only when the cheap tracking signal is near the bar
   if awk "BEGIN{exit !($CP >= $HONEST_AT)}"; then
     HON=$(gate 4 120 "$HONEST_TIMEOUT")
