@@ -152,8 +152,17 @@ def play_game(penta, net, ex, decks, d1, d2, seed, k, handcrafted,
         if len(acts) == 1:
             game.act(acts[0]["index"]); n += 1; continue
         my_deck, opp_deck = (d1, d2) if seat == "p1" else (d2, d1)
-        idx = det_choose(penta, game, seat, net, ex, decks, my_deck,
-                         opp_deck, k, prng, search)
+        # Mirror det_runner.rs play_game EXACTLY: draw the epsilon roll
+        # ONCE per multi-action decision BEFORE branching (native draws
+        # `e = prng.next_f64()` unconditionally after the forced-move
+        # check), so the shared PRNG stream stays aligned whether or not
+        # this decision explores.
+        e = prng.next_f64()
+        if epsilon > 0.0 and e < epsilon:
+            idx = _explore_pick(obs, acts, ex, prior_frac, prng)
+        else:
+            idx = det_choose(penta, game, seat, net, ex, decks, my_deck,
+                             opp_deck, k, prng, search)
         if idx is None:
             idx = acts[0]["index"]
         game.act(idx); n += 1
