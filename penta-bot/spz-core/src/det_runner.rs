@@ -140,9 +140,11 @@ fn explore_pick(obs: &PlayerObservation, actions: &[penta::Action],
 /// Consensus index over K hypothesis worlds; None when no world
 /// survived (caller then plays the first legal action, matching the
 /// Python DET_FALLBACK path's greedy degenerate case at epsilon 0).
+#[allow(clippy::too_many_arguments)]
 fn det_choose(real: &BotGame, seat: PlayerId, policy: &Policy,
               decks: &Decks, my_deck: &str, opp_deck: &str, k: usize,
-              prng: &mut SplitMix64) -> Option<usize> {
+              prng: &mut SplitMix64,
+              deck_slots: &[Vec<i32>; 2]) -> Option<usize> {
     let raw = real.observe_json(seat);
     let obs = real.core_game().observe(seat);
     let mut votes: std::collections::HashMap<usize, usize> =
@@ -158,7 +160,7 @@ fn det_choose(real: &BotGame, seat: PlayerId, policy: &Policy,
                                                           rollout_seed) {
             Ok(w) => w, Err(_) => continue,  // fail closed per world
         };
-        let (idx, val) = policy.choose_scored(world.core_game());
+        let (idx, val) = policy.choose_scored(world.core_game(), deck_slots);
         *votes.entry(idx).or_insert(0) += 1;
         *sum_val.entry(idx).or_insert(0.0) += val;
     }
@@ -188,6 +190,11 @@ pub fn trace_game(policy: &Policy, decks: &Decks, d1: &str, d2: &str,
         BotGame::new(d1, d2, Opponent::External, PlayerId::Two, seed)
     }.expect("game");
     let mut prng = SplitMix64::new(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B5);
+    let empty = std::collections::HashMap::new();
+    let deck_slots: [Vec<i32>; 2] = [
+        policy.tables.deck_slots(decks.get(d1).unwrap_or(&empty)),
+        policy.tables.deck_slots(decks.get(d2).unwrap_or(&empty)),
+    ];
     let mut out = Vec::new();
     let mut n = 0usize;
     while game.result().is_none() && n < max_moves {
@@ -197,7 +204,8 @@ pub fn trace_game(policy: &Policy, decks: &Decks, d1: &str, d2: &str,
             let _ = game.act(0); n += 1; out.push(-1); continue;
         }
         let (my, opp) = if seat == PlayerId::One { (d1, d2) } else { (d2, d1) };
-        let idx = det_choose(&game, seat, policy, decks, my, opp, k, &mut prng)
+        let idx = det_choose(&game, seat, policy, decks, my, opp, k, &mut prng,
+                             &deck_slots)
             .unwrap_or(0);
         out.push(idx as i64);
         if game.act(idx).is_err() { break; }
@@ -223,6 +231,13 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
         BotGame::new(d1, d2, Opponent::External, PlayerId::Two, seed)
     }.expect("game");
     let mut prng = SplitMix64::new(seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B5);
+    // Seat-indexed decklist counts for the belief block (p1 plays d1, p2
+    // plays d2); the true decks, since self-play knows the matchup.
+    let empty = std::collections::HashMap::new();
+    let deck_slots: [Vec<i32>; 2] = [
+        tables.deck_slots(decks.get(d1).unwrap_or(&empty)),
+        tables.deck_slots(decks.get(d2).unwrap_or(&empty)),
+    ];
     // per-seat recorded feature rows
     let mut rows: [Vec<Vec<f32>>; 2] = [Vec::new(), Vec::new()];
     let mut n = 0usize;
@@ -242,7 +257,7 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
             explore_pick(&obs, &acts, tables, prior_frac, &mut prng)
         } else {
             det_choose(&game, seat, policy, decks, my_deck, opp_deck, k,
-                       &mut prng).unwrap_or(0)
+                       &mut prng, &deck_slots).unwrap_or(0)
         };
         if game.act(idx).is_err() { break; }
         n += 1;
@@ -250,7 +265,7 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
         if !handcrafted || seat == learner {
             let after = game.core_game().observe(seat);
             let pg = game.core_game().in_pregame();
-            rows[seat_idx(seat)].push(features(&after, pg, tables));
+            rows[seat_idx(seat)].push(features(&after, pg, tables, &deck_slots));
         }
     }
     let result = game.result();

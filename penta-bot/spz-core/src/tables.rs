@@ -23,7 +23,10 @@ pub struct Tables {
     pub cost: HashMap<u16, i64>,
     pub flying: HashSet<u16>,
     pub invisible_upside: HashSet<u16>,
-    pub size: usize, // v2 = 5*defs + 35 + defs + 14 + 8
+    pub size: usize, // v2 = 5*defs + 35 + defs + 14 + 8 (+ 2*defs if belief)
+    pub v2_size: usize,     // the 825 base, before the belief block
+    pub belief_base: usize, // where the belief block starts (== v2_size)
+    pub belief: bool,       // append the 2*defs hidden-pool block?
 }
 
 fn converted_cost(cost: &serde_json::Value) -> i64 {
@@ -84,9 +87,31 @@ impl Tables {
                 invisible.insert(d);
             }
         }
-        let size = 5 * defs + 35 + defs + 2 * N_COST_BUCKETS + N_EXTRA_SCALARS;
+        let v2_size = 5 * defs + 35 + defs + 2 * N_COST_BUCKETS + N_EXTRA_SCALARS;
         Ok(Tables { def_slot, defs, kind, power, cost, flying,
-                    invisible_upside: invisible, size })
+                    invisible_upside: invisible, size: v2_size, v2_size,
+                    belief_base: v2_size, belief: false })
+    }
+
+    /// Turn the hidden-pool belief block on/off. On -> the vector grows by
+    /// 2*defs (256 on the 128-def catalog), giving the 1081-feature schema
+    /// that mirrors extractor.py's Extractor(version=2, belief=True).
+    pub fn set_belief(&mut self, on: bool) {
+        self.belief = on;
+        self.belief_base = self.v2_size;
+        self.size = if on { self.v2_size + 2 * self.defs } else { self.v2_size };
+    }
+
+    /// A defs-length count array in slot order from a {def: count} map,
+    /// for the belief block's decklist input.
+    pub fn deck_slots(&self, counts: &HashMap<u16, u32>) -> Vec<i32> {
+        let mut v = vec![0i32; self.defs];
+        for (d, c) in counts {
+            if let Some(&i) = self.def_slot.get(d) {
+                v[i] += *c as i32;
+            }
+        }
+        v
     }
 
     pub fn cost_bucket(&self, def: u16) -> usize {

@@ -141,6 +141,22 @@ LEAGUE_FROZEN_FRACTION = 0.25
 # flattening the value net (both 2026-08 curve collapses, lambda 0.9 and
 # 1.0, shared this). True engine draws still score 0.5.
 MAX_DECISIONS = 600
+
+_BELIEF_DECKS_CACHE = None
+
+
+def _set_belief_decks(extractor, d1, d2):
+    """Fix the belief extractor's per-seat decklists for a game (p1 plays
+    d1, p2 plays d2). No-op unless the extractor carries the belief block.
+    Self-play knows the true matchup decks, so it passes them straight in."""
+    if not getattr(extractor, "belief", False):
+        return
+    global _BELIEF_DECKS_CACHE
+    if _BELIEF_DECKS_CACHE is None:
+        from hosted_policy import load_decklists  # noqa: PLC0415
+        _BELIEF_DECKS_CACHE = load_decklists()
+    decks = _BELIEF_DECKS_CACHE
+    extractor.set_deck_context(decks.get(d1, {}), decks.get(d2, {}))
 # EVALUATE-ALL policy (2026-08, approved): the greedy screen and the
 # in-playout greedy 1-ply evaluate EVERY legal candidate rather than a
 # random max_eval/playout_max_eval subsample. Native afterstates are
@@ -849,6 +865,7 @@ def play_selfplay_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
     def make_game():
         return penta.Game(d1, d2, opponent="external", seed=seed)
 
+    _set_belief_decks(extractor, d1, d2)
     game = make_game()
     history = []
     traj = {"p1": ([], [], []), "p2": ([], [], [])}
@@ -929,6 +946,7 @@ def play_handcrafted_game(net, extractor, penta, d1, d2, seed, epsilon, rng,
         return penta.Game(d1, d2, opponent="handcrafted",
                           opponent_seat=opponent_seat, seed=seed)
 
+    _set_belief_decks(extractor, d1, d2)
     game = make_game()
     history = []
     feats_list, values, turns = [], [], []
@@ -1212,6 +1230,12 @@ def main():
                              "weight matrix is grown with zero columns "
                              "for the new features (the net starts "
                              "identical and learns to use them)")
+    parser.add_argument("--belief", action="store_true",
+                        help="use the hidden-pool belief schema (v2 + 2*defs "
+                             "= 1081): the value net gets each player's "
+                             "decklist-minus-seen count vector. Fresh nets "
+                             "start at 1081; with --grow-init an 825 net is "
+                             "grown with zero columns for the belief block")
     parser.add_argument("--seat-oversample", action="store_true",
                         help="weighted TRAINING deck schedule (The Deck "
                              "~1.8x, Counterburn/Jeskai ~1.4x seat share); "
@@ -1261,25 +1285,35 @@ def main():
                              "each round for the native runner")
     args = parser.parse_args()
 
+    target_schema = (Extractor(version=2, belief=True)
+                     if args.belief else Extractor())
     if args.init:
         # Feature schemas are versioned by input size: dispatch on the
         # warm-start net so old (v1, 675-input) nets keep their layout.
         net = Net.load(args.init)
         extractor = Extractor.for_inputs(net.inputs)
-        if args.grow_init and extractor.version < Extractor().version:
-            # Schemas are nested (v3 = v2 + block, ...): grow the input
-            # weight matrix with zero columns so the old net transfers
-            # exactly, then learns the new features from zero.
-            target = Extractor()
-            pad = np.zeros((net.w1.shape[0], target.size - net.inputs))
+        if args.grow_init and extractor.size < target_schema.size:
+            # Schemas are nested (belief = v2 + block, v3 = v2 + block, ...):
+            # grow the input weight matrix with zero columns so the old net
+            # transfers exactly, then learns the new features from zero. The
+            # belief block is nested on v2, so a belief target requires an
+            # 825 (v2) init net; the first 825 columns must line up.
+            if args.belief and extractor.size != 825:
+                raise SystemExit(
+                    f"--belief --grow-init needs an 825 (v2) init net; "
+                    f"{args.init} has {net.inputs} inputs "
+                    f"(v{extractor.version})")
+            pad = np.zeros((net.w1.shape[0], target_schema.size - net.inputs))
             net.w1 = np.hstack([net.w1, pad])
             net._vel[0] = np.zeros_like(net.w1)
+            grown = ("v2+belief" if args.belief
+                     else f"v{target_schema.version}")
             print(f"grow-init: {args.init} grown v{extractor.version} "
                   f"({net.w1.shape[1] - pad.shape[1]}) -> "
-                  f"v{target.version} ({target.size}) with zero columns")
-            extractor = target
+                  f"{grown} ({target_schema.size}) with zero columns")
+            extractor = target_schema
     else:
-        extractor = Extractor()
+        extractor = target_schema
         net = Net(extractor.size, hidden=args.hidden, seed=1)
     for path in args.league_frozen:
         frozen_inputs = Net.load(path).inputs
@@ -1305,6 +1339,8 @@ def main():
           f"{extractor.n_scalars} scalars"
           + (" + castability/race block" if extractor.version >= 2 else "")
           + (" + deployment block" if extractor.version >= 3 else "")
+          + (" + hidden-pool belief block"
+             if getattr(extractor, "belief", False) else "")
           + f"); decks {len(DECKS)}"
           + (" (seat-oversampled: The Deck ~1.8x, CB/JA ~1.4x)"
              if args.seat_oversample else "")

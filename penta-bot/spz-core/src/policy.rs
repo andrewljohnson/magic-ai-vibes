@@ -63,14 +63,16 @@ impl Policy {
 
     /// Greedy choice on a live game for the seat to move. Returns the
     /// action index into the CURRENT observation's protocol_actions.
-    pub fn choose(&self, g: &Game) -> usize {
-        self.choose_scored(g).0
+    /// `decks` are the two seats' decklist count arrays (see extract.rs);
+    /// only read when the belief schema is on.
+    pub fn choose(&self, g: &Game, decks: &[Vec<i32>; 2]) -> usize {
+        self.choose_scored(g, decks).0
     }
 
     /// As `choose`, plus the refined value of the chosen action (the
     /// consensus tie-break needs it). Value is the playout/terminal
     /// score of the winner, or its blended screen score with search off.
-    pub fn choose_scored(&self, g: &Game) -> (usize, f64) {
+    pub fn choose_scored(&self, g: &Game, decks: &[Vec<i32>; 2]) -> (usize, f64) {
         let seat = g.decision_player().expect("choose on a finished game");
         let obs = g.observe(seat);
         // COUNT via protocol_actions, not the typed legal_actions: a
@@ -91,7 +93,8 @@ impl Policy {
                     if let Some(t) = terminal_value(&copy, seat) {
                         scored.push((i, t, None));
                     } else {
-                        let f = features(&after, copy.in_pregame(), &self.tables);
+                        let f = features(&after, copy.in_pregame(),
+                                         &self.tables, decks);
                         scored.push((i, self.blended(&f), Some(copy)));
                     }
                 }
@@ -121,7 +124,7 @@ impl Policy {
             let (_, screen, ref copy) = scored[oi];
             refined[oi] = match copy {
                 None => screen, // terminal keeps its exact outcome
-                Some(c) => self.playout(c, seat, turn0, was_pregame),
+                Some(c) => self.playout(c, seat, turn0, was_pregame, decks),
             };
         }
         let mut best_pos = 0usize;
@@ -137,7 +140,8 @@ impl Policy {
 
     /// Refined playout value for ONE candidate action index, for
     /// per-candidate lockstep diffing vs trainer.playout_value.
-    pub fn playout_candidate(&self, g: &Game, action_index: usize) -> f64 {
+    pub fn playout_candidate(&self, g: &Game, action_index: usize,
+                             decks: &[Vec<i32>; 2]) -> f64 {
         let seat = g.decision_player().expect("finished game");
         let obs = g.observe(seat);
         let actions = protocol_actions(&obs);
@@ -149,11 +153,11 @@ impl Policy {
         }
         let turn0 = obs.turn;
         let was_pregame = g.in_pregame();
-        self.playout(&copy, seat, turn0, was_pregame)
+        self.playout(&copy, seat, turn0, was_pregame, decks)
     }
 
     fn playout(&self, start: &Game, seat: PlayerId, turn0: u32,
-               was_pregame: bool) -> f64 {
+               was_pregame: bool, decks: &[Vec<i32>; 2]) -> f64 {
         let mut g = start.clone();
         for _ in 0..self.search.budget {
             if let Some(t) = terminal_value(&g, seat) {
@@ -190,7 +194,8 @@ impl Policy {
                     Some(t) => t,
                     None => {
                         let f = features(&copy.observe(acting),
-                                         copy.in_pregame(), &self.tables);
+                                         copy.in_pregame(), &self.tables,
+                                         decks);
                         self.value.value(&f)
                     }
                 };
@@ -204,7 +209,8 @@ impl Policy {
             Some(t) => t,
             None => {
                 let obs = g.observe(seat);
-                self.value.value(&features(&obs, g.in_pregame(), &self.tables))
+                self.value.value(&features(&obs, g.in_pregame(),
+                                           &self.tables, decks))
             }
         }
     }

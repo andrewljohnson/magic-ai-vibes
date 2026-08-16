@@ -53,7 +53,8 @@ def _find(cards, object_id):
 class HostedPolicy:
     def __init__(self, value_path="penta_net.npz",
                  head_path="policy_head.ckpt-dagger1.npz", weight=0.15,
-                 shaped=True):
+                 shaped=True, our_deck=None,
+                 decklists_path="builtin-decklists.json"):
         here = os.path.dirname(os.path.abspath(__file__))
         self.net = Net.load(os.path.join(here, value_path)
                             if not os.path.isabs(value_path) else value_path)
@@ -64,6 +65,14 @@ class HostedPolicy:
         self.extractor = Extractor.for_inputs(self.net.inputs)
         if self.head.inputs != self.net.inputs:
             raise ValueError("value net and policy head disagree on schema")
+        # Belief schema needs the two seats' decklists; deck GUESSING is
+        # done in belief_deck_context (classify), never in the extractor.
+        # `_our_deck` is private on purpose: the gate dispatches on the
+        # public `our_deck` attribute (DeterminizedPolicy only), so adding
+        # it here must not change HostedPolicy's choose(obs) contract.
+        self._our_deck = our_deck
+        self._decks = (load_decklists(decklists_path)
+                       if getattr(self.extractor, "belief", False) else {})
 
     # -- approximate afterstates ----------------------------------------
 
@@ -226,6 +235,9 @@ class HostedPolicy:
             return 0
         if len(actions) == 1:
             return actions[0]["index"]
+        if getattr(self.extractor, "belief", False):
+            belief_deck_context(self.extractor, self._decks, obs,
+                                self._our_deck)
         if not self.shaped:
             candidates = list(actions)
             if (obs.get("activeSeat") == obs.get("seat")
@@ -302,6 +314,53 @@ def unseen_pool(decks, deck_name, seen):
         if d in pool:
             pool.remove(d)
     return pool
+
+
+def classify_deck(decks, seen):
+    """Best-overlap built-in deck for a list of seen definitions."""
+    if not seen:
+        return None
+    best, best_score = None, -1.0
+    for name, deck in decks.items():
+        pool = dict(deck)
+        hits = 0
+        for d in seen:
+            if pool.get(d, 0) > 0:
+                pool[d] -= 1
+                hits += 1
+        score = hits / len(seen)
+        if score > best_score:
+            best, best_score = name, score
+    return best
+
+
+def classify_opponent(decks, obs):
+    """Best-overlap guess at the opponent's built-in deck from every card
+    of theirs we have seen (their hand stays hidden)."""
+    opp = "p2" if obs.get("seat") == "p1" else "p1"
+    oi = 0 if opp == "p1" else 1
+    return classify_deck(decks, seen_defs(obs, opp, oi, include_hand=False))
+
+
+def belief_deck_context(extractor, decks, obs, our_deck):
+    """Set the belief extractor's per-seat decklists for one observation:
+    our_deck (or, if unknown, a classification of our own visible cards)
+    for our seat, and the classified opponent deck for theirs. No-op unless
+    the extractor carries the belief block. Deck GUESSING lives HERE, in
+    the caller -- the extractor only receives decided count arrays."""
+    if not getattr(extractor, "belief", False):
+        return
+    me = obs.get("seat", "p1")
+    mi = 0 if me == "p1" else 1
+    my_name = our_deck or classify_deck(
+        decks, seen_defs(obs, me, mi, include_hand=True))
+    opp_name = classify_opponent(decks, obs) or my_name
+    my_deck = decks.get(my_name, {}) if my_name else {}
+    opp_deck = decks.get(opp_name, {}) if opp_name else {}
+    if me == "p1":
+        extractor.set_deck_context(my_deck, opp_deck)
+    else:
+        extractor.set_deck_context(opp_deck, my_deck)
 
 
 def sample_hidden(obs, rng, decks, our_deck, opp_deck):
@@ -427,6 +486,18 @@ class DeterminizedPolicy:
             return self.fallback.choose(obs)
         raw = raw_json if raw_json is not None else json.dumps(obs)
         opp_deck = self.classify_opponent(obs) or self.our_deck
+        # Belief schema: fix the two seats' decklists for the certified
+        # in-world search (trainer.choose reads them via self.extractor).
+        # We KNOW our deck; the opponent's is the best-overlap guess.
+        self.fallback._our_deck = self.our_deck
+        if getattr(self.extractor, "belief", False):
+            me = obs.get("seat", "p1")
+            my_deck = self.decks.get(self.our_deck, {})
+            their_deck = self.decks.get(opp_deck, {})
+            if me == "p1":
+                self.extractor.set_deck_context(my_deck, their_deck)
+            else:
+                self.extractor.set_deck_context(their_deck, my_deck)
         votes = {}
         t0 = _time.time()
         survivors = 0

@@ -137,6 +137,11 @@ def _explore_pick(obs, acts, ex, prior_frac, prng):
 def play_game(penta, net, ex, decks, d1, d2, seed, k, handcrafted,
               learner, search, epsilon=0.0, prior_frac=0.5):
     opp_seat = "p2" if learner == "p1" else "p1"
+    # Belief schema: fix the two seats' decklists so ex.features() can
+    # compute the hidden pools (p1 plays d1, p2 plays d2). No-op for the
+    # non-belief extractors.
+    if getattr(ex, "belief", False):
+        ex.set_deck_context(decks.get(d1, {}), decks.get(d2, {}))
     if handcrafted:
         game = penta.Game(d1, d2, opponent="handcrafted",
                           opponent_seat=opp_seat, seed=seed)

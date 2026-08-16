@@ -155,10 +155,15 @@ def converted_cost(cost):
 class Extractor:
     """Turns one observation dict into a fixed-length float32 vector."""
 
-    def __init__(self, version=3):
+    def __init__(self, version=3, belief=False):
         if version not in (1, 2, 3):
             raise ValueError(f"unknown feature schema version {version}")
+        if belief and version != 2:
+            raise ValueError("the hidden-pool belief block is defined on the "
+                             "v2 (825) base only; use Extractor(version=2, "
+                             "belief=True)")
         self.version = version
+        self.belief = belief
         catalog = pinned_catalog()
         self.engine_version = catalog["engineVersion"]
         self.protocol_version = catalog["protocolVersion"]
@@ -225,16 +230,64 @@ class Extractor:
         self.v2_size = self.size if version >= 2 else None
         if version >= 3:
             self.size += N_V3_SCALARS
+        # The hidden-pool belief block (a per-card-type count vector, for
+        # [me, opp], of each player's decklist minus every card of theirs
+        # visible anywhere) is appended LAST, after the v2 castability
+        # block, keeping the first 825 features byte-identical. New schema
+        # size = 825 + 2*defs (1081 on the 128-def catalog). Ported from
+        # the old honest C++ bot (subtract_public_zones / subtract_owned_
+        # auras / append_counts in selfplay_zero.cpp).
+        self.belief_base = self.size
+        if belief:
+            self.size += 2 * self.defs
+        # Optional per-seat deck context (see set_deck_context): count
+        # arrays [p1_counts, p2_counts] the belief block subtracts the seen
+        # zones from. Deck GUESSING never lives here -- the caller supplies
+        # already-decided count arrays; the extractor stays pure.
+        self._deck_by_seat = None
 
     @classmethod
     def for_inputs(cls, inputs):
         """Extractor whose schema matches a saved net's input size."""
-        for version in (3, 2, 1):
-            ex = cls(version=version)
-            if ex.size == inputs:
-                return ex
+        # Non-belief schemas first (675/825/840), then the belief schema
+        # (v2 + 2*defs = 1081); the sizes never collide.
+        for belief in (False, True):
+            for version in ((2,) if belief else (3, 2, 1)):
+                ex = cls(version=version, belief=belief)
+                if ex.size == inputs:
+                    return ex
         raise ValueError(f"no feature schema has {inputs} inputs "
-                         f"(v1={ex.v1_size})")
+                         f"(v1={cls().v1_size})")
+
+    # -- deck context for the belief block -------------------------------
+
+    def deck_slot_counts(self, deck):
+        """A defs-length int32 count array in this extractor's slot
+        mapping. Accepts a {definition_id: count} dict, an existing
+        defs-length array, or None (-> zeros)."""
+        arr = np.zeros(self.defs, dtype=np.int32)
+        if deck is None:
+            return arr
+        if isinstance(deck, dict):
+            for d, c in deck.items():
+                i = self.def_slot.get(int(d))
+                if i is not None:
+                    arr[i] += int(c)
+            return arr
+        a = np.asarray(deck)
+        if a.shape[0] != self.defs:
+            raise ValueError(f"deck count array has {a.shape[0]} slots, "
+                             f"expected {self.defs}")
+        arr[:] = a.astype(np.int32)
+        return arr
+
+    def set_deck_context(self, p1_deck, p2_deck):
+        """Fix the two seats' decklists (by SEAT, p1 then p2) for the
+        belief block, so features(obs) can compute the hidden pools
+        without threading deck args through every internal call. Each
+        argument is a {definition: count} dict or a defs-length array."""
+        self._deck_by_seat = [self.deck_slot_counts(p1_deck),
+                              self.deck_slot_counts(p2_deck)]
 
     # -- scalars ---------------------------------------------------------
 
@@ -456,8 +509,14 @@ class Extractor:
 
     # -- full vector -----------------------------------------------------
 
-    def features(self, obs):
-        """obs: parsed observation dict for the seat we evaluate for."""
+    def features(self, obs, my_deck=None, opp_deck=None):
+        """obs: parsed observation dict for the seat we evaluate for.
+
+        my_deck / opp_deck (belief schema only): the deciding seat's and
+        the opponent's decklists, each a {definition: count} dict or a
+        defs-length count array. When omitted, the per-seat context set by
+        set_deck_context is used; when neither is available the belief
+        block stays zero (safe, uninformative)."""
         me = 0 if obs["seat"] == "p1" else 1
         opp = 1 - me
         seat_names = ("p1", "p2")
@@ -497,4 +556,84 @@ class Extractor:
         if self.version >= 3:
             vec[self.v2_size:] = self._v3_scalars(obs, me, opp,
                                                   castable_defs)
+        if self.belief:
+            self._belief_block(obs, me, opp, vec, my_deck, opp_deck)
         return vec
+
+    # -- hidden-pool belief block ----------------------------------------
+
+    def _belief_block(self, obs, me, opp, vec, my_deck, opp_deck):
+        """Fill [belief_base : belief_base+2*C] in-place: for [me, opp],
+        each player's decklist counts minus the counts of that player's
+        cards visible ANYWHERE (subtract_public_zones + subtract_owned_
+        auras from the old C++ bot), clamped >=0 and scaled by 1/4.
+
+        "Seen" for player p = p's battlefield permanents + p's graveyard +
+        p's exile + stack objects p controls, and -- only for the viewer
+        (p == me) -- the viewer's hand. The opponent's hand is exactly
+        what the belief block leaves the net to reason about, so it is not
+        subtracted. Definitions outside the decklist floor at 0 (tokens,
+        post-pin cards)."""
+        C = self.defs
+        slot = self.def_slot.get
+        if my_deck is not None or opp_deck is not None:
+            my_counts = self.deck_slot_counts(my_deck)
+            opp_counts = self.deck_slot_counts(opp_deck)
+        elif self._deck_by_seat is not None:
+            my_counts = self._deck_by_seat[me]
+            opp_counts = self._deck_by_seat[opp]
+        else:
+            return  # no deck context -> leave the block zero
+
+        my_seat = ("p1", "p2")[me]
+        my_seen = np.zeros(C, dtype=np.int32)
+        opp_seen = np.zeros(C, dtype=np.int32)
+        for card in obs.get("hand", ()):
+            i = slot(card["definition"])
+            if i is not None:
+                my_seen[i] += 1
+        for perm in obs.get("battlefield", ()):
+            i = slot(perm["definition"])
+            if i is None:
+                continue
+            if perm["controller"] == my_seat:
+                my_seen[i] += 1
+            else:
+                opp_seen[i] += 1
+        graveyards = obs.get("graveyards") or ((), ())
+        for card in graveyards[me]:
+            i = slot(card["definition"])
+            if i is not None:
+                my_seen[i] += 1
+        for card in graveyards[opp]:
+            i = slot(card["definition"])
+            if i is not None:
+                opp_seen[i] += 1
+        exiles = obs.get("exiles") or ((), ())
+        if len(exiles) > me:
+            for card in exiles[me]:
+                i = slot(card["definition"])
+                if i is not None:
+                    my_seen[i] += 1
+        if len(exiles) > opp:
+            for card in exiles[opp]:
+                i = slot(card["definition"])
+                if i is not None:
+                    opp_seen[i] += 1
+        for obj in obs.get("stack", ()):
+            definition = obj.get("definition")
+            if definition is None:
+                continue
+            i = slot(definition)
+            if i is None:
+                continue
+            if obj.get("controller") == my_seat:
+                my_seen[i] += 1
+            else:
+                opp_seen[i] += 1
+
+        base = self.belief_base
+        my_pool = np.maximum(my_counts - my_seen, 0).astype(np.float32) / 4.0
+        opp_pool = np.maximum(opp_counts - opp_seen, 0).astype(np.float32) / 4.0
+        vec[base:base + C] = my_pool
+        vec[base + C:base + 2 * C] = opp_pool

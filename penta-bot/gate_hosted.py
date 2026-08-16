@@ -62,6 +62,10 @@ def _play(task):
     policy = _WORKER["policy"]
     if hasattr(policy, "our_deck"):
         policy.our_deck = d1 if my_seat == "p1" else d2
+    elif hasattr(policy, "_our_deck"):
+        # Non-determinized HostedPolicy: tell the belief block our real
+        # deck (the opponent's is still classified from what we see).
+        policy._our_deck = d1 if my_seat == "p1" else d2
     opponent_seat = "p2" if my_seat == "p1" else "p1"
     game = penta.Game(d1, d2, opponent=opponent,
                       opponent_seat=opponent_seat, seed=seed)

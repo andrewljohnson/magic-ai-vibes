@@ -17,7 +17,11 @@ fn step_index(step: penta::Step) -> usize {
     step as usize
 }
 
-pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables) -> Vec<f32> {
+/// `decks` are the two seats' decklist count arrays in slot order, indexed
+/// by SEAT (0 = p1, 1 = p2); only read when `t.belief` is on. Non-belief
+/// callers may pass any placeholder (e.g. two empty vecs).
+pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
+                decks: &[Vec<i32>; 2]) -> Vec<f32> {
     let mut v = vec![0f32; t.size];
     let c = t.defs;
     let me = obs.viewer;
@@ -162,6 +166,52 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables) -> Vec<f32> 
     v[e + 5] = turns_to_kill(power[0], obs.life_totals[oi]) / 10.0;
     v[e + 6] = turns_to_kill(power[1], obs.life_totals[mi]) / 10.0;
     v[e + 7] = (attack_options as f32) / 8.0;
+
+    // -- hidden-pool belief block (extractor.py _belief_block) ----------
+    // For [me, opp]: that player's decklist counts minus every card of
+    // theirs visible anywhere (own battlefield + graveyard + exile + stack
+    // objects they control, plus the viewer's own hand), clamped >=0 and
+    // scaled by 1/4. Definitions outside the decklist floor at 0.
+    if t.belief {
+        let my_deck = &decks[mi];
+        let opp_deck = &decks[oi];
+        let mut my_seen = vec![0i32; c];
+        let mut opp_seen = vec![0i32; c];
+        for (_, d) in &obs.hand {
+            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+        }
+        for perm in &obs.battlefield {
+            if let Some(&i) = t.def_slot.get(&perm.definition.0) {
+                if perm.controller == me { my_seen[i] += 1; }
+                else { opp_seen[i] += 1; }
+            }
+        }
+        for (_, d) in &obs.graveyards[mi] {
+            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+        }
+        for (_, d) in &obs.graveyards[oi] {
+            if let Some(&i) = t.def_slot.get(&d.0) { opp_seen[i] += 1; }
+        }
+        for (_, d) in &obs.exiles[mi] {
+            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+        }
+        for (_, d) in &obs.exiles[oi] {
+            if let Some(&i) = t.def_slot.get(&d.0) { opp_seen[i] += 1; }
+        }
+        for obj in &obs.stack {
+            if let Some(&i) = t.def_slot.get(&obj.definition.0) {
+                if obj.controller == me { my_seen[i] += 1; }
+                else { opp_seen[i] += 1; }
+            }
+        }
+        let b = t.belief_base;
+        for i in 0..c {
+            let mv = my_deck.get(i).copied().unwrap_or(0);
+            let ov = opp_deck.get(i).copied().unwrap_or(0);
+            v[b + i] = ((mv - my_seen[i]).max(0) as f32) / 4.0;
+            v[b + c + i] = ((ov - opp_seen[i]).max(0) as f32) / 4.0;
+        }
+    }
     v
 }
 

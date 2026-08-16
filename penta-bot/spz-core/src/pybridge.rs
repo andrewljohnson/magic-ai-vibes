@@ -16,9 +16,14 @@ fn build_policy(catalog: &str, value_path: &str, head_path: &str,
                 weight: f64, top_k: usize, playouts: usize,
                 budget: usize, pme: usize, max_eval: usize)
                 -> Result<Policy, String> {
+    let mut tables = Tables::load(catalog)?;
+    let value = Mlp::load(value_path)?;
+    // The belief (1081) schema is selected by the net's input width: turn
+    // the hidden-pool block on iff the value net expects it.
+    tables.set_belief(value.inputs > tables.v2_size);
     Ok(Policy {
-        tables: Tables::load(catalog)?,
-        value: Mlp::load(value_path)?,
+        tables,
+        value,
         head: Mlp::load(head_path)?,
         weight,
         search: SearchConfig { top_k, playouts, budget,
@@ -27,17 +32,35 @@ fn build_policy(catalog: &str, value_path: &str, head_path: &str,
     })
 }
 
+/// Seat-indexed decklist count arrays [p1, p2] for the belief block.
+fn deck_slots_for(tables: &Tables, decks: &crate::decks::Decks,
+                  d1: &str, d2: &str) -> [Vec<i32>; 2] {
+    let empty = std::collections::HashMap::new();
+    [tables.deck_slots(decks.get(d1).unwrap_or(&empty)),
+     tables.deck_slots(decks.get(d2).unwrap_or(&empty))]
+}
+
 #[pyfunction]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn lockstep_trace(
     catalog_json: String,
     d1: String,
     d2: String,
     seed: u64,
     max_decisions: usize,
+    belief: bool,
+    decklists_path: String,
 ) -> PyResult<Vec<(String, Vec<f32>)>> {
-    let tables = Tables::load(&catalog_json)
+    let mut tables = Tables::load(&catalog_json)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    tables.set_belief(belief);
+    let deck_slots = if belief {
+        let decks = decks::load(&decklists_path)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        deck_slots_for(&tables, &decks, &d1, &d2)
+    } else {
+        [vec![0i32; tables.defs], vec![0i32; tables.defs]]
+    };
     let mut game = penta::protocol::BotGame::new(
         &d1, &d2, penta::protocol::Opponent::Handcrafted,
         penta::PlayerId::Two, seed,
@@ -50,7 +73,7 @@ fn lockstep_trace(
         let json = game.observe_json(seat);
         let obs = game.core_game().observe(seat);
         let pregame = game.core_game().in_pregame();
-        out.push((json, features(&obs, pregame, &tables)));
+        out.push((json, features(&obs, pregame, &tables, &deck_slots)));
         // advance deterministically: first legal action
         game.act(0)
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -78,6 +101,9 @@ fn bench_native_selfplay(
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, top_k, 1, budget, pme, 16)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    // Benchmark helper: exercises only the greedy choose path (825 nets in
+    // the lockstep/bench suite), so the belief decklists are placeholders.
+    let zero = [vec![0i32; policy.tables.defs], vec![0i32; policy.tables.defs]];
     let t0 = std::time::Instant::now();
     let mut decisions = 0usize;
     for gi in 0..games {
@@ -88,7 +114,7 @@ fn bench_native_selfplay(
          .into_core_game();
         let mut n = 0;
         while game.result().is_none() && n < 600 {
-            let idx = policy.choose(&game);
+            let idx = policy.choose(&game, &zero);
             let seat = game.decision_player().unwrap();
             let obs = game.observe(seat);
             let actions = penta::protocol::protocol_actions(&obs);
@@ -125,7 +151,8 @@ fn choose_at(
         game.apply(seat, actions[idx].clone())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     }
-    Ok(policy.choose(&game))
+    let zero = [vec![0i32; policy.tables.defs], vec![0i32; policy.tables.defs]];
+    Ok(policy.choose(&game, &zero))
 }
 
 /// Rust refined playout value for one candidate at a replayed state.
@@ -151,7 +178,8 @@ fn playout_at(
         game.apply(seat, actions[idx].clone())
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     }
-    Ok(policy.playout_candidate(&game, action_index))
+    let zero = [vec![0i32; policy.tables.defs], vec![0i32; policy.tables.defs]];
+    Ok(policy.playout_candidate(&game, action_index, &zero))
 }
 
 /// Play a batch of determinized games natively and return their
@@ -251,7 +279,8 @@ fn choose_world(catalog_json: String, value_path: String, head_path: String,
     let world = penta::protocol::BotGame::from_observation_json(
         &raw_obs, &hidden, rollout)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
-    Ok(policy.choose(world.core_game()))
+    let zero = [vec![0i32; policy.tables.defs], vec![0i32; policy.tables.defs]];
+    Ok(policy.choose(world.core_game(), &zero))
 }
 
 #[pyfunction]
