@@ -57,6 +57,21 @@ fn unseen_pool(decks: &Decks, name: &str, seen: &[u16]) -> Vec<u16> {
     pool
 }
 
+/// Serialize the sliced hidden zones to Game::from_observation JSON.
+fn hidden_json(me: PlayerId, opp: PlayerId, opp_hand: &[u16],
+               my_lib: &[u16], opp_lib: &[u16]) -> String {
+    let seat_name = |s: PlayerId| if s == PlayerId::One { "p1" } else { "p2" };
+    let arr = |xs: &[u16]| -> String {
+        let s: Vec<String> = xs.iter().map(|d| d.to_string()).collect();
+        format!("[{}]", s.join(","))
+    };
+    format!(
+        "{{\"hands\":{{\"{}\":{}}},\"libraries\":{{\"{}\":{},\"{}\":{}}},\
+         \"outsideGame\":{{\"p1\":[],\"p2\":[]}}}}",
+        seat_name(opp), arr(opp_hand),
+        seat_name(me), arr(my_lib), seat_name(opp), arr(opp_lib))
+}
+
 /// Build the hidden-hypothesis JSON for Game::from_observation, or None
 /// when the deck hypothesis cannot cover the observation. Mirrors
 /// hosted_policy.sample_hidden with the shared PRNG.
@@ -80,16 +95,39 @@ fn sample_hidden(obs: &PlayerObservation, prng: &mut SplitMix64,
     let opp_lib = &opp_pool[obs.opponent_hand_size
         ..obs.opponent_hand_size + obs.library_sizes[oi]];
     let my_lib = &my_pool[..obs.library_sizes[mi]];
-    let seat_name = |s: PlayerId| if s == PlayerId::One { "p1" } else { "p2" };
-    let arr = |xs: &[u16]| -> String {
-        let s: Vec<String> = xs.iter().map(|d| d.to_string()).collect();
-        format!("[{}]", s.join(","))
-    };
-    Some(format!(
-        "{{\"hands\":{{\"{}\":{}}},\"libraries\":{{\"{}\":{},\"{}\":{}}},\
-         \"outsideGame\":{{\"p1\":[],\"p2\":[]}}}}",
-        seat_name(opp), arr(opp_hand),
-        seat_name(me), arr(my_lib), seat_name(opp), arr(opp_lib)))
+    Some(hidden_json(me, opp, opp_hand, my_lib, opp_lib))
+}
+
+/// DETERMINISTIC "inert" hypothesis (no RNG): fill the opponent's hidden
+/// HAND with the most benign unseen cards (lands first, then stable by
+/// definition id) so the rollout opponent cannot spring threats from
+/// hand. Mirrors hosted_policy.inert_hidden / det_shared.inert_hidden
+/// EXACTLY. Card-kind ("Land") comes from the catalog-derived Tables.kind
+/// map (the same source extractor.card_kind uses). K collapses to 1.
+fn inert_hidden(obs: &PlayerObservation, decks: &Decks, my_deck: &str,
+                opp_deck: &str, tables: &Tables) -> Option<String> {
+    let me = obs.viewer;
+    let opp = if me == PlayerId::One { PlayerId::Two } else { PlayerId::One };
+    let (mi, oi) = (seat_idx(me), seat_idx(opp));
+    let mut my_pool = unseen_pool(decks, my_deck,
+                                  &seen_defs(obs, me, true));
+    let mut opp_pool = unseen_pool(decks, opp_deck,
+                                   &seen_defs(obs, opp, false));
+    let need_opp = obs.opponent_hand_size + obs.library_sizes[oi];
+    if my_pool.len() < obs.library_sizes[mi] || opp_pool.len() < need_opp {
+        return None;
+    }
+    // benign first: lands (kind == "Land"), then the rest; stable by def id.
+    opp_pool.sort_by_key(|&d| {
+        let land = tables.kind.get(&d).map(String::as_str) == Some("Land");
+        (if land { 0u8 } else { 1u8 }, d)
+    });
+    my_pool.sort();
+    let oh = obs.opponent_hand_size;
+    let opp_hand = &opp_pool[..oh];
+    let opp_lib = &opp_pool[oh..oh + obs.library_sizes[oi]];
+    let my_lib = &my_pool[..obs.library_sizes[mi]];
+    Some(hidden_json(me, opp, opp_hand, my_lib, opp_lib))
 }
 
 /// Shared exploration draw (splitmix64) -- an explicit spec mirrored in
@@ -144,16 +182,26 @@ fn explore_pick(obs: &PlayerObservation, actions: &[penta::Action],
 fn det_choose(real: &BotGame, seat: PlayerId, policy: &Policy,
               decks: &Decks, my_deck: &str, opp_deck: &str, k: usize,
               prng: &mut SplitMix64,
-              deck_slots: &[Vec<i32>; 2]) -> Option<usize> {
+              deck_slots: &[Vec<i32>; 2], inert: bool,
+              tables: &Tables) -> Option<usize> {
     let raw = real.observe_json(seat);
     let obs = real.core_game().observe(seat);
     let mut votes: std::collections::HashMap<usize, usize> =
         std::collections::HashMap::new();
     let mut sum_val: std::collections::HashMap<usize, f64> =
         std::collections::HashMap::new();
+    // Inert hypothesis is DETERMINISTIC and singular: K collapses to 1,
+    // no consensus vote (matches hosted_policy/det_shared inert mode).
+    let k = if inert { 1 } else { k };
     for _ in 0..k {
-        let hidden = match sample_hidden(&obs, prng, decks, my_deck, opp_deck) {
-            Some(h) => h, None => continue,
+        let hidden = if inert {
+            match inert_hidden(&obs, decks, my_deck, opp_deck, tables) {
+                Some(h) => h, None => continue,
+            }
+        } else {
+            match sample_hidden(&obs, prng, decks, my_deck, opp_deck) {
+                Some(h) => h, None => continue,
+            }
         };
         let rollout_seed = prng.next_u64();
         let world = match BotGame::from_observation_json(&raw, &hidden,
@@ -205,7 +253,7 @@ pub fn trace_game(policy: &Policy, decks: &Decks, d1: &str, d2: &str,
         }
         let (my, opp) = if seat == PlayerId::One { (d1, d2) } else { (d2, d1) };
         let idx = det_choose(&game, seat, policy, decks, my, opp, k, &mut prng,
-                             &deck_slots)
+                             &deck_slots, false, &policy.tables)
             .unwrap_or(0);
         out.push(idx as i64);
         if game.act(idx).is_err() { break; }
@@ -221,7 +269,7 @@ pub fn trace_game(policy: &Policy, decks: &Decks, d1: &str, d2: &str,
 pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
                  d1: &str, d2: &str, seed: u64, k: usize,
                  handcrafted: bool, learner: PlayerId, epsilon: f64,
-                 prior_frac: f64,
+                 prior_frac: f64, inert: bool,
                  x_out: &mut Vec<f32>, y_out: &mut Vec<f32>) -> usize {
     let opp_seat = if learner == PlayerId::One { PlayerId::Two }
                    else { PlayerId::One };
@@ -257,7 +305,7 @@ pub fn play_game(policy: &Policy, tables: &Tables, decks: &Decks,
             explore_pick(&obs, &acts, tables, prior_frac, &mut prng)
         } else {
             det_choose(&game, seat, policy, decks, my_deck, opp_deck, k,
-                       &mut prng, &deck_slots).unwrap_or(0)
+                       &mut prng, &deck_slots, inert, tables).unwrap_or(0)
         };
         if game.act(idx).is_err() { break; }
         n += 1;

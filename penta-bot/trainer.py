@@ -1283,6 +1283,12 @@ def main():
     parser.add_argument("--native-value-spzw", default="_native_value.spzw",
                         help="scratch path the current net is exported to "
                              "each round for the native runner")
+    parser.add_argument("--inert", action="store_true",
+                        help="in --native-rows mode, use the DETERMINISTIC "
+                             "'inert' hidden-hand hypothesis (opponent hand "
+                             "filled with the most benign unseen cards, lands "
+                             "first) instead of sampling K worlds; K collapses "
+                             "to 1. Row-lockstep verified vs det_shared inert.")
     args = parser.parse_args()
 
     target_schema = (Extractor(version=2, belief=True)
@@ -1390,8 +1396,9 @@ def main():
         weight = float(os.environ.get("PENTA_POLICY_WEIGHT", "0.15"))
         head_spzw = args.native_value_spzw + ".head"
         _export_spzw(Net.load(head_npz), head_spzw)
-        print(f"native-rows: spz_core determinized runner, K="
-              f"{args.determinized_k}, head {os.path.basename(head_npz)} "
+        print(f"native-rows: spz_core determinized runner, "
+              f"{'INERT (K=1)' if args.inert else f'K={args.determinized_k}'}"
+              f", head {os.path.basename(head_npz)} "
               f"@ w={weight}, search topk {args.search_topk} budget "
               f"{args.playout_budget}", flush=True)
         while played < args.games:
@@ -1417,7 +1424,7 @@ def main():
                 catalog_json, args.native_value_spzw, head_spzw, weight,
                 args.search_topk, args.playout_budget,
                 args.determinized_k, "builtin-decklists.json",
-                epsilon, args.prior_frac, specs)
+                epsilon, args.prior_frac, args.inert, specs)
             new = len(y_flat)
             if new:
                 rows = np.asarray(x_flat, dtype=np.float32).reshape(

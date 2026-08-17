@@ -83,13 +83,43 @@ def sample_hidden(obs, prng, decks, my_deck, opp_deck):
             "outsideGame": {"p1": [], "p2": []}}
 
 
+def inert_hidden(obs, decks, my_deck, opp_deck, card_kind):
+    """DETERMINISTIC 'inert' hypothesis (no RNG): opponent's hidden HAND
+    filled with the most benign unseen cards (lands first, then stable by
+    definition id). Mirrors det_runner.rs inert_hidden and
+    hosted_policy.inert_hidden EXACTLY. card_kind is ex.card_kind (the
+    same catalog-derived kind map the native Tables.kind carries)."""
+    me = obs["seat"]
+    opp = "p2" if me == "p1" else "p1"
+    mi, oi = (0, 1) if me == "p1" else (1, 0)
+    my_pool = _pool(decks, my_deck, _seen(obs, me, mi, True))
+    opp_pool = _pool(decks, opp_deck, _seen(obs, opp, oi, False))
+    need = obs.get("opponentHandSize", 0) + obs["librarySizes"][oi]
+    if len(my_pool) < obs["librarySizes"][mi] or len(opp_pool) < need:
+        return None
+    opp_pool.sort(key=lambda d: (0 if card_kind.get(d) == "Land" else 1, d))
+    my_pool.sort()
+    oh = obs.get("opponentHandSize", 0)
+    opp_hand = opp_pool[:oh]
+    opp_lib = opp_pool[oh:oh + obs["librarySizes"][oi]]
+    return {"hands": {opp: opp_hand},
+            "libraries": {me: my_pool[:obs["librarySizes"][mi]],
+                          opp: opp_lib},
+            "outsideGame": {"p1": [], "p2": []}}
+
+
 def det_choose(penta, real, seat, net, ex, decks, my_deck, opp_deck, k,
-               prng, search):
+               prng, search, inert=False):
     raw = real.observe(seat)
     obs = json.loads(raw)
     votes, sval = {}, {}
-    for _ in range(k):
-        hidden = sample_hidden(obs, prng, decks, my_deck, opp_deck)
+    # Inert hypothesis is deterministic and singular: K collapses to 1.
+    kk = 1 if inert else k
+    for _ in range(kk):
+        if inert:
+            hidden = inert_hidden(obs, decks, my_deck, opp_deck, ex.card_kind)
+        else:
+            hidden = sample_hidden(obs, prng, decks, my_deck, opp_deck)
         if hidden is None:
             continue
         rollout = prng.next_u64()
@@ -135,7 +165,7 @@ def _explore_pick(obs, acts, ex, prior_frac, prng):
 
 
 def play_game(penta, net, ex, decks, d1, d2, seed, k, handcrafted,
-              learner, search, epsilon=0.0, prior_frac=0.5):
+              learner, search, epsilon=0.0, prior_frac=0.5, inert=False):
     opp_seat = "p2" if learner == "p1" else "p1"
     # Belief schema: fix the two seats' decklists so ex.features() can
     # compute the hidden pools (p1 plays d1, p2 plays d2). No-op for the
@@ -167,7 +197,7 @@ def play_game(penta, net, ex, decks, d1, d2, seed, k, handcrafted,
             idx = _explore_pick(obs, acts, ex, prior_frac, prng)
         else:
             idx = det_choose(penta, game, seat, net, ex, decks, my_deck,
-                             opp_deck, k, prng, search)
+                             opp_deck, k, prng, search, inert=inert)
         if idx is None:
             idx = acts[0]["index"]
         game.act(idx); n += 1

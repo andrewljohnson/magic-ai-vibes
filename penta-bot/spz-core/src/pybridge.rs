@@ -191,7 +191,7 @@ fn stream_rows(
     py: Python<'_>,
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, top_k: usize, budget: usize, k_worlds: usize,
-    decklists_path: String, epsilon: f64, prior_frac: f64,
+    decklists_path: String, epsilon: f64, prior_frac: f64, inert: bool,
     specs: Vec<(String, String, u64, bool, bool)>,
 ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<usize>)> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
@@ -225,7 +225,7 @@ fn stream_rows(
                     let mut y = Vec::new();
                     let c = det_runner::play_game(&policy, &policy.tables,
                         &decks, d1, d2, *seed, k_worlds, *hc, learner,
-                        epsilon, prior_frac, &mut x, &mut y);
+                        epsilon, prior_frac, inert, &mut x, &mut y);
                     out.push((x, y, i, c));
                     i += threads;
                 }
