@@ -388,6 +388,34 @@ def sample_hidden(obs, rng, decks, our_deck, opp_deck):
     }
 
 
+def inert_hidden(obs, decks, our_deck, opp_deck, card_kind):
+    """DETERMINISTIC 'inert' hypothesis: fill the opponent's hidden HAND
+    with the most benign unseen cards (lands first) so the rollout
+    opponent cannot spring threats from hand -- the old C++ bot's
+    blank/inert-hidden-card model, approximated with real benign cards.
+    One world, no RNG (K collapses to 1)."""
+    me = obs["seat"]
+    opp = "p2" if me == "p1" else "p1"
+    mi, oi = (0, 1) if me == "p1" else (1, 0)
+    my_pool = unseen_pool(decks, our_deck, seen_defs(obs, me, mi, True))
+    opp_pool = unseen_pool(decks, opp_deck, seen_defs(obs, opp, oi, False))
+    need_opp = obs.get("opponentHandSize", 0) + obs["librarySizes"][oi]
+    if len(my_pool) < obs["librarySizes"][mi] or len(opp_pool) < need_opp:
+        return None
+    # benign first: lands, then the rest; stable by definition id.
+    opp_pool.sort(key=lambda d: (0 if card_kind.get(d) == "Land" else 1, d))
+    my_pool.sort()
+    oh = obs.get("opponentHandSize", 0)
+    opp_hand = opp_pool[:oh]
+    opp_lib = opp_pool[oh:oh + obs["librarySizes"][oi]]
+    return {
+        "hands": {opp: opp_hand},
+        "libraries": {me: my_pool[:obs["librarySizes"][mi]],
+                      opp: opp_lib},
+        "outsideGame": {"p1": [], "p2": []},
+    }
+
+
 class DeterminizedPolicy:
     """Full search on hypothesis worlds via Game.from_observation
     (lacker/penta#57): at each observation, sample K hidden-zone
@@ -416,7 +444,8 @@ class DeterminizedPolicy:
                  value_path="penta_net.npz",
                  head_path="policy_head.ckpt-dagger1.npz",
                  decklists_path="builtin-decklists.json",
-                 time_budget=20.0, fail_log=None):
+                 time_budget=20.0, fail_log=None, inert=False):
+        self.inert = inert  # single INERT world (opp hidden cards benign)
         import os as _os
         here = _os.path.dirname(_os.path.abspath(__file__))
         # trainer's blend loads from env at import; pin it before.
@@ -468,6 +497,9 @@ class DeterminizedPolicy:
         return best
 
     def build_hidden(self, obs, rng, opp_deck):
+        if self.inert:
+            return inert_hidden(obs, self.decks, self.our_deck, opp_deck,
+                                self.extractor.card_kind)
         return sample_hidden(obs, rng, self.decks, self.our_deck,
                              opp_deck)
 
@@ -501,7 +533,7 @@ class DeterminizedPolicy:
         votes = {}
         t0 = _time.time()
         survivors = 0
-        for k in range(self.k):
+        for k in range(1 if self.inert else self.k):
             if _time.time() - t0 > self.time_budget and votes:
                 break
             rng = np.random.default_rng()  # sampling entropy per world

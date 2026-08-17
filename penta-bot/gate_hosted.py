@@ -44,13 +44,13 @@ _WORKER = {}
 
 
 def _init(deck_name, head, weight, determinized=False, k_worlds=6,
-          value_net="penta_net.npz"):
+          value_net="penta_net.npz", inert=False):
     _WORKER["penta"] = load_penta18()
     if determinized:
         _WORKER["policy"] = DeterminizedPolicy(
             _WORKER["penta"], our_deck="Sligh", k_worlds=k_worlds,
             weight=weight, head_path=head, value_path=value_net,
-            fail_log=os.environ.get("RECON_FAIL_LOG"))
+            fail_log=os.environ.get("RECON_FAIL_LOG"), inert=inert)
     else:
         _WORKER["policy"] = HostedPolicy(head_path=head, weight=weight,
                                          value_path=value_net)
@@ -113,6 +113,10 @@ def main():
                              "(lacker/penta#57) instead of the shaped "
                              "observation-only policy")
     parser.add_argument("--k-worlds", type=int, default=6)
+    parser.add_argument("--inert", action="store_true",
+                        help="single INERT world (opp hidden cards = benign "
+                             "lands first, deterministic, K=1) -- the old C++ "
+                             "bot's blank-hidden-card search, vs K-world PIMC")
     parser.add_argument("--value-net", default="penta_net.npz",
                         help="value net for the policy (arm evaluation)")
     parser.add_argument("--opponent", default="handcrafted",
@@ -129,7 +133,7 @@ def main():
     t0 = time.time()
     with Pool(args.workers, initializer=_init,
               initargs=("", args.head, args.weight, args.determinized,
-                        args.k_worlds, args.value_net)) as pool:
+                        args.k_worlds, args.value_net, args.inert)) as pool:
         scores = pool.map(_play, tasks)
     took = time.time() - t0
     wins = sum(1 for s in scores if s == 1.0)
