@@ -29,9 +29,9 @@ HONEST = re.compile(r"honest K4/120:.*?->\s+([\d.]+)%")
 
 def build():
     train = []
-    for path in sorted(glob.glob(os.path.join(HERE, "chunk-belief-*.log")),
-                       key=lambda p: int(re.search(r"chunk-belief-(\d+)", p).group(1))):
-        n = int(re.search(r"chunk-belief-(\d+)", path).group(1))
+    for path in sorted(glob.glob(os.path.join(HERE, "chunk-inert-*.log")),
+                       key=lambda p: int(re.search(r"chunk-inert-(\d+)", p).group(1))):
+        n = int(re.search(r"chunk-inert-(\d+)", path).group(1))
         base = (n - 1) * CHUNK
         for line in open(path, errors="replace"):
             m = TRAIN.search(line)
@@ -44,7 +44,7 @@ def build():
     seen_belief_header = False
     if os.path.exists(progress):
         for line in open(progress, errors="replace"):
-            if "BELIEF curve" in line:
+            if "INERT curve" in line:
                 seen_belief_header = True
                 continue
             if not seen_belief_header:
