@@ -106,13 +106,20 @@ class GradAccum:
         self.gb1 += d_h.sum(axis=0)                         # (H,)
 
 
-def actor_ascend(net, grad, lr, scale=1.0):
-    """Momentum gradient ASCENT step (maximise the REINFORCE objective)."""
+def actor_ascend(net, grad, lr, scale=1.0, clip=2.0):
+    """Momentum gradient ASCENT step (maximise the REINFORCE objective),
+    with global gradient-norm clipping to stop the policy-gradient blow-up
+    (the high-lr run diverged after peaking; clipping bounds each step)."""
     v = net._vel
     g_w1 = grad.gw1 * scale
     g_b1 = grad.gb1 * scale
     g_w2 = grad.gw2 * scale
     g_b2 = grad.gb2 * scale
+    gnorm = np.sqrt(sum(float(np.sum(np.asarray(g) ** 2))
+                        for g in (g_w1, g_b1, g_w2, g_b2)))
+    if gnorm > clip:
+        f = clip / (gnorm + 1e-8)
+        g_w1 *= f; g_b1 *= f; g_w2 *= f; g_b2 *= f
     v[0] = MOMENTUM * v[0] + lr * g_w1
     v[1] = MOMENTUM * v[1] + lr * g_b1
     v[2] = MOMENTUM * v[2] + lr * g_w2
