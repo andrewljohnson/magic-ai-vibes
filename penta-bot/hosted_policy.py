@@ -623,12 +623,15 @@ class NativeIsmctsPolicy:
         self.fallback = HostedPolicy(value_path=value_path,
                                      head_path=head_path, weight=weight)
         # Native reads flat LE weights; export the npz pair once per worker.
-        vp = value_path if os.path.isabs(value_path) \
-            else os.path.join(here, value_path)
-        hp = head_path if os.path.isabs(head_path) \
-            else os.path.join(here, head_path)
-        self.value_spzw = vp + ".spzw"
-        self.head_spzw = hp + ".spzw"
+        # Per-PID paths in a temp dir so parallel gate workers never race on
+        # the same file (concurrent truncating writes corrupt the load).
+        import tempfile  # noqa: PLC0415
+        tag = f"{os.getpid()}"
+        tmp = tempfile.gettempdir()
+        base_v = os.path.splitext(os.path.basename(value_path))[0]
+        base_h = os.path.splitext(os.path.basename(head_path))[0]
+        self.value_spzw = os.path.join(tmp, f"{base_v}.{tag}.spzw")
+        self.head_spzw = os.path.join(tmp, f"{base_h}.{tag}.spzw")
         _export_spzw(self.fallback.net, self.value_spzw)
         _export_spzw(self.fallback.head, self.head_spzw)
 
@@ -642,6 +645,19 @@ class NativeIsmctsPolicy:
             # Server predates reconstruction.checkpoint: no world to build.
             self.fallback._our_deck = self.our_deck
             return self.fallback.choose(obs)
+        # Mulligan: Keep/Mulligan afterstates are featurally identical, so
+        # the search has no signal and always mulligans forever. Decide by
+        # the land-count rule (keep 2-5 lands), as the other policies do.
+        by_type = {}
+        for a in actions:
+            by_type.setdefault(a.get("type"), []).append(a)
+        if "KeepHand" in by_type:
+            ck = self.fallback.extractor.card_kind
+            lands = sum(1 for c in obs.get("hand", ())
+                        if ck.get(c["definition"]) == "Land")
+            if 2 <= lands <= 5 or "TakeMulligan" not in by_type:
+                return by_type["KeepHand"][0]["index"]
+            return by_type["TakeMulligan"][0]["index"]
         raw = raw_json if raw_json is not None else json.dumps(obs)
         opp_deck = classify_opponent(self.decks, obs) or self.our_deck
         try:
