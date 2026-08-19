@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 
 use penta::protocol::{protocol_actions, BotGame};
-use penta::{Action, Game, PlayerId, PlayerObservation};
+use penta::{Action, Game, HandcraftedPolicy, PlayerId, PlayerObservation, Policy as EnginePolicy};
 
 use crate::decks::Decks;
 use crate::det_runner::{inert_hidden, sample_hidden};
@@ -131,6 +131,25 @@ impl Tree {
     }
 }
 
+/// In-tree opponent model played at OPPONENT decision nodes during ISMCTS
+/// descent. The opponent is a fixed environment (never branched); this
+/// selects HOW its move is chosen.
+///
+///  * `Greedy` -- the value-net 1-ply argmax over the opponent's afterstates
+///    (`Policy::greedy_index_with`; the historical behavior). Accurate only
+///    if the net's self-play opponent resembles the real opponent, and it
+///    costs a full evaluate-all net pass on every opponent ply.
+///  * `Handcrafted` -- the engine's built-in handcrafted bot
+///    (`HandcraftedPolicy::choose_action`, the SAME rules-based policy that
+///    drives the real gate opponent). Cheap (no net eval) and matches the
+///    opponent we are actually trying to beat, so the search is not
+///    over-optimistic about the opponent's replies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum OpponentModel {
+    Greedy,
+    Handcrafted,
+}
+
 #[derive(Clone)]
 pub struct MctsConfig {
     pub iters: usize,
@@ -150,6 +169,15 @@ pub struct MctsConfig {
     /// M<=1 is the exact per-iteration behavior (default). Larger M trades a
     /// little determinization diversity for skipping the JSON reconstruction.
     pub redeterminize_m: usize,
+    /// In-tree opponent model at OPPONENT decision nodes (default
+    /// `Handcrafted`). See [`OpponentModel`].
+    pub opponent: OpponentModel,
+    /// Hard cap on OUR decisions in a single full game before the runner
+    /// abandons it (a straggler guard). A game that reaches the cap without
+    /// a natural result is scored as a LOSS (see `mcts_runner`), so no game
+    /// runs forever and the gate win% stays bounded. Search-only entries
+    /// ignore this. Default 800 (the historical uncapped-ish limit).
+    pub max_decisions: usize,
 }
 
 impl Default for MctsConfig {
@@ -162,6 +190,8 @@ impl Default for MctsConfig {
             leaf_playout: false,
             leaf_blend: false,
             redeterminize_m: 1,
+            opponent: OpponentModel::Handcrafted,
+            max_decisions: 800,
         }
     }
 }
@@ -224,8 +254,11 @@ impl<'a> Ismcts<'a> {
         }
     }
 
-    /// One determinized playout down the shared tree.
-    fn iterate(&self, tree: &mut Tree, world: &mut Game) {
+    /// One determinized playout down the shared tree. `opp` is the handcrafted
+    /// opponent policy instance reused for every opponent ply in this descent
+    /// (only touched when `cfg.opponent == Handcrafted`).
+    fn iterate(&self, tree: &mut Tree, world: &mut Game,
+               opp: &mut HandcraftedPolicy) {
         let mut path: Vec<ActionKey> = Vec::new();
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
@@ -240,18 +273,34 @@ impl<'a> Ismcts<'a> {
                 break;
             };
             let obs = world.observe(seat);
-            let actions = protocol_actions(&obs);
             if seat != self.our_seat {
-                // Opponent as a fixed environment: greedy 1-ply value net.
-                let i = timed!(3, self.policy.greedy_index_with(
-                    world, seat, &actions, self.deck_slots));
-                if world.apply(seat, actions[i].clone()).is_err() {
+                // Opponent as a fixed environment (never branched).
+                let opp_action = timed!(3, match self.cfg.opponent {
+                    OpponentModel::Handcrafted => {
+                        // The SAME handcrafted policy that drives the real gate
+                        // opponent, chosen on THIS determinization's redacted
+                        // observation. No net eval -- cheap and accurate.
+                        opp.choose_action(&obs)
+                    }
+                    OpponentModel::Greedy => {
+                        // Value-net 1-ply argmax over opponent afterstates.
+                        let actions = protocol_actions(&obs);
+                        let i = self.policy.greedy_index_with(
+                            world, seat, &actions, self.deck_slots);
+                        actions.into_iter().nth(i)
+                    }
+                });
+                let ok = opp_action
+                    .map(|a| world.apply(seat, a).is_ok())
+                    .unwrap_or(false);
+                if !ok {
                     leaf = timed!(4, self.leaf_eval(world));
                     break;
                 }
                 continue;
             }
             // OUR seat.
+            let actions = protocol_actions(&obs);
             if actions.len() == 1 {
                 let _ = world.apply(seat, actions[0].clone());
                 continue;
@@ -409,13 +458,19 @@ impl<'a> Ismcts<'a> {
         }
 
         let mut tree = Tree::new();
+        // One handcrafted opponent instance reused across all iterations (a
+        // cheap Arc-catalog clone; its only state is mulligan bookkeeping,
+        // inert on a mid-game reconstruction). Built even for the Greedy path
+        // -- it is simply never consulted there.
+        let mut opp = HandcraftedPolicy::new(
+            penta::poc::catalog().expect("built-in catalog"));
         let m = self.cfg.redeterminize_m;
         if m <= 1 {
             // Exact per-iteration determinization (matches ismcts_choose).
             for _ in 0..self.cfg.iters {
                 if let Some(mut world) =
                     timed!(0, self.determinize(raw, root_obs, prng)) {
-                    self.iterate(&mut tree, &mut world);
+                    self.iterate(&mut tree, &mut world, &mut opp);
                 }
             }
         } else {
@@ -429,7 +484,7 @@ impl<'a> Ismcts<'a> {
                 }
                 if let Some(t) = &template {
                     let mut world = t.clone();
-                    self.iterate(&mut tree, &mut world);
+                    self.iterate(&mut tree, &mut world, &mut opp);
                 }
             }
         }
@@ -590,6 +645,30 @@ mod tests {
         assert!(v4.iter().sum::<u32>() > 0, "M=4 search must run iterations");
     }
 
+    // --- Both in-tree opponent models drive a valid search: each returns an
+    // in-range root choice over a nonempty visit vector. The handcrafted
+    // model (default) descends the engine bot's legal replies; the greedy
+    // model descends the value-net argmax. --------------------------------
+    #[test]
+    fn both_opponent_models_search() {
+        let policy = make_policy(-4.0);
+        let decks = load_decks();
+        let slots = [vec![0i32; policy.tables.defs],
+                     vec![0i32; policy.tables.defs]];
+        let game = drive_to("Goblins", "The Deck", 5, |o, a| {
+            a.len() >= 3 && o.active_player == PlayerId::One
+        }).expect("a branching OUR decision exists");
+        for opp in [OpponentModel::Handcrafted, OpponentModel::Greedy] {
+            let cfg = MctsConfig { iters: 48, opponent: opp,
+                                   ..Default::default() };
+            let s = mk_search(&policy, &decks, &slots, "Goblins", "The Deck", cfg);
+            let (best, visits) = s.search(&game, &mut SplitMix64::new(3));
+            assert!(best < visits.len(), "{opp:?}: chosen index in range");
+            assert!(visits.iter().sum::<u32>() > 0,
+                    "{opp:?}: search must run iterations");
+        }
+    }
+
     // --- Test 3: forced single action returns 0 without expanding a tree. -
     #[test]
     fn forced_single_action_returns_zero() {
@@ -731,7 +810,11 @@ mod tests {
             a.len() >= 3 && o.active_player == PlayerId::One
         }).expect("a branching OUR decision exists");
         let iters = 256;
-        let cfg = MctsConfig { iters, ..Default::default() };
+        let opponent = match std::env::var("PENTA_PROF_OPP").as_deref() {
+            Ok("greedy") => OpponentModel::Greedy,
+            _ => OpponentModel::Handcrafted,
+        };
+        let cfg = MctsConfig { iters, opponent, ..Default::default() };
         let s = mk_search(&policy, &decks, &slots, "Goblins", "The Deck", cfg);
         // Warm up (page in), then measure.
         let mut prng = SplitMix64::new(7);

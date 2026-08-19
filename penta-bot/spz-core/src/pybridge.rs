@@ -32,6 +32,17 @@ fn build_policy(catalog: &str, value_path: &str, head_path: &str,
     })
 }
 
+/// Parse the in-tree opponent-model flag ("handcrafted" default, or
+/// "greedy") into the typed `MctsConfig.opponent`.
+fn parse_opponent(name: &str) -> PyResult<crate::mcts::OpponentModel> {
+    match name {
+        "handcrafted" => Ok(crate::mcts::OpponentModel::Handcrafted),
+        "greedy" => Ok(crate::mcts::OpponentModel::Greedy),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown opponent model: {other} (want \"handcrafted\" or \"greedy\")"))),
+    }
+}
+
 /// Seat-indexed decklist count arrays [p1, p2] for the belief block.
 fn deck_slots_for(tables: &Tables, decks: &crate::decks::Decks,
                   d1: &str, d2: &str) -> [Vec<i32>; 2] {
@@ -290,12 +301,15 @@ fn choose_world(catalog_json: String, value_path: String, head_path: String,
 /// iteration. Determinization draws use the shared splitmix64 seeded from
 /// `seed` so a run reproduces. `inert` selects the inert hypothesis.
 #[pyfunction]
+#[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
+    c_puct, budget, decklists_path, d1, d2, seed, inert, history,
+    opponent = "handcrafted".to_string()))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_choose_at(
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, iters: usize, c_puct: f64, budget: usize,
     decklists_path: String, d1: String, d2: String, seed: u64,
-    inert: bool, history: Vec<usize>,
+    inert: bool, history: Vec<usize>, opponent: String,
 ) -> PyResult<(usize, Vec<u32>)> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
@@ -323,6 +337,8 @@ fn ismcts_choose_at(
         iters, c_puct, inert,
         use_dominance: true, leaf_playout: false, leaf_blend: false,
         redeterminize_m: 1,
+        opponent: parse_opponent(&opponent)?,
+        max_decisions: 800,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -342,12 +358,15 @@ fn ismcts_choose_at(
 /// 0), matching the det path's fail-closed contract -- the Python wrapper
 /// substitutes its shaped fallback there.
 #[pyfunction]
+#[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
+    c_puct, budget, inert, decklists_path, raw_obs, our_deck, opp_deck,
+    opponent = "handcrafted".to_string()))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_choose(
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
     decklists_path: String, raw_obs: String,
-    our_deck: String, opp_deck: String,
+    our_deck: String, opp_deck: String, opponent: String,
 ) -> PyResult<usize> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
@@ -372,6 +391,8 @@ fn ismcts_choose(
         iters, c_puct, inert,
         use_dominance: true, leaf_playout: false, leaf_blend: false,
         redeterminize_m: 1,
+        opponent: parse_opponent(&opponent)?,
+        max_decisions: 800,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -393,6 +414,9 @@ fn ismcts_choose(
 /// games_finished). `specs` is the (d1, d2, our_p1, seed) per game
 /// (the caller builds the round-robin pairing, like ismcts_gate_stream).
 #[pyfunction]
+#[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
+    c_puct, budget, inert, redeterminize_m, decklists_path, specs, workers,
+    opponent = "handcrafted".to_string(), max_decisions = 800))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_gate(
     py: Python<'_>,
@@ -400,7 +424,8 @@ fn ismcts_gate(
     weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
     redeterminize_m: usize, decklists_path: String,
     specs: Vec<(String, String, bool, u64)>, workers: usize,
-) -> PyResult<(usize, usize, usize)> {
+    opponent: String, max_decisions: usize,
+) -> PyResult<(usize, usize, usize, usize)> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -410,6 +435,8 @@ fn ismcts_gate(
         iters, c_puct, inert, use_dominance: true,
         leaf_playout: false, leaf_blend: false,
         redeterminize_m: redeterminize_m.max(1),
+        opponent: parse_opponent(&opponent)?,
+        max_decisions,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
@@ -418,7 +445,11 @@ fn ismcts_gate(
     let decks = std::sync::Arc::new(decks);
     let specs = std::sync::Arc::new(specs);
     let cfg = std::sync::Arc::new(cfg);
-    let tallies: Vec<(usize, usize, usize)> = py.detach(|| {
+    // (wins, draws, finished, capped). `finished` counts every game that
+    // produced a score (natural OR capped-as-loss), so wins+draws+losses ==
+    // finished and the win% is bounded; `capped` reports how many of those
+    // losses were stragglers cut at the decision cap.
+    let tallies: Vec<(usize, usize, usize, usize)> = py.detach(|| {
         let mut handles = Vec::new();
         for t in 0..threads {
             let policy = policy.clone();
@@ -426,7 +457,7 @@ fn ismcts_gate(
             let specs = specs.clone();
             let cfg = cfg.clone();
             handles.push(std::thread::spawn(move || {
-                let (mut w, mut d, mut f) = (0usize, 0usize, 0usize);
+                let (mut w, mut d, mut f, mut cap) = (0usize, 0usize, 0usize, 0usize);
                 let mut i = t;
                 let mut x = Vec::new();
                 let mut y = Vec::new();
@@ -438,17 +469,20 @@ fn ismcts_gate(
                     if let Some(s) = out.score {
                         f += 1;
                         if s == 1.0 { w += 1; } else if s == 0.5 { d += 1; }
+                        if out.capped { cap += 1; }
                     }
                     i += threads;
                 }
-                (w, d, f)
+                (w, d, f, cap)
             }));
         }
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
-    let (mut wins, mut draws, mut finished) = (0, 0, 0);
-    for (w, d, f) in tallies { wins += w; draws += d; finished += f; }
-    Ok((wins, draws, finished))
+    let (mut wins, mut draws, mut finished, mut capped) = (0, 0, 0, 0);
+    for (w, d, f, c) in tallies {
+        wins += w; draws += d; finished += f; capped += c;
+    }
+    Ok((wins, draws, finished, capped))
 }
 
 /// Native SO-ISMCTS training rows: play `specs` full games vs the
@@ -456,6 +490,9 @@ fn ismcts_gate(
 /// rows as flat arrays (x_flat, y, row_counts_per_game), parallel to
 /// `stream_rows`. `specs` is (d1, d2, our_p1, seed) per game.
 #[pyfunction]
+#[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
+    c_puct, budget, inert, redeterminize_m, decklists_path, specs, workers,
+    opponent = "handcrafted".to_string(), max_decisions = 800))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_stream_rows(
     py: Python<'_>,
@@ -463,6 +500,7 @@ fn ismcts_stream_rows(
     weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
     redeterminize_m: usize, decklists_path: String,
     specs: Vec<(String, String, bool, u64)>, workers: usize,
+    opponent: String, max_decisions: usize,
 ) -> PyResult<(Vec<f32>, Vec<f32>, Vec<usize>)> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
@@ -473,6 +511,8 @@ fn ismcts_stream_rows(
         iters, c_puct, inert, use_dominance: true,
         leaf_playout: false, leaf_blend: false,
         redeterminize_m: redeterminize_m.max(1),
+        opponent: parse_opponent(&opponent)?,
+        max_decisions,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)

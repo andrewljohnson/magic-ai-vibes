@@ -69,6 +69,11 @@ def main():
     ap.add_argument("--inert", action="store_true")
     ap.add_argument("--seed-base", type=int, default=5_000_000)
     ap.add_argument("--decklists", default="builtin-decklists.json")
+    ap.add_argument("--opponent", default="handcrafted",
+                    choices=["handcrafted", "greedy"],
+                    help="in-tree opponent model")
+    ap.add_argument("--max-decisions", type=int, default=250,
+                    help="per-game OUR-decision cap; capped games score as loss")
     args = ap.parse_args()
 
     here = os.path.dirname(os.path.abspath(__file__))
@@ -85,17 +90,21 @@ def main():
     specs = build_specs(args.games, args.seed_base)
     print(f"NATIVE ISMCTS gate: iters={args.iters} M={args.redeterminize_m} "
           f"games={args.games} workers={args.workers or 'all'} "
+          f"opp={args.opponent} cap={args.max_decisions} "
           f"net={args.value_net}", flush=True)
     t0 = time.time()
-    wins, draws, finished = spz_core.ismcts_gate(
+    wins, draws, finished, capped = spz_core.ismcts_gate(
         catalog_json, value_spzw, head_spzw, args.weight, int(args.iters),
         float(args.c_puct), int(args.budget), bool(args.inert),
-        int(args.redeterminize_m), decklists_path, specs, int(args.workers))
+        int(args.redeterminize_m), decklists_path, specs, int(args.workers),
+        args.opponent, int(args.max_decisions))
     el = time.time() - t0
     losses = finished - wins - draws
     rate = (wins + 0.5 * draws) / finished if finished else 0.0
-    print(f"FINAL native iters={args.iters} M={args.redeterminize_m}: "
+    print(f"FINAL native iters={args.iters} M={args.redeterminize_m} "
+          f"opp={args.opponent}: "
           f"{wins}W {draws}D {losses}L / {finished} finished "
+          f"({capped} capped) "
           f"({args.games} played) -> {100*wins/max(finished,1):.1f}% wins, "
           f"{100*rate:.1f}% w/ draws (LCB {100*wilson_lcb(wins, finished):.1f}%) "
           f"[{el:.1f}s, {args.games/el:.3f} g/s]", flush=True)

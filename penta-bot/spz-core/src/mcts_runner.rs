@@ -21,19 +21,20 @@ use crate::policy::Policy;
 use crate::prng::SplitMix64;
 use crate::tables::Tables;
 
-/// Hard cap on OUR decisions in a single game (the opponent's plies are
-/// auto-run by the engine between our decisions and are not counted).
-const MAX_OUR_DECISIONS: usize = 800;
-
 fn seat_idx(s: PlayerId) -> usize { if s == PlayerId::One { 0 } else { 1 } }
 
 /// Outcome of one native ISMCTS game.
 pub struct GameOutcome {
-    /// 1.0 win / 0.5 draw / 0.0 loss for OUR seat; None if the game was
-    /// capped before finishing.
+    /// 1.0 win / 0.5 draw / 0.0 loss for OUR seat. A game that reached the
+    /// per-game decision cap without a natural result is scored 0.0 (loss)
+    /// with `capped = true`, so no game runs forever and the gate win%
+    /// stays bounded. `None` only when the game could not even start.
     pub score: Option<f64>,
-    /// Number of training rows appended (0 unless `record` and finished).
+    /// Number of training rows appended (0 unless `record` and finished
+    /// naturally -- capped games record no rows, their target is unknown).
     pub rows: usize,
+    /// Whether the game hit the decision cap instead of finishing.
+    pub capped: bool,
 }
 
 /// Play one full ISMCTS game. `d1`/`d2` are the p1/p2 decklists; `our_p1`
@@ -57,10 +58,11 @@ pub fn play_ismcts_game(
         tables.deck_slots(decks.get(d2).unwrap_or(&empty)),
     ];
 
+    let cap = cfg.max_decisions.max(1);
     let mut game = match BotGame::new(d1, d2, Opponent::Handcrafted,
                                       opp_seat, seed) {
         Ok(g) => g,
-        Err(_) => return GameOutcome { score: None, rows: 0 },
+        Err(_) => return GameOutcome { score: None, rows: 0, capped: false },
     };
     let search = Ismcts {
         policy, decks, deck_slots: &deck_slots,
@@ -71,7 +73,7 @@ pub fn play_ismcts_game(
 
     let mut rows: Vec<Vec<f32>> = Vec::new();
     let mut n = 0usize;
-    while game.result().is_none() && n < MAX_OUR_DECISIONS {
+    while game.result().is_none() && n < cap {
         // With a handcrafted opponent, only OUR seat is ever the decider.
         let Some(seat) = game.decision_seat() else { break };
         debug_assert_eq!(seat, our_seat);
@@ -86,7 +88,10 @@ pub fn play_ismcts_game(
     }
 
     let Some(res) = game.result() else {
-        return GameOutcome { score: None, rows: 0 };  // capped
+        // Straggler guard: reached the decision cap without a natural result.
+        // Score it as a LOSS so the game is counted (bounded win%) and record
+        // no training rows (the true outcome is unknown).
+        return GameOutcome { score: Some(0.0), rows: 0, capped: true };
     };
     let z = match res {
         penta::GameResult::Winner { winner, .. } =>
@@ -102,7 +107,7 @@ pub fn play_ismcts_game(
         }
     }
     let _ = seat_idx(our_seat);
-    GameOutcome { score: Some(z), rows: count }
+    GameOutcome { score: Some(z), rows: count, capped: false }
 }
 
 #[cfg(test)]
@@ -141,6 +146,62 @@ mod tests {
 
     fn cfg(iters: usize, m: usize) -> MctsConfig {
         MctsConfig { iters, redeterminize_m: m, ..Default::default() }
+    }
+
+    // --- The default opponent model is the handcrafted engine bot, and a
+    // full game against it completes with a legal-only line (an illegal
+    // opponent move would abort the game before a natural result). ---------
+    #[test]
+    fn handcrafted_opponent_game_completes() {
+        use crate::mcts::OpponentModel;
+        let policy = make_policy(-4.0);
+        let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let mut c = cfg(24, 1);
+        assert_eq!(c.opponent, OpponentModel::Handcrafted,
+                   "handcrafted must be the default in-tree opponent");
+        c.max_decisions = 400;
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        let out = play_ismcts_game(&policy, &policy.tables, &decks,
+            "Goblins", "The Deck", true, 42, &c, false, &mut x, &mut y);
+        let s = out.score.expect("game must finish");
+        assert!(s == 0.0 || s == 0.5 || s == 1.0);
+        assert!(!out.capped, "a 400-cap Goblins game should finish naturally");
+    }
+
+    // --- The Greedy opponent path still works behind the flag. -------------
+    #[test]
+    fn greedy_opponent_path_completes() {
+        use crate::mcts::OpponentModel;
+        let policy = make_policy(-4.0);
+        let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let mut c = cfg(16, 1);
+        c.opponent = OpponentModel::Greedy;
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        let out = play_ismcts_game(&policy, &policy.tables, &decks,
+            "Goblins", "The Deck", true, 7, &c, false, &mut x, &mut y);
+        let s = out.score.expect("game must finish");
+        assert!(s == 0.0 || s == 0.5 || s == 1.0);
+    }
+
+    // --- The per-game decision cap terminates a game deterministically:
+    // with a tiny cap the game cannot finish naturally, so it is scored as a
+    // capped loss (0.0) rather than running forever. -----------------------
+    #[test]
+    fn move_cap_terminates_long_game() {
+        let policy = make_policy(-4.0);
+        let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let mut c = cfg(8, 1);
+        c.max_decisions = 3;  // far too few OUR decisions to end a game
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        let out = play_ismcts_game(&policy, &policy.tables, &decks,
+            "Goblins", "The Deck", true, 42, &c, true, &mut x, &mut y);
+        assert_eq!(out.score, Some(0.0), "capped game scores as a loss");
+        assert!(out.capped, "hitting the cap must flag `capped`");
+        assert_eq!(out.rows, 0, "a capped game records no training rows");
+        assert!(y.is_empty(), "no targets emitted for a capped game");
     }
 
     // A full native ISMCTS game completes and returns a plausible score.
