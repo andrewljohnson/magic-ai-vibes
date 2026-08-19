@@ -58,8 +58,27 @@ def build():
             h = HONEST.search(line)
             if h and gates:
                 gates[-1]["handcrafted"] = float(h.group(1))  # honest overrides
+    # ISMCTS-phase gate results (ismcts-gate-i<ITERS>.log) -- the CURRENT
+    # activity: a fixed 825 net searched with SO-ISMCTS at various iters,
+    # vs handcrafted. iters parsed from the filename.
+    RES = re.compile(r"(\d+) games:.*?->\s+([\d.]+)%\s+\(LCB\s+([\d.]+)%\)")
+    ismcts = []
+    for path in sorted(glob.glob(os.path.join(HERE, "ismcts-gate-*.log"))):
+        m = re.search(r"ismcts-gate-i(\d+)", path)
+        iters = int(m.group(1)) if m else None
+        for line in open(path, errors="replace"):
+            r = RES.search(line)
+            if r:
+                ismcts.append({"iters": iters, "games": int(r.group(1)),
+                               "winpct": float(r.group(2)),
+                               "lcb": float(r.group(3))})
+    ismcts.sort(key=lambda g: (g["iters"] or 0))
     return {"updated": datetime.now().strftime("%H:%M:%S"),
-            "baseline": 31.6, "gates": gates, "train": train}
+            "baseline": 31.6, "inert": 29.9, "target": 50.0,
+            "phase": ("ISMCTS evaluation (Phase 1): fixed 825 net + SO-ISMCTS "
+                      "search vs handcrafted. No training curve is running yet "
+                      "— training resumes at Phase 3 (ISMCTS self-play)."),
+            "ismcts_gates": ismcts, "gates": gates, "train": train}
 
 
 def main():
