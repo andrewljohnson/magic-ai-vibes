@@ -130,6 +130,86 @@ pub(crate) fn inert_hidden(obs: &PlayerObservation, decks: &Decks, my_deck: &str
     Some(hidden_json(me, opp, opp_hand, my_lib, opp_lib))
 }
 
+/// Bootstrap a hidden hypothesis DIRECTLY from the raw observation JSON,
+/// for the hosted ISMCTS entry that has no live `BotGame` to observe. It
+/// mirrors `sample_hidden` / `inert_hidden`'s pool logic (same
+/// `unseen_pool` + `hidden_json` primitives) but reads the seen
+/// definitions and zone sizes out of the protocol JSON `Value`. Used ONLY
+/// to reconstruct the FIRST world, whose typed root `PlayerObservation` is
+/// then taken for every subsequent (typed) determinization -- so this
+/// JSON path runs once per move, not per iteration.
+pub(crate) fn bootstrap_hidden_json(
+    v: &serde_json::Value, prng: &mut SplitMix64, decks: &Decks,
+    my_deck: &str, opp_deck: &str, inert: bool, tables: &Tables,
+) -> Option<String> {
+    let seat = v.get("seat")?.as_str()?;
+    let me = if seat == "p1" { PlayerId::One } else { PlayerId::Two };
+    let opp = if me == PlayerId::One { PlayerId::Two } else { PlayerId::One };
+    let (mi, oi) = (seat_idx(me), seat_idx(opp));
+    let mut seen_me: Vec<u16> = Vec::new();
+    let mut seen_opp: Vec<u16> = Vec::new();
+    // Our hand (we see it) counts as our seen pool.
+    if let Some(hand) = v.get("hand").and_then(|h| h.as_array()) {
+        for c in hand {
+            if let Some(d) = c.get("definition").and_then(serde_json::Value::as_u64) {
+                seen_me.push(d as u16);
+            }
+        }
+    }
+    // Battlefield permanents by controller.
+    if let Some(bf) = v.get("battlefield").and_then(|h| h.as_array()) {
+        for p in bf {
+            let d = p.get("definition").and_then(serde_json::Value::as_u64);
+            let ctrl = p.get("controller").and_then(serde_json::Value::as_str);
+            if let (Some(d), Some(ctrl)) = (d, ctrl) {
+                if ctrl == seat { seen_me.push(d as u16); }
+                else { seen_opp.push(d as u16); }
+            }
+        }
+    }
+    // graveyards / exiles are [p1_pile, p2_pile].
+    for zone in ["graveyards", "exiles"] {
+        if let Some(piles) = v.get(zone).and_then(|z| z.as_array()) {
+            for (idx, pile) in piles.iter().enumerate() {
+                let Some(cards) = pile.as_array() else { continue };
+                for c in cards {
+                    if let Some(d) = c.get("definition")
+                        .and_then(serde_json::Value::as_u64) {
+                        if idx == mi { seen_me.push(d as u16); }
+                        else if idx == oi { seen_opp.push(d as u16); }
+                    }
+                }
+            }
+        }
+    }
+    let lib_sizes = v.get("librarySizes")?.as_array()?;
+    let my_lib_n = lib_sizes.get(mi)?.as_u64()? as usize;
+    let opp_lib_n = lib_sizes.get(oi)?.as_u64()? as usize;
+    let opp_hand_n = v.get("opponentHandSize")
+        .and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
+
+    let mut my_pool = unseen_pool(decks, my_deck, &seen_me);
+    let mut opp_pool = unseen_pool(decks, opp_deck, &seen_opp);
+    if inert {
+        opp_pool.sort_by_key(|&d| {
+            let land = tables.kind.get(&d).map(String::as_str) == Some("Land");
+            (if land { 0u8 } else { 1u8 }, d)
+        });
+        my_pool.sort();
+    } else {
+        prng.shuffle(&mut my_pool);
+        prng.shuffle(&mut opp_pool);
+    }
+    let need_opp = opp_hand_n + opp_lib_n;
+    if my_pool.len() < my_lib_n || opp_pool.len() < need_opp {
+        return None;
+    }
+    let opp_hand = &opp_pool[..opp_hand_n];
+    let opp_lib = &opp_pool[opp_hand_n..opp_hand_n + opp_lib_n];
+    let my_lib = &my_pool[..my_lib_n];
+    Some(hidden_json(me, opp, opp_hand, my_lib, opp_lib))
+}
+
 /// Shared exploration draw (splitmix64) -- an explicit spec mirrored in
 /// det_shared.py so exploration rows lockstep. First_bot-shaped prior:
 /// land > biggest-power castable > attacker > uniform. Draw counts are
