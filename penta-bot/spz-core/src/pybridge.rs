@@ -332,6 +332,58 @@ fn ismcts_choose_at(
     Ok(search.search(&game, &mut prng))
 }
 
+/// One native SO-ISMCTS choice for LIVE hosted play, from a raw protocol
+/// observation (no local game object) -- the observation-based sibling of
+/// `ismcts_choose_at`, mirroring `DeterminizedPolicy.choose`. `our_deck`
+/// is our known deck; `opp_deck` is the caller's best-overlap guess (both
+/// seat-relative). Returns the chosen protocol action index; on any
+/// reconstruction/parse failure it returns the first legal action (index
+/// 0), matching the det path's fail-closed contract -- the Python wrapper
+/// substitutes its shaped fallback there.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn ismcts_choose(
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
+    decklists_path: String, raw_obs: String,
+    our_deck: String, opp_deck: String,
+) -> PyResult<usize> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 0, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let value: serde_json::Value = serde_json::from_str(&raw_obs)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let seat = value.get("seat").and_then(|s| s.as_str())
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
+            "observation missing seat"))?;
+    let our_seat = if seat == "p1" { penta::PlayerId::One }
+                   else { penta::PlayerId::Two };
+    // Seat-indexed decklists for the belief block (p1 plays d1, p2 plays d2).
+    let (d1, d2) = if our_seat == penta::PlayerId::One {
+        (our_deck.as_str(), opp_deck.as_str())
+    } else {
+        (opp_deck.as_str(), our_deck.as_str())
+    };
+    let deck_slots = deck_slots_for(&policy.tables, &decks, d1, d2);
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert,
+        use_dominance: true, leaf_playout: false, leaf_blend: false,
+    };
+    let search = crate::mcts::Ismcts {
+        policy: &policy, decks: &decks, deck_slots: &deck_slots,
+        my_deck: &our_deck, opp_deck: &opp_deck, our_seat, cfg,
+    };
+    // Per-move determinism: seed from the observation bytes so the same
+    // decision reproduces its world draws.
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    raw_obs.hash(&mut hasher);
+    let mut prng = crate::prng::SplitMix64::new(hasher.finish() ^ 0xD1B5);
+    Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
+}
+
 #[pyfunction]
 fn prng_probe(seed: u64, count: usize) -> Vec<u64> {
     let mut p = crate::prng::SplitMix64::new(seed);
@@ -353,6 +405,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(bench_native_selfplay, m)?)?;
     m.add_function(wrap_pyfunction!(choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_choose_at, m)?)?;
+    m.add_function(wrap_pyfunction!(ismcts_choose, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(prng_probe, m)?)?;

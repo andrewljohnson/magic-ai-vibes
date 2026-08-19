@@ -24,7 +24,8 @@ from multiprocessing import Pool
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from hosted_policy import DeterminizedPolicy, HostedPolicy  # noqa: E402
+from hosted_policy import (  # noqa: E402
+    DeterminizedPolicy, HostedPolicy, NativeIsmctsPolicy)
 
 DECKS = ("Sligh", "White Weenie", "The Deck", "Counterburn",
          "Goblins", "Erhnamgeddon", "Mono Black", "Jeskai Aggro")
@@ -44,9 +45,14 @@ _WORKER = {}
 
 
 def _init(deck_name, head, weight, determinized=False, k_worlds=6,
-          value_net="penta_net.npz", inert=False):
+          value_net="penta_net.npz", inert=False, native_ismcts=False,
+          iters=150, c_puct=1.5, budget=400):
     _WORKER["penta"] = load_penta18()
-    if determinized:
+    if native_ismcts:
+        _WORKER["policy"] = NativeIsmctsPolicy(
+            our_deck="Sligh", iters=iters, c_puct=c_puct, budget=budget,
+            inert=inert, weight=weight, head_path=head, value_path=value_net)
+    elif determinized:
         _WORKER["policy"] = DeterminizedPolicy(
             _WORKER["penta"], our_deck="Sligh", k_worlds=k_worlds,
             weight=weight, head_path=head, value_path=value_net,
@@ -113,6 +119,17 @@ def main():
                              "(lacker/penta#57) instead of the shaped "
                              "observation-only policy")
     parser.add_argument("--k-worlds", type=int, default=6)
+    parser.add_argument("--native-ismcts", action="store_true",
+                        help="native SO-ISMCTS search (spz_core.ismcts_choose): "
+                             "one shared tree pooling stats across "
+                             "determinizations, vs the --determinized "
+                             "K-worlds-and-vote baseline")
+    parser.add_argument("--iters", type=int, default=150,
+                        help="ISMCTS iterations per move (--native-ismcts)")
+    parser.add_argument("--c-puct", type=float, default=1.5,
+                        help="PUCT exploration constant (--native-ismcts)")
+    parser.add_argument("--budget", type=int, default=400,
+                        help="playout decision budget (--native-ismcts)")
     parser.add_argument("--inert", action="store_true",
                         help="single INERT world (opp hidden cards = benign "
                              "lands first, deterministic, K=1) -- the old C++ "
@@ -133,7 +150,9 @@ def main():
     t0 = time.time()
     with Pool(args.workers, initializer=_init,
               initargs=("", args.head, args.weight, args.determinized,
-                        args.k_worlds, args.value_net, args.inert)) as pool:
+                        args.k_worlds, args.value_net, args.inert,
+                        args.native_ismcts, args.iters, args.c_puct,
+                        args.budget)) as pool:
         scores = pool.map(_play, tasks)
     took = time.time() - t0
     wins = sum(1 for s in scores if s == 1.0)

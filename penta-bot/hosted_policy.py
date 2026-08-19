@@ -576,3 +576,80 @@ class DeterminizedPolicy:
                                     "observation": obs}) + "\n")
         except OSError:
             pass
+
+
+def _export_spzw(net, path):
+    """Write a Net to the flat LE binary spz_core reads (u64 hidden, u64
+    inputs, then w1/b1/w2/b2 f64) -- same layout as trainer._export_spzw."""
+    hidden, inputs = net.w1.shape
+    with open(path, "wb") as f:
+        f.write(np.array([hidden, inputs], dtype="<u8").tobytes())
+        f.write(np.ascontiguousarray(net.w1, dtype="<f8").tobytes())
+        f.write(np.ascontiguousarray(net.b1, dtype="<f8").tobytes())
+        f.write(np.ascontiguousarray(net.w2, dtype="<f8").tobytes())
+        f.write(np.array([net.b2], dtype="<f8").tobytes())
+
+
+class NativeIsmctsPolicy:
+    """Hosted play driven by the native SO-ISMCTS search
+    (spz_core.ismcts_choose): pools statistics across determinizations in
+    one shared tree, versus the DeterminizedPolicy K-worlds-and-VOTE
+    baseline. Holds the SAME certified pair (value net + policy head @
+    weight) as the det path -- this isolates the SEARCH change.
+
+    Fail-closed exactly like DeterminizedPolicy: pre-checkpoint servers and
+    any native error fall back to the shaped observation-only HostedPolicy.
+    """
+
+    def __init__(self, our_deck, iters=150, c_puct=1.5, budget=400,
+                 inert=False, weight=0.15, value_path="penta_net.npz",
+                 head_path="policy_head.ckpt-dagger1.npz",
+                 decklists_path="builtin-decklists.json"):
+        import spz_core  # noqa: PLC0415
+        from extractor import pinned_catalog  # noqa: PLC0415
+        here = os.path.dirname(os.path.abspath(__file__))
+        self._spz = spz_core
+        self.our_deck = our_deck
+        self.iters = iters
+        self.c_puct = c_puct
+        self.budget = budget
+        self.inert = inert
+        self.weight = weight
+        self.decklists_path = (decklists_path if os.path.isabs(decklists_path)
+                               else os.path.join(here, decklists_path))
+        self.catalog_json = json.dumps(pinned_catalog())
+        self.decks = load_decklists(self.decklists_path)
+        # Shaped observation-only fallback (same nets, npz).
+        self.fallback = HostedPolicy(value_path=value_path,
+                                     head_path=head_path, weight=weight)
+        # Native reads flat LE weights; export the npz pair once per worker.
+        vp = value_path if os.path.isabs(value_path) \
+            else os.path.join(here, value_path)
+        hp = head_path if os.path.isabs(head_path) \
+            else os.path.join(here, head_path)
+        self.value_spzw = vp + ".spzw"
+        self.head_spzw = hp + ".spzw"
+        _export_spzw(self.fallback.net, self.value_spzw)
+        _export_spzw(self.fallback.head, self.head_spzw)
+
+    def choose(self, obs, raw_json=None):
+        actions = obs.get("legalActions") or ()
+        if not actions:
+            return 0
+        if len(actions) == 1:
+            return actions[0]["index"]
+        if "checkpoint" not in obs:
+            # Server predates reconstruction.checkpoint: no world to build.
+            self.fallback._our_deck = self.our_deck
+            return self.fallback.choose(obs)
+        raw = raw_json if raw_json is not None else json.dumps(obs)
+        opp_deck = classify_opponent(self.decks, obs) or self.our_deck
+        try:
+            return self._spz.ismcts_choose(
+                self.catalog_json, self.value_spzw, self.head_spzw,
+                self.weight, int(self.iters), float(self.c_puct),
+                int(self.budget), bool(self.inert), self.decklists_path,
+                raw, self.our_deck, opp_deck)
+        except Exception:
+            self.fallback._our_deck = self.our_deck
+            return self.fallback.choose(obs)
