@@ -1289,6 +1289,22 @@ def main():
                              "filled with the most benign unseen cards, lands "
                              "first) instead of sampling K worlds; K collapses "
                              "to 1. Row-lockstep verified vs det_shared inert.")
+    parser.add_argument("--native-ismcts", action="store_true",
+                        help="generate self-play VALUE rows with the native "
+                             "SO-ISMCTS game runner (spz_core."
+                             "ismcts_stream_rows): OUR seat searches, the "
+                             "opponent is the engine's handcrafted bot; rows "
+                             "are (redacted afterstate, z). Python keeps "
+                             "SGD/ring/save. Requires PENTA_ENGINE_DIR and "
+                             "the policy-head env vars.")
+    parser.add_argument("--ismcts-iters", type=int, default=64,
+                        help="ISMCTS iterations per move (--native-ismcts)")
+    parser.add_argument("--ismcts-c-puct", type=float, default=1.5,
+                        help="PUCT exploration constant (--native-ismcts)")
+    parser.add_argument("--ismcts-redeterminize-m", type=int, default=1,
+                        help="re-determinize every M iterations "
+                             "(--native-ismcts); M>1 reuses a reconstructed "
+                             "world for M descents")
     args = parser.parse_args()
 
     target_schema = (Extractor(version=2, belief=True)
@@ -1382,6 +1398,85 @@ def main():
 
     played = 0
     t_start = time.time()
+
+    if args.native_ismcts:
+        # Native SO-ISMCTS value-row generation (spz_core.ismcts_stream_rows).
+        # OUR seat searches; the opponent is the engine's handcrafted bot.
+        # Python keeps SGD, the replay ring, save. Rows are (redacted
+        # afterstate features, z) with TD(1) targets == the game outcome.
+        import json as _json  # noqa: PLC0415
+        import spz_core  # noqa: PLC0415
+        from extractor import pinned_catalog  # noqa: PLC0415
+        catalog_json = _json.dumps(pinned_catalog())
+        head_npz = os.environ["PENTA_POLICY_NET"]
+        weight = float(os.environ.get("PENTA_POLICY_WEIGHT", "0.15"))
+        head_spzw = args.native_value_spzw + ".head"
+        _export_spzw(Net.load(head_npz), head_spzw)
+        print(f"native-ismcts: SO-ISMCTS runner iters={args.ismcts_iters} "
+              f"c_puct={args.ismcts_c_puct} M={args.ismcts_redeterminize_m} "
+              f"{'INERT' if args.inert else 'PIMC'}, head "
+              f"{os.path.basename(head_npz)} @ w={weight} budget "
+              f"{args.playout_budget}", flush=True)
+        while played < args.games:
+            round_n = min(args.round_games, args.games - played)
+            specs = []
+            for g in range(round_n):
+                number = played + g
+                if args.seat_oversample:
+                    d1, d2 = matchup_train(number)
+                    ls = learner_seat_for(number, period=len(TRAIN_PAIRS))
+                else:
+                    d1, d2 = matchup(number)
+                    ls = learner_seat_for(number)
+                seed = args.seed_base + number
+                specs.append((d1, d2, ls == "p1", seed))
+            _export_spzw(net, args.native_value_spzw)
+            x_flat, y_flat, counts = spz_core.ismcts_stream_rows(
+                catalog_json, args.native_value_spzw, head_spzw, weight,
+                args.ismcts_iters, args.ismcts_c_puct, args.playout_budget,
+                args.inert, args.ismcts_redeterminize_m,
+                "builtin-decklists.json", specs, args.workers)
+            new = len(y_flat)
+            if new:
+                rows = np.asarray(x_flat, dtype=np.float32).reshape(
+                    new, extractor.size)
+                targets = np.asarray(y_flat, dtype=np.float32)
+                for i in range(new):
+                    replay_X[replay_cursor] = rows[i]
+                    replay_y[replay_cursor] = targets[i]
+                    replay_cursor = (replay_cursor + 1) % args.replay_capacity
+                replay_size = min(replay_size + new, args.replay_capacity)
+            played += round_n
+            caps = sum(1 for c in counts if c == 0)
+            steps = max(1, 2 * new // args.batch)
+            losses = []
+            for _ in range(steps):
+                lr = args.lr
+                if args.lr_warmup > 0:
+                    lr *= min(1.0, (updates_done + 1) / args.lr_warmup)
+                pick = train_rng.integers(0, max(1, replay_size),
+                                          size=args.batch)
+                losses.append(net.train_batch(
+                    replay_X[pick], replay_y[pick], lr))
+                updates_done += 1
+            net.save(args.out, engine_version=extractor.engine_version,
+                     protocol_version=extractor.protocol_version,
+                     hidden=args.hidden, games=played,
+                     search_topk=args.search_topk,
+                     feature_schema=extractor.version,
+                     td_lambda_per_turn=args.td_lambda_per_turn,
+                     seat_oversample=int(args.seat_oversample),
+                     determinized_k=args.determinized_k,
+                     native_rows=1)
+            rate = played / (time.time() - t_start)
+            print(f"games {played:5d}  loss {np.mean(losses):.4f}  "
+                  f"samples {new:5d}  replay {replay_size:6d}  "
+                  f"caps {caps}  {rate:5.3f} games/s", flush=True)
+        if args.ring:
+            save_ring(args.ring, replay_X, replay_y, replay_size,
+                      replay_cursor, args.replay_capacity, net)
+        print(f"done: {played} games -> {args.out}")
+        return
 
     if args.native_rows:
         # Native determinized row generation (spz_core). Python still owns

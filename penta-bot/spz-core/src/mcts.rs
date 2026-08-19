@@ -47,6 +47,42 @@ use crate::extract::features;
 use crate::policy::{terminal_value, Policy};
 use crate::prng::SplitMix64;
 
+/// Lightweight per-phase profiler, compiled in ONLY under `--features prof`.
+/// Buckets: 0=determinize, 1=available(dominance), 2=action_prior,
+/// 3=opponent greedy model, 4=leaf_eval. The residual (total - sum) is the
+/// tree descent / apply / observe / protocol_actions bookkeeping.
+#[cfg(feature = "prof")]
+pub mod prof {
+    use std::cell::Cell;
+    pub const N: usize = 5;
+    pub const NAMES: [&str; N] =
+        ["determinize", "available", "action_prior", "opp_greedy", "leaf_eval"];
+    thread_local! {
+        static ACC: [Cell<u64>; N] = Default::default();
+    }
+    pub fn add(bucket: usize, ns: u64) {
+        ACC.with(|a| a[bucket].set(a[bucket].get() + ns));
+    }
+    pub fn reset() { ACC.with(|a| for c in a { c.set(0); }); }
+    pub fn snapshot() -> [u64; N] {
+        ACC.with(|a| std::array::from_fn(|i| a[i].get()))
+    }
+}
+
+#[cfg(feature = "prof")]
+macro_rules! timed {
+    ($b:expr, $body:expr) => {{
+        let _t = std::time::Instant::now();
+        let r = $body;
+        prof::add($b, _t.elapsed().as_nanos() as u64);
+        r
+    }};
+}
+#[cfg(not(feature = "prof"))]
+macro_rules! timed {
+    ($b:expr, $body:expr) => { $body };
+}
+
 /// Determinization-independent descriptor of one OUR action: the typed
 /// `Action` (type + stable ids + choice params). See the module crux note.
 pub type ActionKey = Action;
@@ -109,6 +145,11 @@ pub struct MctsConfig {
     pub leaf_playout: bool,
     /// Leaf eval blend: false = value net only (default), true = value+head.
     pub leaf_blend: bool,
+    /// Re-determinize the hidden world every M iterations instead of every
+    /// iteration (reuse one reconstructed world for M consecutive descents).
+    /// M<=1 is the exact per-iteration behavior (default). Larger M trades a
+    /// little determinization diversity for skipping the JSON reconstruction.
+    pub redeterminize_m: usize,
 }
 
 impl Default for MctsConfig {
@@ -120,6 +161,7 @@ impl Default for MctsConfig {
             use_dominance: true,
             leaf_playout: false,
             leaf_blend: false,
+            redeterminize_m: 1,
         }
     }
 }
@@ -194,16 +236,17 @@ impl<'a> Ismcts<'a> {
                 break;
             }
             let Some(seat) = world.decision_player() else {
-                leaf = self.leaf_eval(world);
+                leaf = timed!(4, self.leaf_eval(world));
                 break;
             };
             let obs = world.observe(seat);
             let actions = protocol_actions(&obs);
             if seat != self.our_seat {
                 // Opponent as a fixed environment: greedy 1-ply value net.
-                let i = self.policy.greedy_index(world, seat, self.deck_slots);
+                let i = timed!(3, self.policy.greedy_index_with(
+                    world, seat, &actions, self.deck_slots));
                 if world.apply(seat, actions[i].clone()).is_err() {
-                    leaf = self.leaf_eval(world);
+                    leaf = timed!(4, self.leaf_eval(world));
                     break;
                 }
                 continue;
@@ -213,7 +256,7 @@ impl<'a> Ismcts<'a> {
                 let _ = world.apply(seat, actions[0].clone());
                 continue;
             }
-            let avail = self.available(world, &obs, &actions, seat);
+            let avail = timed!(1, self.available(world, &obs, &actions, seat));
             if avail.len() == 1 {
                 let _ = world.apply(seat, actions[avail[0]].clone());
                 continue;
@@ -226,7 +269,7 @@ impl<'a> Ismcts<'a> {
                 let need_prior = !tree.arena[node_idx].stats
                     .get(&key).map(|s| s.prior_set).unwrap_or(false);
                 let prior = if need_prior {
-                    self.action_prior(world, seat, &actions, i)
+                    timed!(2, self.action_prior(world, seat, &actions, i))
                 } else { 0.0 };
                 let s = tree.arena[node_idx].stats.entry(key).or_default();
                 if need_prior { s.prior = prior; s.prior_set = true; }
@@ -240,7 +283,7 @@ impl<'a> Ismcts<'a> {
             path.push(sel_key);
             if first_visit {
                 // Expansion: leaf-eval the afterstate and stop descending.
-                leaf = self.leaf_eval(world);
+                leaf = timed!(4, self.leaf_eval(world));
                 break;
             }
         }
@@ -366,9 +409,28 @@ impl<'a> Ismcts<'a> {
         }
 
         let mut tree = Tree::new();
-        for _ in 0..self.cfg.iters {
-            if let Some(mut world) = self.determinize(raw, root_obs, prng) {
-                self.iterate(&mut tree, &mut world);
+        let m = self.cfg.redeterminize_m;
+        if m <= 1 {
+            // Exact per-iteration determinization (matches ismcts_choose).
+            for _ in 0..self.cfg.iters {
+                if let Some(mut world) =
+                    timed!(0, self.determinize(raw, root_obs, prng)) {
+                    self.iterate(&mut tree, &mut world);
+                }
+            }
+        } else {
+            // Reuse one reconstructed world for M consecutive iterations:
+            // resample the template every M-th iter, clone it per descent
+            // (iterate mutates its world forward).
+            let mut template: Option<Game> = None;
+            for it in 0..self.cfg.iters {
+                if it % m == 0 {
+                    template = timed!(0, self.determinize(raw, root_obs, prng));
+                }
+                if let Some(t) = &template {
+                    let mut world = t.clone();
+                    self.iterate(&mut tree, &mut world);
+                }
             }
         }
 
@@ -499,6 +561,35 @@ mod tests {
         }
     }
 
+    // --- redeterminize_m: M=1 is deterministic/reproducible on a fixed
+    // seed (the exact per-iteration path), and M>1 still returns a valid,
+    // in-range choice with a nonempty visit vector.
+    #[test]
+    fn redeterminize_m_behaves() {
+        let policy = make_policy(-4.0);
+        let decks = load_decks();
+        let slots = [vec![0i32; policy.tables.defs],
+                     vec![0i32; policy.tables.defs]];
+        let game = drive_to("Goblins", "The Deck", 5, |o, a| {
+            a.len() >= 3 && o.active_player == PlayerId::One
+        }).expect("a branching OUR decision exists");
+        // M=1 twice from the same seed -> identical (best, visits): this is
+        // the same code path ismcts_choose uses.
+        let c1 = MctsConfig { iters: 64, redeterminize_m: 1, ..Default::default() };
+        let s1 = mk_search(&policy, &decks, &slots, "Goblins", "The Deck", c1);
+        let (b_a, v_a) = s1.search(&game, &mut SplitMix64::new(3));
+        let (b_b, v_b) = s1.search(&game, &mut SplitMix64::new(3));
+        assert_eq!(b_a, b_b, "M=1 must be reproducible on a fixed seed");
+        assert_eq!(v_a, v_b);
+        // M=4: still a valid in-range choice, tree expanded.
+        let c4 = MctsConfig { iters: 64, redeterminize_m: 4, ..Default::default() };
+        let s4 = mk_search(&policy, &decks, &slots, "Goblins", "The Deck", c4);
+        let (b4, v4) = s4.search(&game, &mut SplitMix64::new(3));
+        assert!(b4 < v4.len(), "chosen index in range");
+        assert_eq!(v_a.len(), v4.len(), "same root action count");
+        assert!(v4.iter().sum::<u32>() > 0, "M=4 search must run iterations");
+    }
+
     // --- Test 3: forced single action returns 0 without expanding a tree. -
     #[test]
     fn forced_single_action_returns_zero() {
@@ -605,6 +696,64 @@ mod tests {
         let span_a: usize = va.iter().filter(|&&x| x > 0).count();
         let span_b: usize = vb.iter().filter(|&&x| x > 0).count();
         assert!(span_a > 0 && span_b > 0, "both searches must expand nodes");
+    }
+
+    // --- Profiling: attribute per-move ISMCTS time across phases. Run with
+    // `cargo test --release --features prof profile_ismcts_move -- --nocapture`.
+    #[cfg(feature = "prof")]
+    #[test]
+    fn profile_ismcts_move() {
+        // Prefer the REAL exported nets (64x825) so value/head eval cost is
+        // representative; fall back to the tiny hand net.
+        let policy = match (std::env::var("PENTA_PROF_VALUE"),
+                            std::env::var("PENTA_PROF_HEAD")) {
+            (Ok(v), Ok(h)) => {
+                let mut tables = crate::tables::Tables::load(
+                    &std::fs::read_to_string(CATALOG).unwrap()).unwrap();
+                let value = crate::net::Mlp::load(&v).unwrap();
+                tables.set_belief(value.inputs > tables.v2_size);
+                Policy {
+                    tables, value, head: crate::net::Mlp::load(&h).unwrap(),
+                    weight: 0.15,
+                    search: crate::policy::SearchConfig {
+                        top_k: 0, playouts: 1, budget: 400,
+                        playout_max_eval: 999 },
+                    max_eval: 999,
+                }
+            }
+            _ => make_policy(-4.0),
+        };
+        let decks = load_decks();
+        let slots = [vec![0i32; policy.tables.defs],
+                     vec![0i32; policy.tables.defs]];
+        // A real branching OUR decision.
+        let game = drive_to("Goblins", "The Deck", 5, |o, a| {
+            a.len() >= 3 && o.active_player == PlayerId::One
+        }).expect("a branching OUR decision exists");
+        let iters = 256;
+        let cfg = MctsConfig { iters, ..Default::default() };
+        let s = mk_search(&policy, &decks, &slots, "Goblins", "The Deck", cfg);
+        // Warm up (page in), then measure.
+        let mut prng = SplitMix64::new(7);
+        let _ = s.search(&game, &mut prng);
+        prof::reset();
+        let mut prng = SplitMix64::new(7);
+        let t0 = std::time::Instant::now();
+        let (_best, _v) = s.search(&game, &mut prng);
+        let total_ns = t0.elapsed().as_nanos() as u64;
+        let acc = prof::snapshot();
+        let sum: u64 = acc.iter().sum();
+        let residual = total_ns.saturating_sub(sum);
+        println!("\n=== ISMCTS per-move profile (iters={iters}) ===");
+        println!("total move time: {:.2} ms", total_ns as f64 / 1e6);
+        for i in 0..prof::N {
+            println!("  {:>14}: {:>7.2} ms  ({:>5.1}%)",
+                prof::NAMES[i], acc[i] as f64 / 1e6,
+                100.0 * acc[i] as f64 / total_ns as f64);
+        }
+        println!("  {:>14}: {:>7.2} ms  ({:>5.1}%)", "descent/other",
+                 residual as f64 / 1e6,
+                 100.0 * residual as f64 / total_ns as f64);
     }
 
     // --- Test 1: lethal position -> visits concentrate on the winning line.

@@ -74,6 +74,15 @@ impl Policy {
                         decks: &[Vec<i32>; 2]) -> usize {
         let obs = g.observe(seat);
         let actions = protocol_actions(&obs);
+        self.greedy_index_with(g, seat, &actions, decks)
+    }
+
+    /// As `greedy_index`, but the caller supplies the already-computed
+    /// protocol action list (the ISMCTS opponent path has it in hand, so
+    /// this skips a redundant observe + protocol_actions per opponent ply).
+    pub fn greedy_index_with(&self, g: &Game, seat: PlayerId,
+                             actions: &[Action], decks: &[Vec<i32>; 2])
+                             -> usize {
         if actions.len() <= 1 {
             return 0;
         }

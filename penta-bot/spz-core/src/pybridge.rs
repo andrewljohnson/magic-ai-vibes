@@ -322,6 +322,7 @@ fn ismcts_choose_at(
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert,
         use_dominance: true, leaf_playout: false, leaf_blend: false,
+        redeterminize_m: 1,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -370,6 +371,7 @@ fn ismcts_choose(
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert,
         use_dominance: true, leaf_playout: false, leaf_blend: false,
+        redeterminize_m: 1,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -382,6 +384,141 @@ fn ismcts_choose(
     raw_obs.hash(&mut hasher);
     let mut prng = crate::prng::SplitMix64::new(hasher.finish() ^ 0xD1B5);
     Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
+}
+
+/// Native SO-ISMCTS gate: play `n_games` full games vs the engine's
+/// handcrafted bot across the deck matchup (alternating seats, mirroring
+/// gate_hosted's pairing), entirely in Rust -- no per-move Python/JSON
+/// crossing. Multithreaded like `stream_rows`. Returns (wins, draws,
+/// games_finished). `specs` is the (d1, d2, our_p1, seed) per game
+/// (the caller builds the round-robin pairing, like ismcts_gate_stream).
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn ismcts_gate(
+    py: Python<'_>,
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
+    redeterminize_m: usize, decklists_path: String,
+    specs: Vec<(String, String, bool, u64)>, workers: usize,
+) -> PyResult<(usize, usize, usize)> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 0, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert, use_dominance: true,
+        leaf_playout: false, leaf_blend: false,
+        redeterminize_m: redeterminize_m.max(1),
+    };
+    let threads = if workers == 0 {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
+    } else { workers }.min(specs.len().max(1));
+    let policy = std::sync::Arc::new(policy);
+    let decks = std::sync::Arc::new(decks);
+    let specs = std::sync::Arc::new(specs);
+    let cfg = std::sync::Arc::new(cfg);
+    let tallies: Vec<(usize, usize, usize)> = py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..threads {
+            let policy = policy.clone();
+            let decks = decks.clone();
+            let specs = specs.clone();
+            let cfg = cfg.clone();
+            handles.push(std::thread::spawn(move || {
+                let (mut w, mut d, mut f) = (0usize, 0usize, 0usize);
+                let mut i = t;
+                let mut x = Vec::new();
+                let mut y = Vec::new();
+                while i < specs.len() {
+                    let (d1, d2, our_p1, seed) = &specs[i];
+                    let out = crate::mcts_runner::play_ismcts_game(
+                        &policy, &policy.tables, &decks, d1, d2, *our_p1,
+                        *seed, &cfg, false, &mut x, &mut y);
+                    if let Some(s) = out.score {
+                        f += 1;
+                        if s == 1.0 { w += 1; } else if s == 0.5 { d += 1; }
+                    }
+                    i += threads;
+                }
+                (w, d, f)
+            }));
+        }
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let (mut wins, mut draws, mut finished) = (0, 0, 0);
+    for (w, d, f) in tallies { wins += w; draws += d; finished += f; }
+    Ok((wins, draws, finished))
+}
+
+/// Native SO-ISMCTS training rows: play `specs` full games vs the
+/// handcrafted opponent and return their (redacted afterstate, z) value
+/// rows as flat arrays (x_flat, y, row_counts_per_game), parallel to
+/// `stream_rows`. `specs` is (d1, d2, our_p1, seed) per game.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn ismcts_stream_rows(
+    py: Python<'_>,
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
+    redeterminize_m: usize, decklists_path: String,
+    specs: Vec<(String, String, bool, u64)>, workers: usize,
+) -> PyResult<(Vec<f32>, Vec<f32>, Vec<usize>)> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 0, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert, use_dominance: true,
+        leaf_playout: false, leaf_blend: false,
+        redeterminize_m: redeterminize_m.max(1),
+    };
+    let threads = if workers == 0 {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
+    } else { workers }.min(specs.len().max(1));
+    let policy = std::sync::Arc::new(policy);
+    let decks = std::sync::Arc::new(decks);
+    let specs = std::sync::Arc::new(specs);
+    let cfg = std::sync::Arc::new(cfg);
+    let results: Vec<(Vec<f32>, Vec<f32>, usize, usize)> = py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..threads {
+            let policy = policy.clone();
+            let decks = decks.clone();
+            let specs = specs.clone();
+            let cfg = cfg.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut i = t;
+                while i < specs.len() {
+                    let (d1, d2, our_p1, seed) = &specs[i];
+                    let mut x = Vec::new();
+                    let mut y = Vec::new();
+                    let o = crate::mcts_runner::play_ismcts_game(
+                        &policy, &policy.tables, &decks, d1, d2, *our_p1,
+                        *seed, &cfg, true, &mut x, &mut y);
+                    out.push((x, y, i, o.rows));
+                    i += threads;
+                }
+                out
+            }));
+        }
+        let mut all = Vec::new();
+        for h in handles { all.extend(h.join().unwrap()); }
+        all
+    });
+    let mut ordered = results;
+    ordered.sort_by_key(|r| r.2);
+    let mut x = Vec::new();
+    let mut y = Vec::new();
+    let mut counts = vec![0usize; specs.len()];
+    for (gx, gy, i, c) in ordered {
+        x.extend_from_slice(&gx);
+        y.extend_from_slice(&gy);
+        counts[i] = c;
+    }
+    Ok((x, y, counts))
 }
 
 #[pyfunction]
@@ -406,6 +543,8 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_choose, m)?)?;
+    m.add_function(wrap_pyfunction!(ismcts_gate, m)?)?;
+    m.add_function(wrap_pyfunction!(ismcts_stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(prng_probe, m)?)?;
