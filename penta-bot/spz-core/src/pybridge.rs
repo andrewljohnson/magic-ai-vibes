@@ -283,6 +283,55 @@ fn choose_world(catalog_json: String, value_path: String, head_path: String,
     Ok(policy.choose(world.core_game(), &zero))
 }
 
+/// One native SO-ISMCTS choice at a state replayed to `history` from
+/// (d1,d2,seed) External (mirrors `choose_at`, deterministic by action
+/// history so tests are reproducible). Returns (best_index, visit_counts)
+/// over the root protocol_actions; the visit vector is exposed for policy
+/// iteration. Determinization draws use the shared splitmix64 seeded from
+/// `seed` so a run reproduces. `inert` selects the inert hypothesis.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn ismcts_choose_at(
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, iters: usize, c_puct: f64, budget: usize,
+    decklists_path: String, d1: String, d2: String, seed: u64,
+    inert: bool, history: Vec<usize>,
+) -> PyResult<(usize, Vec<u32>)> {
+    let policy = build_policy(&catalog_json, &value_path, &head_path,
+                             weight, 0, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let mut game = penta::protocol::BotGame::new(
+        &d1, &d2, penta::protocol::Opponent::External,
+        penta::PlayerId::Two, seed,
+    ).map_err(pyo3::exceptions::PyValueError::new_err)?;
+    for idx in history {
+        game.act(idx)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    }
+    let our_seat = game.decision_seat()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("game is over"))?;
+    // Seat-relative deck names for the determinization sampler.
+    let (my_deck, opp_deck) = if our_seat == penta::PlayerId::One {
+        (d1.as_str(), d2.as_str())
+    } else {
+        (d2.as_str(), d1.as_str())
+    };
+    let deck_slots = deck_slots_for(&policy.tables, &decks, &d1, &d2);
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert,
+        use_dominance: true, leaf_playout: false, leaf_blend: false,
+    };
+    let search = crate::mcts::Ismcts {
+        policy: &policy, decks: &decks, deck_slots: &deck_slots,
+        my_deck, opp_deck, our_seat, cfg,
+    };
+    let mut prng = crate::prng::SplitMix64::new(
+        seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B5);
+    Ok(search.search(&game, &mut prng))
+}
+
 #[pyfunction]
 fn prng_probe(seed: u64, count: usize) -> Vec<u64> {
     let mut p = crate::prng::SplitMix64::new(seed);
@@ -303,6 +352,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(net_value, m)?)?;
     m.add_function(wrap_pyfunction!(bench_native_selfplay, m)?)?;
     m.add_function(wrap_pyfunction!(choose_at, m)?)?;
+    m.add_function(wrap_pyfunction!(ismcts_choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(prng_probe, m)?)?;

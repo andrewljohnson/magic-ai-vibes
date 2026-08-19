@@ -75,7 +75,7 @@ fn hidden_json(me: PlayerId, opp: PlayerId, opp_hand: &[u16],
 /// Build the hidden-hypothesis JSON for Game::from_observation, or None
 /// when the deck hypothesis cannot cover the observation. Mirrors
 /// hosted_policy.sample_hidden with the shared PRNG.
-fn sample_hidden(obs: &PlayerObservation, prng: &mut SplitMix64,
+pub(crate) fn sample_hidden(obs: &PlayerObservation, prng: &mut SplitMix64,
                  decks: &Decks, my_deck: &str, opp_deck: &str)
                  -> Option<String> {
     let me = obs.viewer;
@@ -104,7 +104,7 @@ fn sample_hidden(obs: &PlayerObservation, prng: &mut SplitMix64,
 /// hand. Mirrors hosted_policy.inert_hidden / det_shared.inert_hidden
 /// EXACTLY. Card-kind ("Land") comes from the catalog-derived Tables.kind
 /// map (the same source extractor.card_kind uses). K collapses to 1.
-fn inert_hidden(obs: &PlayerObservation, decks: &Decks, my_deck: &str,
+pub(crate) fn inert_hidden(obs: &PlayerObservation, decks: &Decks, my_deck: &str,
                 opp_deck: &str, tables: &Tables) -> Option<String> {
     let me = obs.viewer;
     let opp = if me == PlayerId::One { PlayerId::Two } else { PlayerId::One };

@@ -37,7 +37,7 @@ pub struct Policy {
 const MAIN_STEPS: [penta::Step; 2] =
     [penta::Step::PrecombatMain, penta::Step::PostcombatMain];
 
-fn terminal_value(g: &Game, seat: PlayerId) -> Option<f64> {
+pub(crate) fn terminal_value(g: &Game, seat: PlayerId) -> Option<f64> {
     g.result().map(|r| match r {
         penta::GameResult::Winner { winner, .. } => if winner == seat { 1.0 } else { 0.0 },
         penta::GameResult::Draw => 0.5,
@@ -59,6 +59,81 @@ impl Policy {
     fn blended(&self, feats: &[f32]) -> f64 {
         (1.0 - self.weight) * self.value.value(feats)
             + self.weight * self.head.value(feats)
+    }
+
+    /// Public view of the value+head blend, for the ISMCTS leaf eval knob.
+    pub fn blended_value(&self, feats: &[f32]) -> f64 {
+        self.blended(feats)
+    }
+
+    /// The greedy 1-ply EVALUATE-ALL value-net choice for `seat`, returning
+    /// the action index into the current protocol_actions. This is exactly
+    /// the inner move rule of `playout`, exposed so ISMCTS can drive the
+    /// opponent as a fixed environment at non-branching (opponent) nodes.
+    pub fn greedy_index(&self, g: &Game, seat: PlayerId,
+                        decks: &[Vec<i32>; 2]) -> usize {
+        let obs = g.observe(seat);
+        let actions = protocol_actions(&obs);
+        if actions.len() <= 1 {
+            return 0;
+        }
+        let mut best = 0usize;
+        let mut best_v = f64::NEG_INFINITY;
+        for i in 0..actions.len() {
+            let mut copy = g.clone();
+            if copy.apply(seat, actions[i].clone()).is_err() {
+                continue;
+            }
+            let v = match terminal_value(&copy, seat) {
+                Some(t) => t,
+                None => {
+                    let f = features(&copy.observe(seat), copy.in_pregame(),
+                                     &self.tables, decks);
+                    self.value.value(&f)
+                }
+            };
+            if v > best_v { best_v = v; best = i; }
+        }
+        best
+    }
+
+    /// Public wrapper over the dominance branch prune, so ISMCTS can
+    /// restrict the branching (OUR) action set the same way the certified
+    /// greedy policy does (the land-drop + no-upside rules).
+    pub fn dominance_keep_indices(&self, g: &Game, obs: &PlayerObservation,
+                                  actions: &[Action], seat: PlayerId,
+                                  pregame: bool) -> Vec<usize> {
+        self.dominance_keep(g, obs, actions, seat, pregame)
+    }
+
+    /// A full greedy rollout to a terminal (both seats played by the 1-ply
+    /// value-net model), from `our_seat`'s perspective. The optional
+    /// ISMCTS leaf-playout knob; the value net bootstrap is the default.
+    pub fn rollout_to_end(&self, start: &Game, our_seat: PlayerId,
+                          decks: &[Vec<i32>; 2]) -> f64 {
+        let mut g = start.clone();
+        for _ in 0..self.search.budget.max(400) {
+            if let Some(t) = terminal_value(&g, our_seat) {
+                return t;
+            }
+            let Some(seat) = g.decision_player() else { break };
+            let obs = g.observe(seat);
+            let actions = protocol_actions(&obs);
+            if actions.len() == 1 {
+                if g.apply(seat, actions[0].clone()).is_err() { break; }
+                continue;
+            }
+            let i = self.greedy_index(&g, seat, decks);
+            if g.apply(seat, actions[i].clone()).is_err() { break; }
+        }
+        match terminal_value(&g, our_seat) {
+            Some(t) => t,
+            None => {
+                let o = g.observe(our_seat);
+                self.value.value(&features(&o, g.in_pregame(),
+                                           &self.tables, decks))
+            }
+        }
     }
 
     /// Greedy choice on a live game for the seat to move. Returns the

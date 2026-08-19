@@ -2,6 +2,7 @@
 pub mod decks;
 pub mod det_runner;
 pub mod extract;
+pub mod mcts;
 pub mod net;
 pub mod policy;
 pub mod prng;
