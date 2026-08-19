@@ -360,13 +360,14 @@ fn ismcts_choose_at(
 #[pyfunction]
 #[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
     c_puct, budget, inert, decklists_path, raw_obs, our_deck, opp_deck,
-    opponent = "handcrafted".to_string()))]
+    opponent = "handcrafted".to_string(), leaf_playout = false))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_choose(
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
     decklists_path: String, raw_obs: String,
     our_deck: String, opp_deck: String, opponent: String,
+    leaf_playout: bool,
 ) -> PyResult<usize> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
@@ -389,7 +390,7 @@ fn ismcts_choose(
     let deck_slots = deck_slots_for(&policy.tables, &decks, d1, d2);
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert,
-        use_dominance: true, leaf_playout: false, leaf_blend: false,
+        use_dominance: true, leaf_playout, leaf_blend: false,
         redeterminize_m: 1,
         opponent: parse_opponent(&opponent)?,
         max_decisions: 800,

@@ -604,7 +604,8 @@ class NativeIsmctsPolicy:
     def __init__(self, our_deck, iters=150, c_puct=1.5, budget=400,
                  inert=False, weight=0.15, value_path="penta_net.npz",
                  head_path="policy_head.ckpt-dagger1.npz",
-                 decklists_path="builtin-decklists.json"):
+                 decklists_path="builtin-decklists.json",
+                 opponent="handcrafted", leaf_playout=False):
         import spz_core  # noqa: PLC0415
         from extractor import pinned_catalog  # noqa: PLC0415
         here = os.path.dirname(os.path.abspath(__file__))
@@ -614,6 +615,8 @@ class NativeIsmctsPolicy:
         self.c_puct = c_puct
         self.budget = budget
         self.inert = inert
+        self.opponent = opponent
+        self.leaf_playout = leaf_playout
         self.weight = weight
         self.decklists_path = (decklists_path if os.path.isabs(decklists_path)
                                else os.path.join(here, decklists_path))
@@ -665,7 +668,8 @@ class NativeIsmctsPolicy:
                 self.catalog_json, self.value_spzw, self.head_spzw,
                 self.weight, int(self.iters), float(self.c_puct),
                 int(self.budget), bool(self.inert), self.decklists_path,
-                raw, self.our_deck, opp_deck)
+                raw, self.our_deck, opp_deck, self.opponent,
+                bool(self.leaf_playout))
         except Exception:
             self.fallback._our_deck = self.our_deck
             return self.fallback.choose(obs)
