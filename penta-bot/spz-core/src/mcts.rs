@@ -318,7 +318,38 @@ impl<'a> Ismcts<'a> {
                   -> (usize, Vec<u32>) {
         let raw = real.observe_json(self.our_seat);
         let root_obs = real.core_game().observe(self.our_seat);
-        let root_actions = protocol_actions(&root_obs);
+        self.run(&raw, &root_obs, real.core_game(), prng)
+    }
+
+    /// Run the search from a LIVE hosted observation (raw protocol JSON) with
+    /// no local game object -- the observation-based entry that mirrors
+    /// `DeterminizedPolicy.choose`. We reconstruct ONE bootstrap world from
+    /// the observation to obtain the typed root `PlayerObservation` (and a
+    /// core game for the public-state availability prune), then run the same
+    /// iteration loop -- every iteration re-determinizes from `raw` via the
+    /// typed sampler. Returns None when even the bootstrap reconstruction
+    /// fails (caller then falls back), matching the det path's fail-closed
+    /// contract. `our_seat` must equal the observation's seat.
+    pub fn search_obs(&self, raw: &str, prng: &mut SplitMix64)
+                      -> Option<(usize, Vec<u32>)> {
+        let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+        let seed0 = prng.next_u64();
+        let hidden0 = crate::det_runner::bootstrap_hidden_json(
+            &value, prng, self.decks, self.my_deck, self.opp_deck,
+            self.cfg.inert, &self.policy.tables)?;
+        let core = BotGame::from_observation_json(raw, &hidden0, seed0)
+            .ok()?
+            .into_core_game();
+        let root_obs = core.observe(self.our_seat);
+        Some(self.run(raw, &root_obs, &core, prng))
+    }
+
+    /// Shared search body: `raw` is the root observation JSON re-determinized
+    /// per iteration; `root_obs` is the typed root observation; `root_core`
+    /// supplies public state for the (deterministic) root availability prune.
+    fn run(&self, raw: &str, root_obs: &PlayerObservation,
+           root_core: &Game, prng: &mut SplitMix64) -> (usize, Vec<u32>) {
+        let root_actions = protocol_actions(root_obs);
         let mut visits = vec![0u32; root_actions.len()];
         if root_actions.len() <= 1 {
             // Forced: return index 0 without building a tree.
@@ -327,7 +358,7 @@ impl<'a> Ismcts<'a> {
         // Root available set is deterministic (dominance reads public state),
         // so a single survivor is the forced answer -- e.g. a dominating
         // free land drop that prunes Pass down to one option.
-        let root_avail = self.available(real.core_game(), &root_obs,
+        let root_avail = self.available(root_core, root_obs,
                                         &root_actions, self.our_seat);
         if root_avail.len() == 1 {
             visits[root_avail[0]] = self.cfg.iters as u32;
@@ -336,7 +367,7 @@ impl<'a> Ismcts<'a> {
 
         let mut tree = Tree::new();
         for _ in 0..self.cfg.iters {
-            if let Some(mut world) = self.determinize(&raw, &root_obs, prng) {
+            if let Some(mut world) = self.determinize(raw, root_obs, prng) {
                 self.iterate(&mut tree, &mut world);
             }
         }
