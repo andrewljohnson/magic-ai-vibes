@@ -290,12 +290,13 @@ def finalize_returns(records, result):
 
 
 def a2c_update(batch, actor, critic, actor_lr, critic_lr, critic_epochs,
-               entropy_beta):
-    """One A2C update over a batch of finalized decision records.
+               entropy_beta, ppo_epochs=4, ppo_eps=0.2):
+    """One PPO update over a batch of finalized decision records.
 
     Critic: BCE-regress critic(priv) -> clip(G,0,1).
-    Actor: standardized advantage A = G - V(priv); ascend A*log pi(chosen)
-    (+ small entropy bonus)."""
+    Actor: PPO clipped surrogate with standardized advantage A = G - V(priv),
+    ppo_epochs passes over the batch. The clip bounds how far the policy can
+    move per update -> stops the 27->7 win% swings of vanilla REINFORCE."""
     if not batch:
         return None
     priv = np.stack([r["priv"] for r in batch])              # (K,1650)
@@ -313,29 +314,46 @@ def a2c_update(batch, actor, critic, actor_lr, critic_lr, critic_epochs,
     for _ in range(critic_epochs):
         closs = critic.train_batch(priv, Gt, critic_lr)
 
-    # --- actor policy gradient (ascent) ---
-    grad = GradAccum(actor)
-    ent_sum = 0.0
-    for rec, a in zip(batch, adv_n):
-        pi = rec["pi"]
-        m = len(pi)
-        onehot = np.zeros(m)
-        onehot[rec["chosen"]] = 1.0
-        # d log pi(chosen) / d logit_a = (1[a=chosen] - pi_a) / temp
-        up_pg = a * (onehot - pi) / rec["temp"]
-        # entropy bonus grad: d H / d logit_a  (encourage exploration)
-        # H = -sum pi log pi ; dH/dlogit_a = -pi_a*(log pi_a + H)/temp
-        H = -np.sum(pi * np.log(pi + 1e-12))
-        ent_sum += H
-        up_ent = (entropy_beta * -pi * (np.log(pi + 1e-12) + H)
-                  / rec["temp"])
-        grad.add_decision(actor, rec["X"], rec["h"], up_pg + up_ent)
-    # average over decisions
-    actor_ascend(actor, grad, actor_lr, scale=1.0 / len(batch))
+    # old chosen-action prob (frozen policy at collection time) for the ratio
+    for rec in batch:
+        rec["pi_old_c"] = float(rec["pi"][rec["chosen"]])
+
+    # --- PPO clipped actor update (ppo_epochs passes) ---
+    ent_last = 0.0
+    for _ in range(max(1, ppo_epochs)):
+        grad = GradAccum(actor)
+        ent_sum = 0.0
+        for rec, a in zip(batch, adv_n):
+            # recompute pi_new from the stored candidate afterstate features
+            logits, h = actor_logits(actor, rec["X"])
+            z = logits / rec["temp"]
+            z = z - z.max()
+            pi_new = np.exp(z)
+            pi_new = pi_new / pi_new.sum()
+            c = rec["chosen"]
+            m = len(pi_new)
+            ratio = pi_new[c] / (rec["pi_old_c"] + 1e-8)
+            clipped = min(max(ratio, 1.0 - ppo_eps), 1.0 + ppo_eps)
+            # PPO: L = min(ratio*A, clipped*A); gradient flows through the
+            # ACTIVE (min) branch only. coef multiplies dlog pi(chosen).
+            if ratio * a <= clipped * a:
+                coef = ratio * a               # ratio branch active
+            else:
+                coef = 0.0                     # clipped branch -> no gradient
+            onehot = np.zeros(m)
+            onehot[c] = 1.0
+            up_pg = coef * (onehot - pi_new) / rec["temp"]
+            H = -np.sum(pi_new * np.log(pi_new + 1e-12))
+            ent_sum += H
+            up_ent = (entropy_beta * -pi_new * (np.log(pi_new + 1e-12) + H)
+                      / rec["temp"])
+            grad.add_decision(actor, rec["X"], h, up_pg + up_ent)
+        actor_ascend(actor, grad, actor_lr, scale=1.0 / len(batch))
+        ent_last = ent_sum / len(batch)
 
     return {"critic_loss": closs, "V_mean": float(V.mean()),
             "G_mean": float(G.mean()), "adv_std": float(adv_std),
-            "entropy": float(ent_sum / len(batch))}
+            "entropy": float(ent_last)}
 
 
 # --------------------------------------------------------------------------
