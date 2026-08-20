@@ -141,18 +141,50 @@ def finalize_returns(records, result):
     return [r for r in records if "G" in r]
 
 
+def compute_gae(records, result, critic, gamma=1.0, lam=0.95):
+    """GAE(lambda) advantage + return target per record, per seat, using the
+    CURRENT critic (computed at collection time). Lower-variance credit
+    assignment than MC. Terminal value = z (the seat's game outcome)."""
+    if result is None:
+        return []
+    out = []
+    for seat in ("p1", "p2"):
+        recs = [r for r in records if r["seat"] == seat]
+        if not recs:
+            continue
+        z = 0.5 if result == "draw" else (1.0 if result == seat else 0.0)
+        priv = torch.as_tensor(np.stack([r["priv"] for r in recs]),
+                               dtype=torch.float32, device=DEV)
+        with torch.no_grad():
+            V = critic(priv).cpu().numpy()          # (T,)
+        T = len(recs)
+        adv = np.zeros(T, dtype=np.float32)
+        gae = 0.0
+        for t in reversed(range(T)):
+            v_next = z if t == T - 1 else V[t + 1]   # bootstrap; terminal = z
+            delta = recs[t]["r"] + gamma * v_next - V[t]
+            gae = delta + gamma * lam * gae
+            adv[t] = gae
+        for t, rec in enumerate(recs):
+            rec["adv"] = float(adv[t])
+            rec["ret"] = float(adv[t] + V[t])        # critic target
+            out.append(rec)
+    return out
+
+
 def ppo_update(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
                ent_beta, clip, minibatch):
     if not batch:
         return None
     priv = torch.as_tensor(np.stack([r["priv"] for r in batch]),
                            dtype=torch.float32, device=DEV)
-    G = torch.as_tensor(np.array([r["G"] for r in batch], dtype=np.float32),
-                        device=DEV)
+    ret = torch.as_tensor(np.array([r["ret"] for r in batch], dtype=np.float32),
+                          device=DEV)
+    adv_raw = torch.as_tensor(np.array([r["adv"] for r in batch],
+                                       dtype=np.float32), device=DEV)
+    adv = (adv_raw - adv_raw.mean()) / (adv_raw.std() + 1e-6)
     with torch.no_grad():
         V = critic(priv)
-        adv = G - V
-        adv = (adv - adv.mean()) / (adv.std() + 1e-6)
     logp_old = torch.as_tensor(
         np.array([r["logp_old"] for r in batch], dtype=np.float32), device=DEV)
 
@@ -184,7 +216,7 @@ def ppo_update(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
             aopt.step()
             # critic: value regression to G
             v = critic(priv[mb])
-            val_loss = ((v - G[mb]) ** 2).mean()
+            val_loss = ((v - ret[mb]) ** 2).mean()
             copt.zero_grad()
             val_loss.backward()
             nn.utils.clip_grad_norm_(critic.parameters(), clip)
@@ -193,7 +225,7 @@ def ppo_update(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
             ploss = float(pol_loss)
             ent_val = float(ent)
     return {"critic_loss": closs, "pol_loss": ploss, "entropy": ent_val,
-            "V_mean": float(V.mean()), "G_mean": float(G.mean())}
+            "V_mean": float(V.mean()), "G_mean": float(ret.mean())}
 
 
 def gate(actor, extractor, penta, decks, learner_deck, games, seed_base):
@@ -292,7 +324,7 @@ def main():
                                      ep_seed, args.temperature, mode,
                                      learner_seat, card_power)
             ep_seed += 1
-            batch.extend(finalize_returns(recs, res))
+            batch.extend(compute_gae(recs, res, critic))
             played += 1
         stats = ppo_update(batch, actor, critic, aopt, copt, args.ppo_eps,
                            args.ppo_epochs, args.entropy_beta, args.clip,
