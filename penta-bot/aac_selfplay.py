@@ -425,6 +425,10 @@ def main():
     ap.add_argument("--critic-lr", type=float, default=0.05)
     ap.add_argument("--critic-epochs", type=int, default=3)
     ap.add_argument("--entropy-beta", type=float, default=0.01)
+    ap.add_argument("--ppo-epochs", type=int, default=1,
+                    help="1 = vanilla A2C (the config that reached 26%%); "
+                         ">1 = PPO clipped surrogate")
+    ap.add_argument("--ppo-eps", type=float, default=0.2)
     ap.add_argument("--hidden", type=int, default=64)
     ap.add_argument("--selfplay-frac", type=float, default=0.5)
     ap.add_argument("--gate-every", type=int, default=500)
@@ -470,7 +474,7 @@ def main():
                   f"{max(r['G'] for r in recs):.3f}]")
         stats = a2c_update(recs, actor, critic, args.actor_lr,
                            args.critic_lr, args.critic_epochs,
-                           args.entropy_beta)
+                           args.entropy_beta, args.ppo_epochs, args.ppo_eps)
         print(f"  a2c_update stats={stats}")
         print("  no NaN in actor:",
               not np.isnan(actor.w1).any(),
@@ -526,7 +530,7 @@ def main():
         if episodes_in_batch >= args.batch:
             last_stats = a2c_update(batch, actor, critic, args.actor_lr,
                                     args.critic_lr, args.critic_epochs,
-                                    args.entropy_beta)
+                                    args.entropy_beta, args.ppo_epochs, args.ppo_eps)
             batch = []
             episodes_in_batch = 0
 
