@@ -135,18 +135,35 @@ print('400-game gate:', 100*gate_belief(a,ex,penta,load_decklists(),'Sligh',400,
 - Memory: use `--workers = physical_cores - 2`. fork start method loads torch
   ONCE (shared COW); workers use numpy+engine only.
 
-## NEXT STEPS (priority order)
+## NEXT STEPS (priority order — DECIDED 2026-08-21)
 
-1. **Let the belief run go much longer** — it peaked 45% at only 6k games and
-   was still oscillating up; belief cols started at zero and need many games to
-   mature. On the faster box, run 100k+ games and watch for the climb toward
-   the old C++ bot's 57.7%. If belief stays ~+1% by ~30k games, it's marginal
-   in AAC and deprioritize.
-2. **Rust the self-play hot loop** — the real throughput multiplier and the fix
-   for the hang tax (async collection that doesn't stall a whole round; native
-   actor forward). spz-core crate exists. This unblocks all bigger experiments.
-3. **Bigger net** (512) once throughput allows — width ladder gave ~+5%/2x but
-   diminishing.
-4. Reward/λ sweeps (cheap tuning), larger gate samples to cut variance.
+**#1 (USER-CHOSEN): Rust the self-play hot loop in `spz-core`.** The Python
+loop is capped at ~0.9 g/s by native engine HANGS (a worker spins/blocks in
+engine code; the watchdog absorbs it but it worsens as the actor strengthens).
+A native loop removes that tax and saturates all cores on the beefy Linux box.
+spz-core already has the pieces:
+  - `net.rs::Mlp` (load + forward) — reuse as the AAC ACTOR (afterstate scorer,
+    same features->scalar shape). Add softmax-over-afterstates + PRNG sampling.
+  - `extract.rs::features` — native feature extraction. ADD the belief block
+    (unseen-pool = decklist - seen; port `_belief_block` from extractor.py /
+    the old C++ `selfplay_zero.cpp`). Need both-seats extraction for the
+    privileged critic.
+  - `det_runner.rs::play_game` — native self-play runner; prior "--native-rows"
+    work already feeds trajectories to the Python trainer via `pybridge.rs`.
+  Concrete FIRST SLICE: emit AAC trajectories natively — per decision
+  {candidate afterstate features, chosen idx, logp_old, privileged (both-seat)
+  features, shaped reward, seat} + terminal result — and feed them to the
+  EXISTING Python PPO+GAE update (`ppo_update_fast` in aac_torch_par.py) and
+  gate. Keep the learner in torch (tiny, fast); only MOVE GENERATION to Rust.
+  Validate: a native-generated batch must reproduce the Python gate curve
+  (lockstep check — there's precedent: "Row-lockstep PASSES" in git log).
+  Build: `cd penta-bot/spz-core && cargo build --release`; exposed via pybridge.
+
+**#2: Once native generation runs, scale hard** — belief run 100k+ games (it
+peaked 45% at only 6k, still oscillating up; belief cols start at zero and need
+many games to mature — open question whether it climbs toward 57.7%), then
+bigger net (512; width ladder gave ~+5%/2x, diminishing but real).
+
+**#3:** reward/λ sweeps, larger gate samples to cut variance.
 
 See memory: `aac-parallel-throughput.md`, `penta-bot-arc.md`.
