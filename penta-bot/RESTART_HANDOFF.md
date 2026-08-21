@@ -60,17 +60,37 @@ cd magic-ai-vibes
 git checkout ismcts-handcrafted-opponent
 ```
 
-Requires macOS ARM (penta.so is a compiled binary; if the new box is a
-different arch, rebuild/obtain a matching penta.so). Python 3.13.
+The committed `engine-0.7.0/penta.so` is a macOS-ARM binary and will NOT load
+on Linux. The engine SOURCE is vendored (Rust), so rebuild it — this reproduces
+the pinned engine 0.7.0 / protocol 22 (`lacker/penta ac6cd4d`). Needs Python
+3.13 and a current Rust (edition 2024 -> rustc >= 1.85).
 
 ```bash
-cd penta-bot
+# 1. Rust engine -> Linux penta.so
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+cd penta-bot/vendor/penta/bindings/penta-py
+cargo build --release            # -> target/release/libpenta.so
+cp target/release/libpenta.so ../../../../engine-0.7.0/penta.so   # overwrite mac binary
+cd ../../../../                  # back to penta-bot
+
+# 2. Python + torch (CUDA build auto-selected on a GPU box)
 python3 -m venv --system-site-packages .venv-torch
 .venv-torch/bin/pip install torch numpy
-# sanity:
+
+# 3. Sanity: must print 1081 (825 + 2*128 defs) -- confirms the Linux engine
+#    reproduces the same 128-def catalog, so the .npz actors transfer as-is.
 PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python -c \
-  "from extractor import Extractor; print(Extractor(version=2, belief=True).size)"  # -> 1081
+  "from extractor import Extractor; print(Extractor(version=2, belief=True).size)"
 ```
+If step 3 prints anything other than 1081, the catalog differs from what the
+actors were trained on -> retrain from scratch (fine; the recipe is the value,
+not the weights -- see "Early-days mindset" memory).
+
+NOTE ON GPU: the nets are tiny (1081->256->1); a GPU barely helps them. The
+throughput wall is CPU self-play generation through the engine, which scales
+with CPU CORES (`--workers`), not GPU. The GPU only becomes the lever if we go
+to a much bigger net or move generation into the Rust native loop (spz-core).
 
 ## RESTART TRAINING (pick up where we left off)
 
