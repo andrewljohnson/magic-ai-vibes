@@ -44,29 +44,30 @@ pub struct GameOutcome {
 #[allow(clippy::too_many_arguments)]
 pub fn play_ismcts_game(
     policy: &Policy, tables: &Tables, decks: &Decks,
+    book: &crate::decks::DeckBook,
     d1: &str, d2: &str, our_p1: bool, seed: u64, cfg: &MctsConfig,
+    classify: bool,
     record: bool, x_out: &mut Vec<f32>, y_out: &mut Vec<f32>,
 ) -> GameOutcome {
     let our_seat = if our_p1 { PlayerId::One } else { PlayerId::Two };
     let opp_seat = if our_p1 { PlayerId::Two } else { PlayerId::One };
-    // Seat-relative deck names for the determinization sampler.
-    let (my_deck, opp_deck) = if our_p1 { (d1, d2) } else { (d2, d1) };
-    // Seat-indexed decklist counts for the belief block (p1 plays d1).
-    let empty = std::collections::HashMap::new();
-    let deck_slots: [Vec<i32>; 2] = [
-        tables.deck_slots(decks.get(d1).unwrap_or(&empty)),
-        tables.deck_slots(decks.get(d2).unwrap_or(&empty)),
-    ];
+    // OUR deck is known (we pilot it). The opponent's is CLASSIFIED from
+    // its revealed cards, recomputed each move as more is revealed --
+    // never taken from d1/d2.
+    //
+    // This used to read `decks.get(d1)` / `decks.get(d2)` directly, which
+    // handed the search the true archetype in two places at once: the
+    // belief block's unseen-pool counts AND the determinization sampler
+    // that decides which cards can be in the opponent's hand. The AAC path
+    // classifies, so any ISMCTS number measured against the true decklists
+    // was not comparable to it -- it was a strictly easier game.
+    let my_deck = if our_p1 { d1 } else { d2 };
 
     let cap = cfg.max_decisions.max(1);
     let mut game = match BotGame::new(d1, d2, Opponent::Handcrafted,
                                       opp_seat, seed) {
         Ok(g) => g,
         Err(_) => return GameOutcome { score: None, rows: 0, capped: false },
-    };
-    let search = Ismcts {
-        policy, decks, deck_slots: &deck_slots,
-        my_deck, opp_deck, our_seat, cfg: cfg.clone(),
     };
     let mut prng = SplitMix64::new(
         seed.wrapping_mul(0x9E3779B97F4A7C15) ^ 0xD1B5);
@@ -77,6 +78,31 @@ pub fn play_ismcts_game(
         // With a handcrafted opponent, only OUR seat is ever the decider.
         let Some(seat) = game.decision_seat() else { break };
         debug_assert_eq!(seat, our_seat);
+        // Re-classify each move: the opponent's revealed cards accumulate,
+        // so the guess sharpens as the game goes on (measured 0% accurate
+        // on turn one, ~90% by turn eight).
+        let obs = game.core_game().observe(our_seat);
+        let opp_seen = crate::det_runner::seen_defs(
+            &obs, if our_seat == PlayerId::One { PlayerId::Two }
+                  else { PlayerId::One }, false);
+        let mut scratch = std::collections::HashMap::new();
+        // classify=false takes the TRUE opponent decklist. That is a deck
+        // oracle the AAC path never gets, so it is only for isolating
+        // whether classification is what degrades the search -- never for
+        // a number quoted against the 1-ply baseline.
+        let true_opp = if our_p1 { d2 } else { d1 };
+        let opp_deck = if classify {
+            crate::aac::classify_deck(book, &opp_seen, &mut scratch)
+                .unwrap_or(my_deck)
+        } else { true_opp };
+        let mut deck_slots: [Vec<i32>; 2] = [Vec::new(), Vec::new()];
+        let mi = if our_seat == PlayerId::One { 0 } else { 1 };
+        deck_slots[mi] = tables.deck_slots(book.counts(my_deck));
+        deck_slots[1 - mi] = tables.deck_slots(book.counts(opp_deck));
+        let search = Ismcts {
+            policy, decks, deck_slots: &deck_slots,
+            my_deck, opp_deck, our_seat, cfg: cfg.clone(),
+        };
         let (best, _visits) = search.search(&game, &mut prng);
         if game.act(best).is_err() { break; }
         n += 1;

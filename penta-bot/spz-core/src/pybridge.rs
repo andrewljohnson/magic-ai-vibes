@@ -417,7 +417,8 @@ fn ismcts_choose(
 #[pyfunction]
 #[pyo3(signature = (catalog_json, value_path, head_path, weight, iters,
     c_puct, budget, inert, redeterminize_m, decklists_path, specs, workers,
-    opponent = "handcrafted".to_string(), max_decisions = 800))]
+    opponent = "handcrafted".to_string(), max_decisions = 800,
+    classify = true))]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn ismcts_gate(
     py: Python<'_>,
@@ -425,12 +426,14 @@ fn ismcts_gate(
     weight: f64, iters: usize, c_puct: f64, budget: usize, inert: bool,
     redeterminize_m: usize, decklists_path: String,
     specs: Vec<(String, String, bool, u64)>, workers: usize,
-    opponent: String, max_decisions: usize,
+    opponent: String, max_decisions: usize, classify: bool,
 ) -> PyResult<(usize, usize, usize, usize)> {
     let policy = build_policy(&catalog_json, &value_path, &head_path,
                              weight, 0, 1, budget, 999, 999)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let book = decks::DeckBook::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert, use_dominance: true,
@@ -444,6 +447,7 @@ fn ismcts_gate(
     } else { workers }.min(specs.len().max(1));
     let policy = std::sync::Arc::new(policy);
     let decks = std::sync::Arc::new(decks);
+    let book = std::sync::Arc::new(book);
     let specs = std::sync::Arc::new(specs);
     let cfg = std::sync::Arc::new(cfg);
     // (wins, draws, finished, capped). `finished` counts every game that
@@ -455,6 +459,7 @@ fn ismcts_gate(
         for t in 0..threads {
             let policy = policy.clone();
             let decks = decks.clone();
+            let book = book.clone();
             let specs = specs.clone();
             let cfg = cfg.clone();
             handles.push(std::thread::spawn(move || {
@@ -465,8 +470,9 @@ fn ismcts_gate(
                 while i < specs.len() {
                     let (d1, d2, our_p1, seed) = &specs[i];
                     let out = crate::mcts_runner::play_ismcts_game(
-                        &policy, &policy.tables, &decks, d1, d2, *our_p1,
-                        *seed, &cfg, false, &mut x, &mut y);
+                        &policy, &policy.tables, &decks, &book, d1, d2,
+                        *our_p1, *seed, &cfg, classify, false, &mut x,
+                        &mut y);
                     if let Some(s) = out.score {
                         f += 1;
                         if s == 1.0 { w += 1; } else if s == 0.5 { d += 1; }
@@ -508,6 +514,8 @@ fn ismcts_stream_rows(
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let decks = decks::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let book = decks::DeckBook::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert, use_dominance: true,
         leaf_playout: false, leaf_blend: false,
@@ -520,6 +528,7 @@ fn ismcts_stream_rows(
     } else { workers }.min(specs.len().max(1));
     let policy = std::sync::Arc::new(policy);
     let decks = std::sync::Arc::new(decks);
+    let book = std::sync::Arc::new(book);
     let specs = std::sync::Arc::new(specs);
     let cfg = std::sync::Arc::new(cfg);
     let results: Vec<(Vec<f32>, Vec<f32>, usize, usize)> = py.detach(|| {
@@ -527,6 +536,7 @@ fn ismcts_stream_rows(
         for t in 0..threads {
             let policy = policy.clone();
             let decks = decks.clone();
+            let book = book.clone();
             let specs = specs.clone();
             let cfg = cfg.clone();
             handles.push(std::thread::spawn(move || {
@@ -537,8 +547,8 @@ fn ismcts_stream_rows(
                     let mut x = Vec::new();
                     let mut y = Vec::new();
                     let o = crate::mcts_runner::play_ismcts_game(
-                        &policy, &policy.tables, &decks, d1, d2, *our_p1,
-                        *seed, &cfg, true, &mut x, &mut y);
+                        &policy, &policy.tables, &decks, &book, d1, d2,
+                        *our_p1, *seed, &cfg, true, true, &mut x, &mut y);
                     out.push((x, y, i, o.rows));
                     i += threads;
                 }

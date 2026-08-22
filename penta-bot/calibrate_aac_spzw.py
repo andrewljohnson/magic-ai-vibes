@@ -72,7 +72,7 @@ def harvest(actor, hidden, belief, learner_deck, games, seed_base, threads):
     logits = stats["logits"]
     x, y = [], []
     off = 0
-    for records, result in episodes:
+    for records, result, _final in episodes:
         for r in records:
             m = r["cand"].shape[0]
             chosen_logit = float(logits[off + r["chosen"]])
