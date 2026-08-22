@@ -57,6 +57,32 @@ START_RE = re.compile(r"PAR-AAC start: (.*)")
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
 
+def live_prefixes():
+    """save-prefix values of trainer processes running right now.
+
+    Definitive where it works, which beats guessing from file mtime: a log
+    can be touched by unrelated repo work, and a slow historical run's gate
+    cadence buys it hours of grace under the idle heuristic. Reads /proc
+    directly to stay dependency-free; on a platform without /proc this
+    returns None and callers fall back to the idle heuristic.
+    """
+    if not os.path.isdir("/proc"):
+        return None
+    out = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = f.read().split(b"\0")
+        except OSError:
+            continue                      # process exited mid-scan
+        for i, a in enumerate(argv):
+            if a == b"--save-prefix" and i + 1 < len(argv):
+                out.add(argv[i + 1].decode(errors="replace"))
+    return out
+
+
 def parse_log(path):
     name = os.path.basename(path)[:-4]
     gates, config, done = [], "", None
@@ -128,9 +154,12 @@ def parse_log(path):
 
 def collect():
     runs = []
+    alive = live_prefixes()
     for path in sorted(glob.glob(os.path.join(HERE, "*.log"))):
         r = parse_log(path)
         if r:
+            if alive is not None and not r["done"]:
+                r["stale"] = r["name"] not in alive
             runs.append(r)
     # Busiest runs first; a finished run sorts below a live one of equal size.
     # live first, then stopped, then finished; biggest first within a group
