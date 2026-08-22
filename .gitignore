@@ -22,3 +22,7 @@ penta-bot/recon-failures.jsonl
 data/spz-*.txt
 data/*.txt.ckpt-*.txt
 web/penta-telemetry.json
+
+# training run logs (results are recorded in RESTART_HANDOFF.md)
+penta-bot/*.log
+penta-bot/*.out

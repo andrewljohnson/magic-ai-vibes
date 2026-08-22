@@ -248,6 +248,56 @@ action lists are permutations that settle to identical afterstates --
 would cut the cap's cost AND remove its approximation), reward/lambda
 sweeps, larger gate samples to cut variance.
 
+## EXPERIMENT RECORD: search (ISMCTS) as the next lever -- NEGATIVE
+
+Tested 2026-08-21. Premise: the bot is a 1-ply afterstate scorer, the old
+C++ reference was 57.7% WITH determinized search, and spz-core already
+has ISMCTS -- so plugging the trained AAC actor into it looked like the
+cheap path past 50%. It is not. Recorded so nobody re-runs it blind.
+
+**Finding 1 -- the AAC actor cannot be an MCTS leaf evaluator untreated.**
+Nothing in AAC training anchors the logit's absolute scale (the loss only
+sees a softmax over ONE decision's afterstates). Measured on the 49%
+actor: logits span -142..+196, and after net.rs's sigmoid, 95.2% of
+afterstates saturate and **79.5% of DECISIONS have every candidate within
+1e-6 of every other**. The search could not tell moves apart.
+  ISMCTS iters=16: **6.2%** (1W/15L, 8 of 16 games stalled into the cap).
+
+**Finding 2 -- calibration fixes that, and it is a big fix.** Platt
+scaling folded into the weights (calibrate_aac_spzw.py, no Rust change):
+saturation 95.2% -> 0.0%.
+  Same 16 games, same seeds: **6.2% -> 37.5%** (1W -> 6W, capped 8 -> 5).
+
+**Finding 3 -- and it still loses to no search at all.**
+  1-ply argmax, honest, 400-game gates: **49.0%**
+  ISMCTS iters=16, calibrated:          **37.5%** (16 games, SE ~12%)
+The 37.5% is FLATTERED: mcts_runner takes the TRUE decklists for both
+seats (`decks.get(d1)` / `decks.get(d2)`), while the AAC path classifies
+the opponent's deck from revealed cards. Search got a deck oracle the
+49% number never had.
+
+**Finding 4 -- the cost rules it out of training regardless.** 1466s for
+16 games (~0.01 g/s) vs ~100 g/s for the 1-ply gate: about 5000x. Search
+can never sit inside the training loop; at most it is a deployment bot
+gated on a few hundred games.
+
+**Why it likely fails, and what would change the answer.** The Platt fit
+reports BCE 0.6481 against a base-rate entropy of ~0.651 -- the actor's
+logit is worth ~0.003 nats toward predicting the winner. It is a strong
+RELATIVE ranker and a nearly worthless ABSOLUTE value estimate, and MCTS
+backup needs the latter. Calibration restores the ability to distinguish
+moves; it cannot add information the actor never learned.
+  The candidate that could: the PRIVILEGED CRITIC, trained on real value
+targets. Inside a determinized world the hypothesis fixes both hands by
+construction, so evaluating with it stays honest. Until 2026-08-21 the
+trainer discarded the critic every run; it now checkpoints
+(`<prefix>_critic.npz`). Revisit search ONLY with a trained critic -- and
+fix mcts_runner's deck oracle first, or the number is not comparable.
+
+Control validating the above: iters=1 scores 0.0% for BOTH the AAC net
+and the reference value net, so that configuration is degenerate and the
+comparisons above are at real iteration counts.
+
 ## REPO BACKLOG (Andrew, 2026-08-21) -- do in this order
 
 The repo is being narrowed to ONE purpose: training bots that play
