@@ -68,6 +68,12 @@ deployed**; it would be reading information the actor is not allowed.
 Trained with PPO + GAE, roughly half self-play and half against the
 engine's built-in bot.
 
+**One deck, many opponents.** The actor always pilots a single archetype
+(`--learner-deck`, default Sligh) while the opponent rotates over the
+other 14. So it is a specialist that has seen the whole field, not a
+general player — which matches deployment, since a bot registers one deck.
+See `ROADMAP.md` → Maybe, for how to lift that.
+
 **Generation runs natively.** Rust (`spz-core/`) plays the games,
 featurizes, and scores; Python keeps PPO, GAE, gating and checkpointing.
 They meet once per training round over flat buffers — 0.9 → 7.8 games/sec.
