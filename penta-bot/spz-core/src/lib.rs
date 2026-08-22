@@ -1,4 +1,5 @@
 //! spz-core: the SPZ penta bot's inference stack, native. See Cargo.toml.
+pub mod aac;
 pub mod decks;
 pub mod det_runner;
 pub mod extract;

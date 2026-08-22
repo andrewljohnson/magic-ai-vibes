@@ -25,7 +25,7 @@ const MAX_DECISIONS: usize = 600;
 
 fn seat_idx(s: PlayerId) -> usize { if s == PlayerId::One { 0 } else { 1 } }
 
-fn seen_defs(obs: &PlayerObservation, seat: PlayerId, include_hand: bool)
+pub(crate) fn seen_defs(obs: &PlayerObservation, seat: PlayerId, include_hand: bool)
              -> Vec<u16> {
     let si = seat_idx(seat);
     let mut v = Vec::new();

@@ -576,8 +576,263 @@ fn shuffle_probe(seed: u64, n: usize) -> Vec<usize> {
     v
 }
 
+// ---- native AAC self-play -------------------------------------------
+//
+// One call per PPO round: Python hands over the current actor weights and
+// a list of episode specs, Rust plays them across OS threads with the GIL
+// released, and the whole batch of trajectories comes back as flat
+// buffers. No per-decision boundary crossing, no worker pool, no fork.
+
+/// Little-endian bytes for a float slice, so the big trajectory arrays
+/// cross into Python as one `bytes` object each (`np.frombuffer`) instead
+/// of a multi-million-element Python list.
+fn f32_bytes(v: &[f32]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(v.len() * 4);
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+    out
+}
+
+fn f64_bytes(v: &[f64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(v.len() * 8);
+    for x in v {
+        out.extend_from_slice(&x.to_le_bytes());
+    }
+    out
+}
+
+fn thread_count(requested: usize, work: usize) -> usize {
+    let n = if requested == 0 {
+        std::thread::available_parallelism().map_or(8, std::num::NonZero::get)
+    } else {
+        requested
+    };
+    n.min(work.max(1)).max(1)
+}
+
+/// Build the actor + tables + decklists shared by every native AAC entry.
+#[allow(clippy::too_many_arguments)]
+fn build_aac(catalog_json: &str, decklists_path: &str, belief: bool,
+             hidden: usize, w1: Vec<f64>, b1: Vec<f64>, w2: Vec<f64>,
+             b2: f64)
+             -> Result<(crate::aac::Actor, Tables, decks::DeckBook), String> {
+    let mut tables = Tables::load(catalog_json)?;
+    tables.set_belief(belief);
+    let actor = crate::aac::Actor::new(tables.size, hidden, w1, b1, w2, b2)?;
+    let book = decks::DeckBook::load(decklists_path)?;
+    Ok((actor, tables, book))
+}
+
+/// Play a batch of AAC self-play episodes natively and return their
+/// trajectories.
+///
+/// `specs` is one `(d1, d2, seed, handcrafted, learner_is_p1)` per
+/// episode. The return is a flat, dtype-tagged bundle (see
+/// `aac_native.py`, which reassembles it into the record dicts
+/// `compute_gae` / `ppo_update_fast` already consume):
+///
+/// ```text
+/// 0  cand_bytes    f32, sum(m)*feat        candidate afterstate features
+/// 1  cand_counts   u32, n_records          m per record
+/// 2  chosen        u32, n_records          sampled candidate index
+/// 3  logp_old      f64, n_records          log pi(chosen) at collection
+/// 4  logit_bytes   f64, sum(m)             unsquashed actor logits
+/// 5  priv_bytes    f32, n_records*2*feat   privileged critic input
+/// 6  reward        f64, n_records          shaped tempo reward
+/// 7  seat          u8,  n_records          0 = p1, 1 = p2
+/// 8  ep_records    u32, n_episodes         records per episode
+/// 9  ep_result     i8,  n_episodes         0 p1, 1 p2, 2 draw, -1 capped
+/// 10 ep_diag       u32, 2*n_episodes       decisions played, then the
+///                                          widest legal-action list seen
+///                                          (two n_episodes-long halves;
+///                                          packed because PyO3 tuples
+///                                          stop at 12 elements)
+/// 11 feat          usize                   feature width (825 or 1081)
+/// ```
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn aac_stream_episodes(
+    py: Python<'_>,
+    catalog_json: String,
+    decklists_path: String,
+    belief: bool,
+    hidden: usize,
+    w1: Vec<f64>,
+    b1: Vec<f64>,
+    w2: Vec<f64>,
+    b2: f64,
+    temperature: f64,
+    threads: usize,
+    max_actions: usize,
+    specs: Vec<(String, String, u64, bool, bool)>,
+) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>, Vec<u32>,
+               Vec<f64>, pyo3::Bound<'_, pyo3::types::PyBytes>,
+               pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<f64>, Vec<u8>,
+               Vec<u32>, Vec<i8>, Vec<u32>, usize)> {
+    use pyo3::types::PyBytes;
+
+    let (actor, tables, book) = build_aac(&catalog_json, &decklists_path,
+                                          belief, hidden, w1, b1, w2, b2)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let feat = tables.size;
+    let n_threads = thread_count(threads, specs.len());
+
+    let actor = std::sync::Arc::new(actor);
+    let tables = std::sync::Arc::new(tables);
+    let book = std::sync::Arc::new(book);
+    let specs = std::sync::Arc::new(specs);
+
+    // (spec index, episode) pairs, reordered to spec order afterwards so
+    // the batch is reproducible regardless of how the threads interleave.
+    let mut episodes: Vec<(usize, crate::aac::Episode)> = py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..n_threads {
+            let (actor, tables, book, specs) =
+                (actor.clone(), tables.clone(), book.clone(), specs.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut i = t;
+                while i < specs.len() {
+                    let (d1, d2, seed, hc, lp1) = &specs[i];
+                    let learner = if *lp1 { penta::PlayerId::One }
+                                  else { penta::PlayerId::Two };
+                    out.push((i, crate::aac::play_episode(
+                        &actor, &tables, &book, d1, d2, *seed, temperature,
+                        *hc, learner, max_actions)));
+                    i += n_threads;
+                }
+                out
+            }));
+        }
+        let mut all = Vec::new();
+        for h in handles {
+            all.extend(h.join().expect("aac worker thread panicked"));
+        }
+        all
+    });
+    episodes.sort_by_key(|(i, _)| *i);
+
+    let mut cand: Vec<f32> = Vec::new();
+    let mut cand_counts: Vec<u32> = Vec::new();
+    let mut chosen: Vec<u32> = Vec::new();
+    let mut logp: Vec<f64> = Vec::new();
+    let mut logits: Vec<f64> = Vec::new();
+    let mut privileged: Vec<f32> = Vec::new();
+    let mut reward: Vec<f64> = Vec::new();
+    let mut seat: Vec<u8> = Vec::new();
+    let mut ep_records: Vec<u32> = Vec::new();
+    let mut ep_result: Vec<i8> = Vec::new();
+    let mut ep_decisions: Vec<u32> = Vec::new();
+    let mut ep_maxactions: Vec<u32> = Vec::new();
+    for (_, ep) in episodes {
+        ep_records.push(ep.records.len() as u32);
+        ep_result.push(ep.result);
+        ep_decisions.push(ep.decisions as u32);
+        ep_maxactions.push(ep.max_actions as u32);
+        for r in ep.records {
+            cand.extend_from_slice(&r.cand);
+            cand_counts.push(r.m as u32);
+            chosen.push(r.chosen as u32);
+            logp.push(r.logp_old);
+            logits.extend_from_slice(&r.logits);
+            privileged.extend_from_slice(&r.privileged);
+            reward.push(r.reward);
+            seat.push(r.seat);
+        }
+    }
+    Ok((PyBytes::new(py, &f32_bytes(&cand)), cand_counts, chosen, logp,
+        PyBytes::new(py, &f64_bytes(&logits)),
+        PyBytes::new(py, &f32_bytes(&privileged)), reward, seat,
+        ep_records, ep_result,
+        ep_decisions.into_iter().chain(ep_maxactions).collect(), feat))
+}
+
+/// The honest gate, natively: actor ARGMAX (observation only) versus the
+/// engine's handcrafted bot, alternating seats and rotating opponent
+/// decks exactly like `gate_belief` in aac_torch_par.py.
+///
+/// Returns (score rate, per-game decisions, per-game widest action list)
+/// -- the two diagnostic vectors are what identify the wide-decision
+/// outliers that dominate gate wall clock.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn aac_gate(
+    py: Python<'_>,
+    catalog_json: String,
+    decklists_path: String,
+    belief: bool,
+    hidden: usize,
+    w1: Vec<f64>,
+    b1: Vec<f64>,
+    w2: Vec<f64>,
+    b2: f64,
+    learner_deck: String,
+    games: usize,
+    seed_base: u64,
+    threads: usize,
+    max_actions: usize,
+) -> PyResult<(f64, Vec<u32>, Vec<u32>)> {
+    let (actor, tables, book) = build_aac(&catalog_json, &decklists_path,
+                                          belief, hidden, w1, b1, w2, b2)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let opps: Vec<String> = book.names().filter(|n| *n != learner_deck)
+        .map(String::from).collect();
+    if opps.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            format!("no opponent decks besides {learner_deck}")));
+    }
+    let n_threads = thread_count(threads, games);
+    let actor = std::sync::Arc::new(actor);
+    let tables = std::sync::Arc::new(tables);
+    let book = std::sync::Arc::new(book);
+    let opps = std::sync::Arc::new(opps);
+    let learner_deck = std::sync::Arc::new(learner_deck);
+    let mut per_game: Vec<(usize, f64, u32, u32)> = py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..n_threads {
+            let (actor, tables, book, opps, learner_deck) =
+                (actor.clone(), tables.clone(), book.clone(), opps.clone(),
+                 learner_deck.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut g = t;
+                while g < games {
+                    let my_p1 = g % 2 == 0;
+                    let opp_deck = &opps[g % opps.len()];
+                    let (d1, d2) = if my_p1 {
+                        (learner_deck.as_str(), opp_deck.as_str())
+                    } else {
+                        (opp_deck.as_str(), learner_deck.as_str())
+                    };
+                    let learner = if my_p1 { penta::PlayerId::One }
+                                  else { penta::PlayerId::Two };
+                    let (s, dec, mx) = crate::aac::gate_game(
+                        &actor, &tables, &book, d1, d2, seed_base + g as u64,
+                        learner, max_actions);
+                    out.push((g, s, dec as u32, mx as u32));
+                    g += n_threads;
+                }
+                out
+            }));
+        }
+        let mut all = Vec::new();
+        for h in handles {
+            all.extend(h.join().expect("gate thread panicked"));
+        }
+        all
+    });
+    per_game.sort_by_key(|r| r.0);
+    let score: f64 = per_game.iter().map(|r| r.1).sum();
+    Ok((score / games as f64,
+        per_game.iter().map(|r| r.2).collect(),
+        per_game.iter().map(|r| r.3).collect()))
+}
+
 #[pymodule]
 fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(aac_stream_episodes, m)?)?;
+    m.add_function(wrap_pyfunction!(aac_gate, m)?)?;
     m.add_function(wrap_pyfunction!(lockstep_trace, m)?)?;
     m.add_function(wrap_pyfunction!(net_value, m)?)?;
     m.add_function(wrap_pyfunction!(bench_native_selfplay, m)?)?;
