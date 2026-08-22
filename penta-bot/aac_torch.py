@@ -8,10 +8,10 @@ surrogate over several epochs, normalized advantage, value loss, entropy
 bonus, and gradient clipping -- the standard ingredients that turn a chaotic
 bounce into a smooth climb.
 
-ACTOR (honest): 825->H->1 afterstate scorer; pi(a)=softmax(score/temp) over
+ACTOR (observation-only): 825->H->1 afterstate scorer; pi(a)=softmax(score/temp) over
 legal actions; sample in self-play, argmax at eval. CRITIC (privileged):
 1650->H->1 (both seats' redacted obs concatenated = both hands). Tempo shaping
-+ handcrafted-mixed curriculum, all reused from aac_selfplay. Honest gate =
++ handcrafted-mixed curriculum, all reused from aac_selfplay. Evaluation =
 actor argmax (obs only) vs the engine handcrafted bot.
 
 Run: PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_torch.py \
@@ -302,7 +302,7 @@ def main():
         f"ent={args.entropy_beta} clip={args.clip}", args.log)
     wr0 = gate(actor, extractor, penta, decks, args.learner_deck,
                max(24, args.gate_games // 4), 900000)
-    log(f"GATE @0 games: honest actor vs handcrafted = {100*wr0:.1f}%",
+    log(f"GATE @0 games: actor vs handcrafted = {100*wr0:.1f}%",
         args.log)
 
     opps = [d for d in decks if d != args.learner_deck]

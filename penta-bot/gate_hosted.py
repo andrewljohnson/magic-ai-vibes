@@ -1,5 +1,5 @@
 """Gate the OBSERVATION-ONLY hosted policy vs the current engine's
-handcrafted bot -- the honest strength number for the public bot.
+handcrafted bot -- the strength number for the public bot.
 
 Uses the protocol-18 engine named by PENTA18_DIR (a directory holding a
 freshly built penta.so from origin/main; never the pinned training

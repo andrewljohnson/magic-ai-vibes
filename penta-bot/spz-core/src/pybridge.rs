@@ -769,7 +769,7 @@ fn aac_stream_episodes(
         ep_decisions.into_iter().chain(ep_maxactions).collect(), feat))
 }
 
-/// The honest gate, natively: actor ARGMAX (observation only) versus the
+/// The evaluation, natively: actor ARGMAX (observation only) versus the
 /// engine's handcrafted bot, alternating seats and rotating opponent
 /// decks exactly like `gate_belief` in aac_torch_par.py.
 ///

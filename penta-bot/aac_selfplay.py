@@ -4,11 +4,11 @@ Principled fix for our diagnosed failures (value-greedy plays passive;
 imitating a perfect-info teacher gets WORSE with data). From the
 literature (MADDPG / AlphaStar / sim-to-real): train a CRITIC with
 PRIVILEGED info (sees BOTH seats' redacted observations = both hands) but
-an ACTOR that sees only its OWN honest observation; update the actor by
+an ACTOR that sees only its OWN redacted observation; update the actor by
 policy gradient using the privileged critic's advantage. At deployment
-ONLY the honest actor is used -- it never copies hidden-info moves.
+ONLY the actor is used -- it never copies hidden-info moves.
 
-ACTOR (honest): scores afterstates. At a decision, for each legal action
+ACTOR (observation-only): scores afterstates. At a decision, for each legal action
 we clone the game, act, observe(seat) -> redacted 825-dim afterstate
 features; actor_net(feats) -> scalar logit score. pi(a) = softmax(score /
 temperature). SAMPLE during self-play, argmax at eval.
@@ -30,7 +30,7 @@ A_t * log pi(chosen afterstate_t).
 CURRICULUM: half self-play (actor vs actor, both seats recorded), half
 actor vs the engine's HANDCRAFTED bot (learner seat recorded only).
 
-Honest eval is sacred: the gated actor uses ONLY its own redacted
+Evaluation discipline is sacred: the gated actor uses ONLY its own redacted
 observation (afterstate features from acting our OWN action on a clone,
 exactly what the hosted bot does). Privileged both-hands info is ONLY for
 the critic during training.
@@ -189,7 +189,7 @@ def actor_decide(game, seat, obs, actor, extractor, temperature, rng,
 def _priv_features(game, seat, extractor):
     """Privileged critic input: [features(seat_to_move), features(other)].
     Both are REDACTED per-seat observations, but concatenating BOTH gives
-    the critic both hands -- the privilege the honest actor never sees."""
+    the critic both hands -- the privilege the actor never sees."""
     other = "p2" if seat == "p1" else "p1"
     f_me = extractor.features(json.loads(game.observe(seat)))
     f_op = extractor.features(json.loads(game.observe(other)))
@@ -357,13 +357,13 @@ def a2c_update(batch, actor, critic, actor_lr, critic_lr, critic_epochs,
 
 
 # --------------------------------------------------------------------------
-# Honest gate: argmax afterstate actor (observation only) vs handcrafted.
+# Evaluation: argmax afterstate actor (observation only) vs handcrafted.
 # --------------------------------------------------------------------------
 
 
 def gate(actor, extractor, penta, decks, learner_deck, games, seed_base,
          opp_decks):
-    """Plays `games` honest games (Sligh learner, alternating seats) vs the
+    """Plays `games` observation-only games (Sligh learner, alternating seats) vs the
     engine handcrafted bot. Returns win rate (draws count 0.5)."""
     rng = random.Random(999)
     score = 0.0
@@ -489,7 +489,7 @@ def main():
     # Gate at random init first (the baseline of the curve).
     wr0 = gate(actor, extractor, penta, decks, args.learner_deck,
                args.gate_games, 7_000_000, opp_decks)
-    log(f"GATE @0 games: honest actor vs handcrafted = {100*wr0:.1f}% "
+    log(f"GATE @0 games: actor vs handcrafted = {100*wr0:.1f}% "
         f"(LCB {100*wilson_lcb(wr0*args.gate_games, args.gate_games):.1f}%)",
         args.log)
 

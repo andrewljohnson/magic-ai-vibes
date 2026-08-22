@@ -166,7 +166,7 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
 def gate(spz_core, actor, hidden, belief, learner_deck, games, seed_base,
          threads=0, max_actions=DEFAULT_MAX_ACTIONS, open_decklist=False,
          catalog_json=None, decklists_path=None, full=False):
-    """Honest gate, natively: actor argmax vs the handcrafted bot.
+    """Evaluation, natively: actor argmax vs the handcrafted bot.
 
     Same protocol as `aac_torch_par.gate_belief` (alternating seats,
     rotating opponent decks, capped games scored as draws), but the games

@@ -409,7 +409,7 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
     Episode { records, result, decisions: n, max_actions: max_seen }
 }
 
-/// One honest gate game: the actor plays ARGMAX from its own redacted
+/// One evaluation game: the actor plays ARGMAX from its own redacted
 /// observations against the engine's handcrafted bot. Returns
 /// (score, decisions, widest action list), where score is the learner's
 /// (win 1, draw 0.5, unfinished 0.5 -- matching `gate_belief`, which

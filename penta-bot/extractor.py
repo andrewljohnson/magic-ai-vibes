@@ -235,7 +235,7 @@ class Extractor:
         # visible anywhere) is appended LAST, after the v2 castability
         # block, keeping the first 825 features byte-identical. New schema
         # size = 825 + 2*defs (1081 on the 128-def catalog). Ported from
-        # the old honest C++ bot (subtract_public_zones / subtract_owned_
+        # the old C++ bot (subtract_public_zones / subtract_owned_
         # auras / append_counts in selfplay_zero.cpp).
         self.belief_base = self.size
         if belief:

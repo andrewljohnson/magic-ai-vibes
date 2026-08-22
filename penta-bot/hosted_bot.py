@@ -48,7 +48,7 @@ def _request(url, payload=None, headers=None, timeout=30):
     req = urllib.request.Request(url, data=data, headers={
         "content-type": "application/json",
         # The public deployment's WAF rejects the default Python-urllib
-        # agent with 403; identify ourselves honestly instead.
+        # agent with 403; identify ourselves accurately instead.
         "user-agent": "SPZ-hosted-bot/1.0 (penta-bot; +lacker/penta#57)",
         **(headers or {})})
     with urllib.request.urlopen(req, timeout=timeout) as resp:

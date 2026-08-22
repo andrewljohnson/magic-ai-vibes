@@ -3,7 +3,7 @@
 Everything measured, with error bars. Kept because the numbers have to
 outlive the code that produced them.
 
-**How to read a gate.** The honest gate plays the actor's argmax against
+**How to read a gate.** Evaluation plays the actor's argmax against
 the engine's built-in handcrafted bot, alternating seats and rotating all
 14 opponent decks. Gates are 400 games, so a single gate carries a
 **standard error of ±2.5 points**. A single gate is not a result. Compare
@@ -15,7 +15,7 @@ across them is mostly a max-of-noise statistic — one arm below showed a
 
 ## 1. Strength
 
-| stage | honest gate | note |
+| stage | evaluation | note |
 |---|---|---|
 | handcrafted bot | 31.6% | the bar |
 | 128-net AAC | ~35% | prior ceiling |
@@ -140,7 +140,7 @@ could not tell moves apart.
 
 | config | score |
 |---|---|
-| 1-ply argmax (honest) | **49.0%** |
+| 1-ply argmax | **49.0%** |
 | ISMCTS iters=16, uncalibrated | 6.2% |
 | ISMCTS iters=16, Platt-calibrated | 37.5% |
 
@@ -173,8 +173,9 @@ A quarter of decisions computed the unseen-pool maths against the wrong 60
 cards, worst exactly where planning matters. It also meant our numbers
 were never comparable to the 57.7% reference, which had open decklists.
 
-**Decided: open decklists are the architecture.** "Honest" means the
-opponent's hidden *hand* is never read, not that the matchup is secret.
+**Decided at the time: open decklists.** SUPERSEDED -- upstream's bot
+guide confirms the server discloses no deck metadata, so open decklists
+are a research setting only and cannot be used to train a deployed bot.
 
 Inference-only A/B on an actor *trained* under classification: classified
 51.12%, open 48.62% (800 games each). That is distribution shift, not

@@ -27,7 +27,7 @@
     hidden, NO sigmoid -- net::Mlp's squash belongs to the determinized
     value net), softmax + splitmix64 sampling, emits the exact record
     aac_torch's compute_gae / ppo_update_fast consume.
-[x] Ported for the honest actor: classify_deck + belief_deck_context (our
+[x] Ported for the actor: classify_deck + belief_deck_context (our
     deck known, opponent's classified from REVEALED cards only), and
     `DeckBook` -- classify_deck breaks ties by decklist FILE order, which
     a HashMap cannot reproduce, hence serde_json preserve_order.
@@ -71,7 +71,7 @@ lockstep). Workaround today: shard across 2-4 trainer processes.
    SPZ-redeploy hook, ~hourly chunks, detached, telemetry, early-stop.
    This is also the clean evaluate-all baseline.
 
-## Scope notes / honest gaps
+## Scope notes / known gaps
 - native runner is GREEDY (epsilon 0) determinized self-play + handcrafted
   league. Epsilon exploration + frozen-snapshot league are NOT yet in the
   native runner (Python det path has them). First native curve runs

@@ -128,7 +128,7 @@ def main():
                         default=["random", "handcrafted"])
     args = parser.parse_args()
 
-    # HONESTY: with search on, playout clones carry true hidden state
+    # CAVEAT: with search on, playout clones carry true hidden state
     # (upstream issue #11 tracks determinized clones), so gate results
     # vs the scripted bots inherit that leak through the search policy.
     search = None

@@ -15,12 +15,12 @@ What is shipped (see README.md for the feasibility numbers behind this):
   finally show their consequence instead of only their cost -- the
   passivity driver of every 1-ply collapse. --search-topk 0 restores the
   plain 1-ply policy.
-- HONESTY: clones carry the TRUE hidden state (both libraries, the
+- CAVEAT: clones carry the TRUE hidden state (both libraries, the
   opponent's hand), so playout outcomes leak information the deciding
   seat could not see. That is acceptable for TRAINING/self-improvement
   (both seats are us), but evaluation gates vs the scripted bots carry
   the same leak through the search policy; upstream issue #11 tracks
-  determinized clones for honest search-time evaluation.
+  determinized clones for search-time evaluation.
 - Exploration: with probability epsilon the move is an exploration draw;
   a --prior-frac slice of those follows a first_bot-shaped AGGRESSION
   PRIOR (play a land, else cast the biggest thing, else declare an
@@ -360,7 +360,7 @@ def _settle_all_pass(copy, budget=PRUNE_SETTLE_STEPS):
 def _settled_pass_state(fork, pass_action, seat):
     """The status-quo afterstate: the PASS branch, forked and settled the
     same way every candidate is (`_settle_all_pass`). None when the pass
-    branch cannot be settled (fail closed -- no honest baseline).
+    branch cannot be settled (fail closed -- no valid baseline).
 
     Its purpose is symmetry. On the from_observation search worlds used in
     training and hosted play the opponent seat merely passes, so this
@@ -472,7 +472,7 @@ def dominance_prune(fork, obs, actions, extractor):
     testable = [a for a in non_pass if a["type"] in _PRUNABLE_TYPES]
     if len(non_pass) >= 2 and testable:
         # Baseline for the dominated-by-pass test. The current observation
-        # is normally the honest no-op reference. But a candidate spell or
+        # is normally the no-op reference. But a candidate spell or
         # ability sits on the stack while priority is passed to settle it,
         # and on a scripted-opponent clone (protocol 22) that inline window
         # lets the opponent react -- their reaction is folded into the
@@ -608,12 +608,12 @@ def playout_value(copy, seat, net, extractor, rng, turn0, was_pregame,
     playout runs THROUGH blocks and combat damage, which is the point:
     attack declarations are finally priced by their consequence.
 
-    HONESTY: `copy` is a true-state clone -- both libraries and the
+    CAVEAT: `copy` is a true-state clone -- both libraries and the
     opponent's hand are real, so the playout outcome leaks hidden
     information. Fine for training (self-improvement, both seats are us);
     flagged for evaluation -- gates vs the scripted bots inherit the leak
     through the search policy. Upstream issue #11 tracks determinized
-    clones for honest search-time evaluation.
+    clones for search-time evaluation.
 
     ENGINE-PANIC ARMOR: the engine can panic inside CLONE acts (pyo3
     PanicException, e.g. 'a legal payment has a complete mana

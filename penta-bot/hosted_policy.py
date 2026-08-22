@@ -220,7 +220,7 @@ class HostedPolicy:
         """Action index for one observation; never raises on odd shapes
         (falls back to the tie ordering, then index 0).
 
-        SHAPED mode (default; the honest hosted fallback): without
+        SHAPED mode (default; the observation-only hosted fallback): without
         playouts the raw 1-ply blend reverts to the passivity every
         pre-search era collapsed into (measured: 2 casts from 157 cast
         offers, zero attacks, 0/12 vs handcrafted). The cure that

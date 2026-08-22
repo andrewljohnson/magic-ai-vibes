@@ -2,13 +2,14 @@
 
 ## Project goal
 
-Train the strongest **honest** bot for lacker's penta engine and run it on
+Train the strongest bot for lacker's penta engine and run it on
 lacker's server. Nothing else. There is no engine of ours to maintain, no
 arena, no site.
 
-"Honest" means the deployed actor sees only a redacted observation — its
-own hand, the public zones, the opponent's hand *size*. It never sees the
-opponent's hidden hand. Decklists are open.
+The deployed actor sees only a redacted observation — its own hand, the
+public zones, the opponent's hand *size*. It never sees the opponent's
+hand contents or either library's order, and the server does not disclose
+which archetype the opponent is playing.
 
 Read `RESULTS.md` before proposing an experiment; several obvious ideas
 have already been tried and measured, including two that failed.
@@ -47,7 +48,7 @@ PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
     --episodes 3 --hidden 256 --belief --actor <actor>.npz
 ```
 
-## Rules that keep results honest
+## Rules that keep results credible
 
 - **A single gate is not a result.** Gates are 400 games: ±2.5 points.
   Compare means over many gates. With several runs going, the best gate

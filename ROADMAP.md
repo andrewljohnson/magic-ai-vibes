@@ -22,16 +22,16 @@ score is a *relative ranking* with no absolute scale, and it carries
 
 Two candidates, and they are not exclusive:
 
-- **An honest value head** — single-seat redacted observation → P(win),
+- **An observation-only value head** — single-seat redacted observation → P(win),
   trained on the returns the trainer already computes. Nearly free: one
   more small MLP per round, no new data. This is the AlphaZero-shaped
   answer and should be built first.
 - **The privileged critic** — already trained on real value targets, and
   now checkpointed (`<prefix>_critic.npz`; every run before 2026-08-22
   discarded it). It is privileged (both seats' observations) so it can
-  never deploy as an honest actor — but inside a *determinized* world the
+  never deploy as an actor — but inside a *determinized* world the
   hypothesis fixes both hands by construction, so using it there stays
-  honest. That makes it the natural leaf evaluator for search.
+  allowed to see. That makes it the natural leaf evaluator for search.
 
 **Done when:** a value net's win-probability prediction beats base rate by
 a real margin (the actor manages 0.003 nats; anything worth using should
@@ -44,7 +44,7 @@ better evaluator. Before trusting any number from it:
 
 - **Fix the deck oracle.** `mcts_runner.rs` reads `decks.get(d1)` /
   `decks.get(d2)` directly. Now that open decklists are the architecture
-  this is no longer *dishonest*, but it must match whatever the AAC path
+  this is no longer a disclosure problem, but it must match whatever the AAC path
   does or the comparison is meaningless.
 - **Fix the cost.** ~5000x per game is not fundamental. `determinize()`
   calls `from_observation_json`, rebuilding an entire game from JSON per
@@ -78,7 +78,32 @@ Four hypotheses tested and rejected. Next step is to **profile with
 because the concurrent-runs workaround already recovers the throughput —
 this only buys tidiness.
 
-## 6. Deploy
+## 6. Upstream PR: expose the opponent's deck as a flag
+
+Worth proposing to [penta](https://github.com/lacker/penta). Today the bot
+protocol discloses no deck metadata — registration and the heartbeat both
+report *your own* deck, and the observation has no archetype field — so a
+bot must classify the opponent from revealed cards (76.6% accurate, 0% on
+turn one).
+
+That makes open decklists a research setting we cannot deploy: an actor
+trained with the true decklist would be trained on information the server
+never provides, and the mismatch is measurable (~2.5 points when the input
+distribution is swapped at test time).
+
+A per-room or per-registration flag — "both sides' archetypes are
+disclosed" — would make it a real format rather than a lab condition.
+There is precedent in paper Magic: open decklists are standard at
+competitive tables, and the pool here is fifteen known archetypes anyway,
+so it leaks far less than it sounds. It would also make our numbers
+directly comparable to the older determinized-search results, which were
+all measured with decklists known.
+
+Shape of the proposal: an optional field on the bot registry entry and the
+hosted room, surfaced in the observation as the opponent's archetype name
+when both sides opted in. Default off, so nothing changes for existing bots.
+
+## 7. Deploy
 
 `hosted_bot.py` is the client that plays on lacker's server. Once a
 champion clears a large-sample gate, ship it and confirm the hosted path

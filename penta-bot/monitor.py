@@ -52,7 +52,7 @@ GATE_RE = re.compile(
     r"GATE @(\d+) games: ([0-9.]+)%"
     r"(?:.*?entropy=([0-9.]+))?"
     r"(?:.*?\[([0-9.]+) g/s\])?")
-GATE0_RE = re.compile(r"GATE @(\d+) games: honest actor vs handcrafted = ([0-9.]+)%")
+GATE0_RE = re.compile(r"GATE @(\d+) games: actor vs handcrafted = ([0-9.]+)%")
 START_RE = re.compile(r"PAR-AAC start: (.*)")
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
@@ -203,7 +203,7 @@ tr:last-child td{border-bottom:none}
 .foot{color:var(--text-muted);font-size:12px;margin-top:4px}
 </style></head><body><div class="wrap">
 <h1>penta bot — training monitor</h1>
-<p class="sub">Honest gate: actor argmax vs the engine's handcrafted bot.
+<p class="sub">Evaluation: actor argmax vs the engine's handcrafted bot.
 Gates are 400 games (standard error ±2.5 points), so compare <b>means</b>,
 never a single gate.</p>
 <div class="tiles" id="tiles"></div>

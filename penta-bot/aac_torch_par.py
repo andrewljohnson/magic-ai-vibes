@@ -7,7 +7,7 @@ COLLECTION runs across N worker processes -- the ~8x throughput multiplier that
 makes "bigger net + far more games" runnable. Workers score afterstates with a
 NUMPY forward of the current actor (no torch in workers); the main process holds
 the torch actor+critic, broadcasts actor weights each round, and does GAE +
-minibatch PPO. Honest gate = actor argmax vs handcrafted.
+minibatch PPO. Evaluation = actor argmax vs handcrafted.
 
 Run: PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_torch_par.py \
        --games 60000 --workers 8 --hidden 256 --gate-every 4000 --log par.log
@@ -269,7 +269,7 @@ def gate_belief(actor, extractor, penta, decks, learner_deck, games,
 
 
 def native_or_python_gate(args, spz, actor, extractor, penta, decks, games):
-    """The honest gate, through whichever runner this run is using.
+    """The evaluation, through whichever runner this run is using.
 
     Both play actor argmax vs the handcrafted bot over the same seats,
     decks and seeds; the native one just runs the games on threads instead
@@ -340,7 +340,7 @@ def main():
                          "emits no training row")
     # OPEN DECKLISTS ARE THE ARCHITECTURE (decided 2026-08-22). The belief
     # block gets the opponent's REAL decklist; only their HIDDEN HAND stays
-    # hidden, which is what "honest" means here. Classifying the deck from
+    # hidden. Classifying the deck Classifying the deck from
     # revealed cards was the old AAC default and it is measurably lossy:
     # 76.6% accurate overall, but 0% on turn 1, 53% turn 2, 64% turn 3 --
     # a quarter of decisions ran the unseen-pool maths against the wrong 60
@@ -394,7 +394,7 @@ def main():
         f"ent={args.entropy_beta} gae_lam={args.gae_lambda}", args.log)
     wr0 = native_or_python_gate(args, spz, actor, extractor, penta, decks,
                                 40)
-    log(f"GATE @0 games: honest actor vs handcrafted = {100*wr0:.1f}%",
+    log(f"GATE @0 games: actor vs handcrafted = {100*wr0:.1f}%",
         args.log)
 
     played = 0
@@ -476,14 +476,14 @@ def main():
                      for k, v in actor.state_dict().items()}
             np.savez(f"{args.save_prefix}_actor.npz", **sd_np)   # latest
             # Checkpoint the CRITIC too. It is privileged (both seats'
-            # redacted observations) so it can never deploy as an honest
+            # redacted observations) so it can never deploy as a live
             # actor -- but it is trained on real value targets, which the
             # actor is not: the actor only ever sees a softmax over one
             # decision's afterstates, so its logit has no absolute scale
             # (see calibrate_aac_spzw.py). That makes the critic the
             # candidate leaf evaluator for determinized search, where a
             # sampled world supplies both hands by construction and using
-            # it stays honest. Until now every run discarded it at exit.
+            # it stays inside what the bot is allowed to see. Until now every run discarded it at exit.
             cr_np = {k: v.detach().numpy()
                      for k, v in critic.state_dict().items()}
             np.savez(f"{args.save_prefix}_critic.npz", **cr_np)
