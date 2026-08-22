@@ -602,6 +602,26 @@ fn f64_bytes(v: &[f64]) -> Vec<u8> {
     out
 }
 
+/// Work-stealing cursor: threads pull the next index instead of owning a
+/// fixed stride.
+///
+/// This box is an i9-13900KS -- 8 performance cores plus 16 efficiency
+/// cores, not 32 interchangeable ones. With static round-robin
+/// (`i += n_threads`) the games handed to an E-core thread take far
+/// longer, and since the call cannot return until every thread is done,
+/// the slowest straggler sets the wall clock. That is what made one
+/// process look like it saturated at 8 threads (8.5 g/s) while four
+/// separate processes reached ~26 g/s aggregate on the same machine:
+/// smaller per-process batches simply had shorter straggler tails.
+///
+/// Pulling indices off one atomic lets the fast cores take more games and
+/// the slow ones take fewer, so the tail shrinks to a single game.
+fn next_index(cursor: &std::sync::atomic::AtomicUsize, n: usize)
+              -> Option<usize> {
+    let i = cursor.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    (i < n).then_some(i)
+}
+
 fn thread_count(requested: usize, work: usize) -> usize {
     let n = if requested == 0 {
         std::thread::available_parallelism().map_or(8, std::num::NonZero::get)
@@ -685,22 +705,22 @@ fn aac_stream_episodes(
 
     // (spec index, episode) pairs, reordered to spec order afterwards so
     // the batch is reproducible regardless of how the threads interleave.
+    let cursor = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut episodes: Vec<(usize, crate::aac::Episode)> = py.detach(|| {
         let mut handles = Vec::new();
-        for t in 0..n_threads {
-            let (actor, tables, book, specs) =
-                (actor.clone(), tables.clone(), book.clone(), specs.clone());
+        for _ in 0..n_threads {
+            let (actor, tables, book, specs, cursor) =
+                (actor.clone(), tables.clone(), book.clone(), specs.clone(),
+                 cursor.clone());
             handles.push(std::thread::spawn(move || {
                 let mut out = Vec::new();
-                let mut i = t;
-                while i < specs.len() {
+                while let Some(i) = next_index(&cursor, specs.len()) {
                     let (d1, d2, seed, hc, lp1) = &specs[i];
                     let learner = if *lp1 { penta::PlayerId::One }
                                   else { penta::PlayerId::Two };
                     out.push((i, crate::aac::play_episode(
                         &actor, &tables, &book, d1, d2, *seed, temperature,
                         *hc, learner, max_actions)));
-                    i += n_threads;
                 }
                 out
             }));
@@ -788,16 +808,16 @@ fn aac_gate(
     let book = std::sync::Arc::new(book);
     let opps = std::sync::Arc::new(opps);
     let learner_deck = std::sync::Arc::new(learner_deck);
+    let cursor = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut per_game: Vec<(usize, f64, u32, u32)> = py.detach(|| {
         let mut handles = Vec::new();
-        for t in 0..n_threads {
-            let (actor, tables, book, opps, learner_deck) =
+        for _ in 0..n_threads {
+            let (actor, tables, book, opps, learner_deck, cursor) =
                 (actor.clone(), tables.clone(), book.clone(), opps.clone(),
-                 learner_deck.clone());
+                 learner_deck.clone(), cursor.clone());
             handles.push(std::thread::spawn(move || {
                 let mut out = Vec::new();
-                let mut g = t;
-                while g < games {
+                while let Some(g) = next_index(&cursor, games) {
                     let my_p1 = g % 2 == 0;
                     let opp_deck = &opps[g % opps.len()];
                     let (d1, d2) = if my_p1 {
@@ -811,7 +831,6 @@ fn aac_gate(
                         &actor, &tables, &book, d1, d2, seed_base + g as u64,
                         learner, max_actions);
                     out.push((g, s, dec as u32, mx as u32));
-                    g += n_threads;
                 }
                 out
             }));
