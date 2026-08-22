@@ -135,6 +135,16 @@ pub struct Episode {
     pub records: Vec<Record>,
     /// 0 = p1 wins, 1 = p2 wins, 2 = draw, -1 = unfinished (hit the cap).
     pub result: i8,
+    /// For a TRUNCATED episode (result -1) only: `2 * feat` holding
+    /// [features(p1), features(p2)] at the cut. Empty otherwise.
+    ///
+    /// Hitting the decision cap is truncation, not termination -- there is
+    /// no outcome to learn from, but the state still has a value. Handing
+    /// the final state back lets the learner bootstrap V(s_T) instead of
+    /// discarding the episode, which is what made pure self-play collapse:
+    /// 43% of its games were thrown away, so it never learned to close one.
+    /// Python composes each seat's privileged row from these two halves.
+    pub final_feat: Vec<f32>,
     pub decisions: usize,
     /// Widest legal-action list seen; the afterstate expansion is linear
     /// in this, so it is the throughput outlier to watch.
@@ -406,7 +416,23 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
         Some(penta::GameResult::Winner { winner, .. }) =>
             if winner == PlayerId::One { 0 } else { 1 },
     };
-    Episode { records, result, decisions: n, max_actions: max_seen }
+    // Only a truncated episode needs a bootstrap state; a finished one has
+    // a real outcome. Each seat's belief context is built from its own
+    // view, exactly as during play.
+    let mut final_feat = Vec::new();
+    if result < 0 && !records.is_empty() {
+        let pregame = game.core_game().in_pregame();
+        for seat in [PlayerId::One, PlayerId::Two] {
+            let obs = game.core_game().observe(seat);
+            let my_deck = if seat == PlayerId::One { d1 } else { d2 };
+            let opp_deck = if seat == PlayerId::One { d2 } else { d1 };
+            let ctx = belief_context(tables, book, &obs, my_deck, opp_deck,
+                                     open_decklist, &mut scratch);
+            final_feat.extend(features(&obs, pregame, tables, &ctx));
+        }
+    }
+    Episode { records, result, decisions: n, max_actions: max_seen,
+              final_feat }
 }
 
 /// One evaluation game: the actor plays ARGMAX from its own redacted

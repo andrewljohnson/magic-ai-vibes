@@ -48,6 +48,33 @@ PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
     --episodes 3 --hidden 256 --belief --actor <actor>.npz
 ```
 
+## The pure-build rule (decided 2026-08-22)
+
+**Do not train against the built-in handcrafted bot.** New training runs
+use self-play only (`--selfplay-frac 1.0`). Scoring against the built-in
+bot continues — it is our only external yardstick — but it is no longer
+part of the training signal.
+
+The reasoning: training half our games against the opponent we are scored
+on both risks specialising to it and masks whether the method actually
+works. We want to know we can build a strong player, not a
+handcrafted-bot counter.
+
+**Know what this costs.** Pure self-play does not currently work: it
+plateaued at ~6% for 24k games, and the reason is structural, not a bug.
+Self-play optimises RELATIVE performance, so two mutually terrible
+policies are a stable equilibrium; nothing pushes toward absolute quality.
+AlphaZero's pure self-play works because MCTS is a policy IMPROVEMENT
+OPERATOR — the search produces a better policy than the raw net, and the
+net chases it. We have no such ratchet.
+
+So this rule makes ROADMAP #1 (value function) and #2 (search) blocking
+prerequisites rather than nice-to-haves. Expect no progress from pure
+self-play until they exist.
+
+The existing 50/50 lineage stays as the deployable incumbent (~51%) while
+the pure line is built. It is legacy, not the direction.
+
 ## Rules that keep results credible
 
 - **A single gate is not a result.** Gates are 400 games: ±2.5 points.

@@ -141,18 +141,43 @@ def finalize_returns(records, result):
     return [r for r in records if "G" in r]
 
 
-def compute_gae(records, result, critic, gamma=1.0, lam=0.95):
+def compute_gae(records, result, critic, gamma=1.0, lam=0.95, final=None):
     """GAE(lambda) advantage + return target per record, per seat, using the
     CURRENT critic (computed at collection time). Lower-variance credit
-    assignment than MC. Terminal value = z (the seat's game outcome)."""
-    if result is None:
+    assignment than MC.
+
+    Terminal value is the seat's outcome z, EXCEPT for a truncated episode
+    (one that hit the decision cap, result None), where there is no outcome
+    and the bootstrap value V(s_T) is used instead.
+
+    That distinction matters enormously. Hitting a decision limit is
+    TRUNCATION, not termination -- the game did not end, it ran out of
+    budget -- and the standard treatment is to bootstrap the value at the
+    cut rather than drop the episode. This function used to return [] for
+    those, and it quietly broke self-play from scratch: 43% of a pure
+    self-play run's episodes were capped and discarded, so the learner
+    almost never saw a terminal signal, never learned to close a game, and
+    scored 6.5% and FALLING. It also silently biased the mixed runs, which
+    still discard ~6% -- systematically the LONG games.
+
+    `final` is {"p1": priv_row, "p2": priv_row} at the cut, from the
+    native runner. Without it a truncated episode still has to be dropped,
+    since there is nothing to bootstrap from.
+    """
+    truncated = result is None
+    if truncated and final is None:
         return []
     out = []
     for seat in ("p1", "p2"):
         recs = [r for r in records if r["seat"] == seat]
         if not recs:
             continue
-        z = 0.5 if result == "draw" else (1.0 if result == seat else 0.0)
+        if truncated:
+            with torch.no_grad():
+                z = float(critic(torch.as_tensor(
+                    final[seat][None, :], dtype=torch.float32, device=DEV))[0])
+        else:
+            z = 0.5 if result == "draw" else (1.0 if result == seat else 0.0)
         priv = torch.as_tensor(np.stack([r["priv"] for r in recs]),
                                dtype=torch.float32, device=DEV)
         with torch.no_grad():

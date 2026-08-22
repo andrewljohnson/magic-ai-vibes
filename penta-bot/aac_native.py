@@ -104,20 +104,28 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
     """Play `specs` natively; return (episodes, stats).
 
     `specs` is a list of (d1, d2, seed, handcrafted, learner_is_p1).
-    `episodes` is a list of (records, result) pairs shaped like
+    `episodes` is a list of (records, result, final) triples shaped like
     `_worker_episode`'s return: each record is a dict with cand / chosen /
     logp_old / temp / seat / priv / r, and `result` is "p1" / "p2" /
-    "draw" / None (None = the episode hit the 600-decision cap, which
-    `compute_gae` drops, exactly as before).
+    "draw" / None (None = the episode hit the 600-decision cap). `final`
+    carries that episode's per-seat privileged row at the cut so the
+    learner can bootstrap it instead of discarding it; it is None for
+    episodes that finished normally.
     """
     w1, b1, w2, b2 = flat_weights(actor)
-    (cand_buf, cand_counts, chosen, logp, logit_buf, priv_buf, reward,
-     seats, ep_records, ep_result, ep_diag, feat) = \
+    (cand_buf, rec_u32, logp, logit_buf, priv_buf, reward,
+     seats, ep_records, ep_result, ep_diag, feat, final_buf) = \
         spz_core.aac_stream_episodes(
             _catalog(catalog_json), decklists_path or DECKLISTS, belief,
             hidden, w1, b1, w2, b2, temperature, threads, max_actions,
             open_decklist, specs)
 
+    n_rec = len(rec_u32) // 2
+    cand_counts, chosen = rec_u32[:n_rec], rec_u32[n_rec:]
+    # One [features(p1), features(p2)] block per TRUNCATED episode, in
+    # order. These let compute_gae bootstrap V(s_T) rather than throw the
+    # episode away -- see the truncation note there.
+    final_all = np.frombuffer(final_buf, dtype="<f4").reshape(-1, 2 * feat)
     n_ep = len(ep_records)
     decisions = np.asarray(ep_diag[:n_ep], dtype=np.int64)
     widest = np.asarray(ep_diag[n_ep:], dtype=np.int64)
@@ -132,6 +140,7 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
 
     episodes = []
     r = 0
+    t_idx = 0
     for e in range(n_ep):
         records = []
         for _ in range(int(ep_records[e])):
@@ -147,7 +156,15 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
                 "r": float(reward[r]),
             })
             r += 1
-        episodes.append((records, _RESULT_NAME[int(ep_result[e])]))
+        res = _RESULT_NAME[int(ep_result[e])]
+        final = None
+        if res is None and records and t_idx < len(final_all):
+            # per-seat privileged row: own view first, then the other seat
+            f = final_all[t_idx]
+            final = {"p1": np.concatenate([f[:feat], f[feat:]]),
+                     "p2": np.concatenate([f[feat:], f[:feat]])}
+            t_idx += 1
+        episodes.append((records, res, final))
 
     stats = {
         "records": int(len(counts)),

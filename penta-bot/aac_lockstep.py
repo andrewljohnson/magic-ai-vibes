@@ -167,7 +167,7 @@ def main():
     argmax_disagree = 0
     all_logits = stats["logits"]      # flat, in record order across episodes
     off = 0                           # running offset into that buffer
-    for (nat_recs, nat_res), (d1, d2, seed, hc, lp1) in zip(episodes, specs):
+    for (nat_recs, nat_res, _fin), (d1, d2, seed, hc, lp1) in zip(episodes, specs):
         forced = [r["chosen"] for r in nat_recs]
         py_recs, py_res = python_episode(
             weights, ex, penta, decks, ex.card_power, d1, d2, seed, 1.0,

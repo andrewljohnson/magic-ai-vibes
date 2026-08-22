@@ -432,10 +432,11 @@ def main():
                 max_actions=args.native_max_actions,
                 open_decklist=not args.classify_decklist)
             capped += nstats["capped"]
-            for recs, res in episodes:
+            for recs, res, final in episodes:
                 played += 1
                 batch.extend(AT.compute_gae(recs, res, critic,
-                                            lam=args.gae_lambda))
+                                            lam=args.gae_lambda,
+                                            final=final))
         else:
             it = pool.imap_unordered(_worker_episode, tasks)
             for _ in range(len(tasks)):

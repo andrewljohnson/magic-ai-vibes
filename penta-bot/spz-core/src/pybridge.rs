@@ -654,8 +654,10 @@ fn build_aac(catalog_json: &str, decklists_path: &str, belief: bool,
 ///
 /// ```text
 /// 0  cand_bytes    f32, sum(m)*feat        candidate afterstate features
-/// 1  cand_counts   u32, n_records          m per record
-/// 2  chosen        u32, n_records          sampled candidate index
+/// 1  rec_u32       u32, 2*n_records        m per record, then the sampled
+///                                          candidate index per record
+///                                          (two n_records halves; packed
+///                                          because PyO3 tuples stop at 12)
 /// 3  logp_old      f64, n_records          log pi(chosen) at collection
 /// 4  logit_bytes   f64, sum(m)             unsquashed actor logits
 /// 5  priv_bytes    f32, n_records*2*feat   privileged critic input
@@ -663,6 +665,11 @@ fn build_aac(catalog_json: &str, decklists_path: &str, belief: bool,
 /// 7  seat          u8,  n_records          0 = p1, 1 = p2
 /// 8  ep_records    u32, n_episodes         records per episode
 /// 9  ep_result     i8,  n_episodes         0 p1, 1 p2, 2 draw, -1 capped
+/// 9b final_bytes   f32, (truncated eps)*2*feat  [features(p1),features(p2)]
+///                                          at the cut, ONE BLOCK PER
+///                                          TRUNCATED episode in order --
+///                                          lets the learner bootstrap
+///                                          V(s_T) instead of discarding
 /// 10 ep_diag       u32, 2*n_episodes       decisions played, then the
 ///                                          widest legal-action list seen
 ///                                          (two n_episodes-long halves;
@@ -687,10 +694,12 @@ fn aac_stream_episodes(
     max_actions: usize,
     open_decklist: bool,
     specs: Vec<(String, String, u64, bool, bool)>,
-) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>, Vec<u32>,
+) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                Vec<f64>, pyo3::Bound<'_, pyo3::types::PyBytes>,
                pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<f64>, Vec<u8>,
-               Vec<u32>, Vec<i8>, Vec<u32>, usize)> {
+               Vec<u32>, Vec<i8>, Vec<u32>, usize,
+               pyo3::Bound<'_, pyo3::types::PyBytes>)>
+{
     use pyo3::types::PyBytes;
 
     let (actor, tables, book) = build_aac(&catalog_json, &decklists_path,
@@ -746,7 +755,9 @@ fn aac_stream_episodes(
     let mut ep_result: Vec<i8> = Vec::new();
     let mut ep_decisions: Vec<u32> = Vec::new();
     let mut ep_maxactions: Vec<u32> = Vec::new();
+    let mut final_feat: Vec<f32> = Vec::new();
     for (_, ep) in episodes {
+        final_feat.extend_from_slice(&ep.final_feat);
         ep_records.push(ep.records.len() as u32);
         ep_result.push(ep.result);
         ep_decisions.push(ep.decisions as u32);
@@ -762,11 +773,13 @@ fn aac_stream_episodes(
             seat.push(r.seat);
         }
     }
-    Ok((PyBytes::new(py, &f32_bytes(&cand)), cand_counts, chosen, logp,
+    Ok((PyBytes::new(py, &f32_bytes(&cand)),
+        cand_counts.into_iter().chain(chosen).collect(), logp,
         PyBytes::new(py, &f64_bytes(&logits)),
         PyBytes::new(py, &f32_bytes(&privileged)), reward, seat,
         ep_records, ep_result,
-        ep_decisions.into_iter().chain(ep_maxactions).collect(), feat))
+        ep_decisions.into_iter().chain(ep_maxactions).collect(), feat,
+        PyBytes::new(py, &f32_bytes(&final_feat))))
 }
 
 /// The evaluation, natively: actor ARGMAX (observation only) versus the
