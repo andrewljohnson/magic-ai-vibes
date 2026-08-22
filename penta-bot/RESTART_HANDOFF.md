@@ -248,4 +248,24 @@ action lists are permutations that settle to identical afterstates --
 would cut the cap's cost AND remove its approximation), reward/lambda
 sweeps, larger gate samples to cut variance.
 
-See memory: `aac-parallel-throughput.md`, `penta-bot-arc.md`.
+## REPO BACKLOG (Andrew, 2026-08-21) -- do in this order
+
+The repo is being narrowed to ONE purpose: training bots that play
+lacker's penta engine, plus monitor screens for the runs.
+
+1. Merge the bot work to master. Note the current branch
+   (`rust-native-selfplay`) descends from `ismcts-handcrafted-opponent`,
+   NOT from master -- master is a different lineage, so this is a real
+   merge decision, not a fast-forward.
+2. **Write up the experiment record FIRST.** Results have to outlive the
+   code that produced them.
+3. Then delete the C++ code and the web-play code.
+4. Then tidy what remains.
+
+Step 2 before step 3 is the whole point: once the old lineages are gone,
+so is the context for their numbers. Confirm what counts as "web play
+code" before deleting -- the hosted path may still be needed to deploy a
+trained actor.
+
+See memory: `aac-parallel-throughput.md`, `penta-bot-arc.md`,
+`repo-scope-penta-only.md`.
