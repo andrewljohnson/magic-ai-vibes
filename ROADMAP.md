@@ -286,24 +286,6 @@ non-transitive results (a new actor beating the old one but doing worse on
 the gate), which is the classic cycling signature. **Watch for it; we are
 not currently checking.**
 
-## Check this before anything else
-
-`hosted_policy.py`'s `choose()` docstring claims **"first_bot's bare
-ordering alone beats handcrafted ~73%"** — a fixed category order (land >
-cast > attack > the rest) with no network at all.
-
-Our trained actor is at ~51%.
-
-If that 73% is real and comparable, a trivial heuristic is 22 points ahead
-of everything in this repo, and the entire neural programme is
-underperforming a baseline we already wrote. If it is stale, mismeasured,
-or from a different setup, the claim needs deleting before someone plans
-around it.
-
-Either way it is cheap to settle: run the shaped ordering through the same
-400-game evaluation the actors use. **Do this before starting any item
-above** — it could reorder the whole roadmap.
-
 ## Open questions worth an experiment
 
 - **Does the belief block actually earn its 256 dimensions?** It was

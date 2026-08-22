@@ -227,9 +227,15 @@ class HostedPolicy:
         worked then works here: a first_bot-shaped category order --
         land > cast > attack > the rest -- with the NETS selecting
         WITHIN each category (which land, which cast/target/X, which
-        blocker). first_bot's bare ordering alone beats handcrafted
-        ~73%; the nets refine its choices. shaped=False keeps the pure
-        blend for comparison gates."""
+        blocker). shaped=False keeps the pure blend for comparison gates.
+
+        NOTE: this docstring used to claim "first_bot's bare ordering
+        alone beats handcrafted ~73%". That is FALSE as written -- measured
+        2026-08-22 with gate_heuristic.py over 400 games on the same
+        protocol the actors use, the bare ordering scores 3.9% +- 1.0.
+        Whatever the 73% referred to, it was not this ordering against the
+        handcrafted bot in this engine. The ordering is a deadline
+        fallback and a tie-break, not a strong policy."""
         actions = obs.get("legalActions") or ()
         if not actions:
             return 0

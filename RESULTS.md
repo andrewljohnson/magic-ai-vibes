@@ -129,6 +129,21 @@ never learned.
 → Do not retry search with a better prompt. Retry it with a real value
 function (ROADMAP #1), and fix the runner's deck handling first.
 
+### The "heuristic beats handcrafted 73%" claim was false
+
+`hosted_policy.choose()`'s docstring long claimed that "first_bot's bare
+ordering alone beats handcrafted ~73%" — a fixed category order (land >
+cast > attack > rest) with no network. If true, a trivial heuristic would
+have been 22 points ahead of every net here.
+
+Measured with `gate_heuristic.py`, 400 games, the same protocol the actors
+are scored on: **3.9% ± 1.0**. Not 73%, and well below the 31.6% built-in
+bot. The trained actor is ~47 points ahead of it.
+
+→ The neural approach is not behind a trivial baseline. The docstring has
+been corrected. Worth remembering as a lesson about uncited numbers in
+comments: it nearly reordered the roadmap.
+
 ### Four throughput hypotheses are dead
 
 One process saturates near 8 threads (~8.5 g/s); **four processes at 8
