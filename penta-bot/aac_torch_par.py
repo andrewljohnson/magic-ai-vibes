@@ -46,6 +46,7 @@ from aac_selfplay import (  # noqa: E402
     _priv_features, own_board_power, K_IDLE, K_LIFE, K_POWER,
     MAX_DECISIONS)
 import aac_torch as AT  # noqa: E402  MLP, compute_gae, ppo_update, gate
+import aac_native as AN  # noqa: E402  native episode generation + gate
 
 DEV = torch.device("cpu")
 
@@ -267,6 +268,22 @@ def gate_belief(actor, extractor, penta, decks, learner_deck, games,
     return wins / games
 
 
+def native_or_python_gate(args, spz, actor, extractor, penta, decks, games):
+    """The honest gate, through whichever runner this run is using.
+
+    Both play actor argmax vs the handcrafted bot over the same seats,
+    decks and seeds; the native one just runs the games on threads instead
+    of in one Python loop. --python-gate forces the Python path (useful
+    for spot-checking the two against each other mid-run)."""
+    if args.native and not args.python_gate:
+        return AN.gate(spz, actor, args.hidden, args.belief,
+                       args.learner_deck, games, 900000,
+                       threads=args.native_threads,
+                       max_actions=args.native_max_actions)
+    return gate_belief(actor, extractor, penta, decks, args.learner_deck,
+                       games, 900000)
+
+
 def log(msg, path):
     line = f"[{time.strftime('%H:%M:%S')}] {msg}"
     print(line, flush=True)
@@ -306,11 +323,29 @@ def main():
                     help="use the hidden-pool belief feature schema "
                          "(v2+2*defs=1081); actor sees unseen-pool counts for "
                          "[me, opp] -- own deck known, opp deck classified")
+    ap.add_argument("--native", action="store_true",
+                    help="generate episodes in spz-core's native AAC runner "
+                         "instead of the fork() worker pool: same rows "
+                         "(aac_lockstep.py holds them to bit-equality), no "
+                         "JSON in the hot loop, OS threads instead of "
+                         "processes, and no hang watchdog to pay for")
+    ap.add_argument("--native-threads", type=int, default=0,
+                    help="native worker threads (0 = all cores)")
+    ap.add_argument("--native-max-actions", type=int,
+                    default=AN.DEFAULT_MAX_ACTIONS,
+                    help="cap the afterstate expansion at this many legal "
+                         "actions (0 = expand everything). Above the cap a "
+                         "decision is played greedily from a prefix and "
+                         "emits no training row")
+    ap.add_argument("--python-gate", action="store_true",
+                    help="with --native, still gate through the Python loop "
+                         "(slower; the native gate is the default there)")
     ap.add_argument("--log", default="aac_par.log")
     ap.add_argument("--save-prefix", default="aac_par")
     args = ap.parse_args()
 
     global BELIEF, DECKS
+    spz = AN.load_spz_core() if args.native else None
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     rng = random.Random(args.seed)
@@ -334,13 +369,16 @@ def main():
     aopt = torch.optim.Adam(actor.parameters(), lr=args.actor_lr)
     copt = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
 
-    log(f"PAR-AAC start: games={args.games} workers={args.workers} "
+    runner = (f"NATIVE(threads={args.native_threads or 'all'},"
+              f"max_actions={args.native_max_actions})"
+              if args.native else f"pool(workers={args.workers})")
+    log(f"PAR-AAC start: games={args.games} runner={runner} "
         f"round_ep={args.round_episodes} hidden={args.hidden} "
         f"belief={args.belief} feat={feat} "
         f"a_lr={args.actor_lr} ppo_epochs={args.ppo_epochs} "
         f"ent={args.entropy_beta} gae_lam={args.gae_lambda}", args.log)
-    wr0 = gate_belief(actor, extractor, penta, decks, args.learner_deck,
-                      40, 900000)
+    wr0 = native_or_python_gate(args, spz, actor, extractor, penta, decks,
+                                40)
     log(f"GATE @0 games: honest actor vs handcrafted = {100*wr0:.1f}%",
         args.log)
 
@@ -350,7 +388,8 @@ def main():
     last_gate = 0
     hangs = 0
     best_wr = -1.0
-    pool = Pool(args.workers, initializer=_winit)
+    capped = 0
+    pool = None if args.native else Pool(args.workers, initializer=_winit)
     while played < args.games:
         w = actor_weights(actor)
         tasks = []
@@ -364,38 +403,58 @@ def main():
             tasks.append((w, args.temperature, mode, ls, d1, d2, ep_seed))
             ep_seed += 1
         batch = []
-        it = pool.imap_unordered(_worker_episode, tasks)
-        for _ in range(len(tasks)):
-            try:
-                recs, res = it.next(timeout=args.per_result_timeout)
-            except mp.TimeoutError:
-                # A worker is spinning in native engine code (unbounded by
-                # MAX_DECISIONS). Can't interrupt native from Python -- kill
-                # and rebuild the pool, keep the episodes already collected.
-                hangs += 1
-                log(f"HANG #{hangs}: no episode in "
-                    f"{args.per_result_timeout:.0f}s; rebuilding pool "
-                    f"(kept {len(batch)} recs this round)", args.log)
-                pool.terminate()
-                pool.join()
-                pool = Pool(args.workers, initializer=_winit)
-                break
-            played += 1
-            batch.extend(AT.compute_gae(recs, res, critic,
-                                        lam=args.gae_lambda))
+        if args.native:
+            # One PyO3 call for the whole round: the native runner plays
+            # every episode across OS threads with the GIL released, so
+            # there is no worker pool to hang and no per-decision boundary
+            # crossing. The records come back in the shape the pool
+            # produced, so GAE and PPO below are untouched.
+            specs = [(d1, d2, s, mode == "handcrafted", ls == "p1")
+                     for (_w, _t, mode, ls, d1, d2, s) in tasks]
+            episodes, nstats = AN.stream_episodes(
+                spz, actor, args.hidden, args.belief, specs,
+                args.temperature, threads=args.native_threads,
+                max_actions=args.native_max_actions)
+            capped += nstats["capped"]
+            for recs, res in episodes:
+                played += 1
+                batch.extend(AT.compute_gae(recs, res, critic,
+                                            lam=args.gae_lambda))
+        else:
+            it = pool.imap_unordered(_worker_episode, tasks)
+            for _ in range(len(tasks)):
+                try:
+                    recs, res = it.next(timeout=args.per_result_timeout)
+                except mp.TimeoutError:
+                    # A worker is spinning in native engine code (unbounded
+                    # by MAX_DECISIONS). Can't interrupt native from Python
+                    # -- kill and rebuild the pool, keep what was collected.
+                    hangs += 1
+                    log(f"HANG #{hangs}: no episode in "
+                        f"{args.per_result_timeout:.0f}s; rebuilding pool "
+                        f"(kept {len(batch)} recs this round)", args.log)
+                    pool.terminate()
+                    pool.join()
+                    pool = Pool(args.workers, initializer=_winit)
+                    break
+                played += 1
+                batch.extend(AT.compute_gae(recs, res, critic,
+                                            lam=args.gae_lambda))
         stats = ppo_update_fast(batch, actor, critic, aopt, copt,
                                 args.ppo_eps, args.ppo_epochs,
                                 args.entropy_beta, args.clip)
         if played - last_gate >= args.gate_every:
             last_gate = played
-            wr = gate_belief(actor, extractor, penta, decks,
-                             args.learner_deck, args.gate_games, 900000)
+            wr = native_or_python_gate(args, spz, actor, extractor, penta,
+                                       decks, args.gate_games)
             gps = played / (time.time() - t0)
             s = stats or {}
             log(f"GATE @{played} games: {100*wr:.1f}% | "
                 f"critic_loss={s.get('critic_loss',0):.3f} "
                 f"entropy={s.get('entropy',0):.3f} "
-                f"G_mean={s.get('G_mean',0):.3f} hangs={hangs} [{gps:.2f} g/s]",
+                f"G_mean={s.get('G_mean',0):.3f} "
+                f"{'capped=' + str(capped) if args.native else 'hangs=' + str(hangs)}"
+                f" [{gps:.2f} g/s]",
                 args.log)
             sd_np = {k: v.detach().numpy()
                      for k, v in actor.state_dict().items()}
@@ -405,7 +464,8 @@ def main():
                 np.savez(f"{args.save_prefix}_best.npz", **sd_np)
                 log(f"  new best {100*wr:.1f}% -> {args.save_prefix}_best.npz",
                     args.log)
-    log(f"PAR-AAC complete: {played} games ({hangs} hangs), "
+    tail = f"{capped} capped" if args.native else f"{hangs} hangs"
+    log(f"PAR-AAC complete: {played} games ({tail}), "
         f"best={100*best_wr:.1f}%", args.log)
 
 
