@@ -177,6 +177,19 @@ PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
     --episodes 4 --hidden 256 --belief --actor aac_par_belief_best.npz
 ```
 
+**The gate agrees too.** Same 100 games (same seats, decks, seeds), 45%
+champion: native **39.0%** in 4.3s vs Python **40.0%** in 49.1s -- one
+game apart, 11.3x faster wall. The one-game delta comes from argmax
+tie-breaks (the Python gate's forward is torch f32, the native one f64)
+and from the wide-decision cap; both only move decisions where candidates
+are separated by less than an ulp.
+
+**Measured throughput** (32-core Linux box, 1248-game run, belief 1081,
+hidden 256, 30 threads): **7.8 g/s generation, 6.1 g/s including a
+200-game gate every 600 games** -- against the Python fork pool's ~0.9
+g/s ceiling. ~5% of episodes still hit the 600-decision cap and are
+dropped by compute_gae, exactly as before.
+
 ### Run the native trainer
 
 ```bash
