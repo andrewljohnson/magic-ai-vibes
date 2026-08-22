@@ -53,11 +53,14 @@ better evaluator. Before trusting any number from it:
   iterations is *comparable* engine work; the gap is implementation.
 - **Then gate it** against 1-ply on identical games and seeds.
 
-## 3. Keep scaling what already works
+## 3. Keep scaling what already works — IN FLIGHT
 
 The curve has never plateaued (§1). This is the boring, reliable lever.
 
-- The from-scratch open-decklist run (`od_scratch`) to 200k+ games.
+- Two from-scratch runs are up on seed 33, a paired comparison isolating
+  the decklist mode: `cls_scratch` (classified — **the deployable line**,
+  since the server discloses no deck) and `od_scratch` (open — research,
+  deployable only if #6 lands). Both target 200k games.
 - Then more games again. Every arm improved overnight purely from volume.
 - **Fill the box with concurrent runs, not one wide one** — a single
   process saturates near 3 cores (§4c).
@@ -78,7 +81,7 @@ Four hypotheses tested and rejected. Next step is to **profile with
 because the concurrent-runs workaround already recovers the throughput —
 this only buys tidiness.
 
-## 6. Upstream PR: expose the opponent's deck as a flag
+## 6. Upstream PR: expose the opponent's deck as a flag — IN FLIGHT
 
 Worth proposing to [penta](https://github.com/lacker/penta). Today the bot
 protocol discloses no deck metadata — registration and the heartbeat both
@@ -102,6 +105,11 @@ all measured with decklists known.
 Shape of the proposal: an optional field on the bot registry entry and the
 hosted room, surfaced in the observation as the opponent's archetype name
 when both sides opted in. Default off, so nothing changes for existing bots.
+
+Status: a patch and PR text are being prepared against a scratch clone of
+upstream. It cannot be pushed from here — the only GitHub credential on
+this box is a deploy key scoped to *this* repo, which is deliberate.
+A human pushes it.
 
 ## 7. Deploy
 

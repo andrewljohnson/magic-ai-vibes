@@ -84,6 +84,10 @@ reference path.
 Evaluations are 400 games (±2.5 points), so single numbers are noise and
 only means count. Full record and error bars in `RESULTS.md`.
 
+That champion was trained before we established that the server discloses
+no opponent deck, so the current deployable line is being retrained from
+scratch with classification (`cls_scratch`). See `RESULTS.md` → In flight.
+
 ## Setup
 
 Needs Rust and Python 3.13 (the engine binding pins `abi3-py313`).
