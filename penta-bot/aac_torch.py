@@ -193,6 +193,13 @@ def compute_gae(records, result, critic, gamma=1.0, lam=0.95, final=None):
         for t, rec in enumerate(recs):
             rec["adv"] = float(adv[t])
             rec["ret"] = float(adv[t] + V[t])        # critic target
+            # The seat's OUTCOME, separate from `ret`. `ret` carries the
+            # tempo shaping and so averages ~0.68, which is a return, not a
+            # probability -- a value head trained on it predicts 0.78-0.85
+            # everywhere and gives search almost nothing to rank on. `z` is
+            # the actual result (or the bootstrap value for a truncated
+            # episode), which is what P(win) means.
+            rec["z"] = float(z)
             out.append(rec)
     return out
 

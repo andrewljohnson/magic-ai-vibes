@@ -168,6 +168,10 @@ def ppo_update_fast(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
     adv_raw = torch.as_tensor(np.array([r["adv"] for r in batch],
                                        dtype=np.float32), device=DEV)
     adv = (adv_raw - adv_raw.mean()) / (adv_raw.std() + 1e-6)
+    # outcome targets for the value head (see compute_gae): P(win), not the
+    # shaped return the critic regresses
+    zt = torch.as_tensor(np.array([r.get("z", 0.5) for r in batch],
+                                  dtype=np.float32), device=DEV).clamp(0, 1)
     logp_old = torch.as_tensor(np.array([r["logp_old"] for r in batch],
                                         dtype=np.float32), device=DEV)
     val_loss = pol_loss = ent = None
@@ -198,20 +202,32 @@ def ppo_update_fast(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
         nn.utils.clip_grad_norm_(critic.parameters(), clip)
         copt.step()
         if vhead is not None:
-            # same targets, but only the acting seat's own half of the row
+            # Same targets, but only the acting seat's own half of the row.
+            #
+            # BCE-ON-LOGITS, not MSE, and that choice is load-bearing: the
+            # native reader (net.rs Mlp::value) applies a sigmoid. Train
+            # with MSE and the raw output is already a probability in
+            # [0,1], which that sigmoid then squashes into [0.5, 0.73] --
+            # monotone, but most of the resolution gone. Training on
+            # logits makes the reader's sigmoid exactly right, so the head
+            # exports to .spzw with no Rust change and no calibration step.
+            # Targets are soft (a draw is 0.5), which BCE accepts.
             vh = vhead(priv[:, :feat])
-            vh_loss = ((vh - ret) ** 2).mean()
+            vh_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                vh, zt)
             vopt.zero_grad()
             vh_loss.backward()
             nn.utils.clip_grad_norm_(vhead.parameters(), clip)
             vopt.step()
     with torch.no_grad():
         V = critic(priv)
-        vh_mse = float(((vhead(priv[:, :feat]) - ret) ** 2).mean()) \
-            if vhead is not None else 0.0
-        # variance of the targets: MSE below this means the head is
-        # genuinely predicting, not just emitting the mean
-        base_mse = float(((ret - ret.mean()) ** 2).mean())
+        # report the MSE of the SQUASHED output, so the number stays
+        # comparable to the target variance below it
+        vh_mse = float(((torch.sigmoid(vhead(priv[:, :feat])) - zt) ** 2)
+                       .mean()) if vhead is not None else 0.0
+        # variance of the OUTCOME targets: MSE below this means the head is
+        # genuinely predicting, not just emitting the base rate
+        base_mse = float(((zt - zt.mean()) ** 2).mean())
     return {"vhead_mse": vh_mse, "base_mse": base_mse,
             "critic_loss": float(val_loss.detach()),
             "pol_loss": float(pol_loss.detach()),
