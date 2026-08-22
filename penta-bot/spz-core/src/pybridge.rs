@@ -685,6 +685,7 @@ fn aac_stream_episodes(
     temperature: f64,
     threads: usize,
     max_actions: usize,
+    open_decklist: bool,
     specs: Vec<(String, String, u64, bool, bool)>,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>, Vec<u32>,
                Vec<f64>, pyo3::Bound<'_, pyo3::types::PyBytes>,
@@ -720,7 +721,7 @@ fn aac_stream_episodes(
                                   else { penta::PlayerId::Two };
                     out.push((i, crate::aac::play_episode(
                         &actor, &tables, &book, d1, d2, *seed, temperature,
-                        *hc, learner, max_actions)));
+                        *hc, learner, max_actions, open_decklist)));
                 }
                 out
             }));
@@ -792,6 +793,7 @@ fn aac_gate(
     seed_base: u64,
     threads: usize,
     max_actions: usize,
+    open_decklist: bool,
 ) -> PyResult<(f64, Vec<u32>, Vec<u32>)> {
     let (actor, tables, book) = build_aac(&catalog_json, &decklists_path,
                                           belief, hidden, w1, b1, w2, b2)
@@ -829,7 +831,7 @@ fn aac_gate(
                                   else { penta::PlayerId::Two };
                     let (s, dec, mx) = crate::aac::gate_game(
                         &actor, &tables, &book, d1, d2, seed_base + g as u64,
-                        learner, max_actions);
+                        learner, max_actions, open_decklist);
                     out.push((g, s, dec as u32, mx as u32));
                 }
                 out

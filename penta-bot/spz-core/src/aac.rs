@@ -177,18 +177,38 @@ pub fn classify_deck<'a>(book: &'a DeckBook, seen: &[u16],
 }
 
 /// Seat-indexed decklist counts for one decision's belief block -- a port
-/// of `hosted_policy.belief_deck_context`. HONEST: our own deck is known
-/// (we pilot it); the opponent's is CLASSIFIED from its revealed cards
-/// only, never from its hidden hand.
+/// of `hosted_policy.belief_deck_context`. Our own deck is always known
+/// (we pilot it); how the OPPONENT's is obtained is the `open_decklist`
+/// switch, and it is a real difference in what the bot is allowed to know:
+///
+/// * `false` (CLASSIFIED, the AAC default): infer the opponent's deck by
+///   best-overlap against its REVEALED cards only, never its hidden hand.
+///   Measured accuracy 76.6% overall -- but 0% on turn 1 (nothing is
+///   revealed yet, so there is nothing to classify), 53% turn 2, 64% turn
+///   3, reaching ~90% by turn 8. So roughly a quarter of decisions feed
+///   the belief block the WRONG decklist, concentrated in the early turns.
+///
+/// * `true` (OPEN): take the opponent's real decklist. This is what the
+///   determinized/ISMCTS lineage has always done (`mcts_runner.rs` reads
+///   `decks.get(d1)` / `decks.get(d2)` directly), which matters because
+///   the 57.7% C++ reference came from that lineage -- so a classified
+///   AAC number and that benchmark were never measured on the same game.
+///
+/// Either way the opponent's HIDDEN HAND is never read; open decklists
+/// only fix which 60 cards the unseen pool is computed from.
 fn belief_context(tables: &Tables, book: &DeckBook, obs: &PlayerObservation,
-                  our_deck: &str, scratch: &mut HashMap<u16, u32>)
-                  -> [Vec<i32>; 2] {
+                  our_deck: &str, true_opp_deck: &str, open_decklist: bool,
+                  scratch: &mut HashMap<u16, u32>) -> [Vec<i32>; 2] {
     if !tables.belief {
         return [Vec::new(), Vec::new()];
     }
     let mi = seat_idx(obs.viewer);
-    let opp_seen = seen_defs(obs, flip(obs.viewer), false);
-    let opp_name = classify_deck(book, &opp_seen, scratch).unwrap_or(our_deck);
+    let opp_name = if open_decklist {
+        true_opp_deck
+    } else {
+        let opp_seen = seen_defs(obs, flip(obs.viewer), false);
+        classify_deck(book, &opp_seen, scratch).unwrap_or(our_deck)
+    };
     let mut out = [Vec::new(), Vec::new()];
     out[mi] = tables.deck_slots(book.counts(our_deck));
     out[1 - mi] = tables.deck_slots(book.counts(opp_name));
@@ -272,7 +292,7 @@ fn expand_candidates(game: &BotGame, seat: PlayerId, m: usize,
 pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
                     d1: &str, d2: &str, seed: u64, temperature: f64,
                     handcrafted: bool, learner: PlayerId,
-                    max_actions: usize) -> Episode {
+                    max_actions: usize, open_decklist: bool) -> Episode {
     let mut game = if handcrafted {
         BotGame::new(d1, d2, Opponent::Handcrafted, flip(learner), seed)
     } else {
@@ -306,9 +326,10 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
             continue;
         }
 
-        let my_deck = if seat == PlayerId::One { d1 } else { d2 };
-        let deck_ctx = belief_context(tables, book, &obs, my_deck,
-                                      &mut scratch);
+        let (my_deck, opp_deck) = if seat == PlayerId::One { (d1, d2) }
+                                  else { (d2, d1) };
+        let deck_ctx = belief_context(tables, book, &obs, my_deck, opp_deck,
+                                      open_decklist, &mut scratch);
 
         // A pathologically wide decision: expand only a prefix, play the
         // best of it, and emit NO row. Recording a truncated candidate
@@ -400,7 +421,8 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
 /// (it is rare, and confined to near-exact ties).
 pub fn gate_game(actor: &Actor, tables: &Tables, book: &DeckBook,
                  d1: &str, d2: &str, seed: u64, learner: PlayerId,
-                 max_actions: usize) -> (f64, usize, usize) {
+                 max_actions: usize, open_decklist: bool)
+                 -> (f64, usize, usize) {
     let mut game = BotGame::new(d1, d2, Opponent::Handcrafted, flip(learner),
                                 seed).expect("game");
     let mut n = 0usize;
@@ -415,8 +437,10 @@ pub fn gate_game(actor: &Actor, tables: &Tables, book: &DeckBook,
         let idx = if acts.len() == 1 {
             0
         } else {
-            let my_deck = if seat == PlayerId::One { d1 } else { d2 };
+            let (my_deck, opp_deck) = if seat == PlayerId::One { (d1, d2) }
+                                      else { (d2, d1) };
             let deck_ctx = belief_context(tables, book, &obs, my_deck,
+                                          opp_deck, open_decklist,
                                           &mut scratch);
             let m = if max_actions > 0 { acts.len().min(max_actions) }
                     else { acts.len() };

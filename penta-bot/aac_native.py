@@ -45,6 +45,15 @@ DECKLISTS = os.path.join(HERE, "builtin-decklists.json")
 # Chosen from the measured action-count distribution; see MAX_ACTIONS above.
 DEFAULT_MAX_ACTIONS = 64
 
+# Whether the belief block gets the opponent's REAL decklist (open) or has
+# to classify it from revealed cards. Measured classification accuracy is
+# 76.6% overall but 0% on turn 1 / 53% turn 2 / 64% turn 3, so a quarter of
+# decisions -- concentrated early -- run on the wrong decklist. The
+# determinized/ISMCTS lineage has always used open decklists, which is why
+# its 57.7% reference and a classified AAC number were never comparable.
+# Neither setting ever reads the opponent's hidden HAND.
+DEFAULT_OPEN_DECKLIST = False
+
 _RESULT_NAME = {0: "p1", 1: "p2", 2: "draw", -1: None}
 
 
@@ -90,7 +99,8 @@ def _catalog(catalog_json):
 
 def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
                     threads=0, max_actions=DEFAULT_MAX_ACTIONS,
-                    catalog_json=None, decklists_path=None):
+                    open_decklist=False, catalog_json=None,
+                    decklists_path=None):
     """Play `specs` natively; return (episodes, stats).
 
     `specs` is a list of (d1, d2, seed, handcrafted, learner_is_p1).
@@ -106,7 +116,7 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
         spz_core.aac_stream_episodes(
             _catalog(catalog_json), decklists_path or DECKLISTS, belief,
             hidden, w1, b1, w2, b2, temperature, threads, max_actions,
-            specs)
+            open_decklist, specs)
 
     n_ep = len(ep_records)
     decisions = np.asarray(ep_diag[:n_ep], dtype=np.int64)
@@ -154,8 +164,8 @@ def stream_episodes(spz_core, actor, hidden, belief, specs, temperature,
 
 
 def gate(spz_core, actor, hidden, belief, learner_deck, games, seed_base,
-         threads=0, max_actions=DEFAULT_MAX_ACTIONS, catalog_json=None,
-         decklists_path=None, full=False):
+         threads=0, max_actions=DEFAULT_MAX_ACTIONS, open_decklist=False,
+         catalog_json=None, decklists_path=None, full=False):
     """Honest gate, natively: actor argmax vs the handcrafted bot.
 
     Same protocol as `aac_torch_par.gate_belief` (alternating seats,
@@ -168,7 +178,8 @@ def gate(spz_core, actor, hidden, belief, learner_deck, games, seed_base,
     w1, b1, w2, b2 = flat_weights(actor)
     rate, decisions, widest = spz_core.aac_gate(
         _catalog(catalog_json), decklists_path or DECKLISTS, belief, hidden,
-        w1, b1, w2, b2, learner_deck, games, seed_base, threads, max_actions)
+        w1, b1, w2, b2, learner_deck, games, seed_base, threads, max_actions,
+        open_decklist)
     if full:
         return rate, np.asarray(decisions), np.asarray(widest)
     return rate

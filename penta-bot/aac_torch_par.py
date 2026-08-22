@@ -279,7 +279,8 @@ def native_or_python_gate(args, spz, actor, extractor, penta, decks, games):
         return AN.gate(spz, actor, args.hidden, args.belief,
                        args.learner_deck, games, 900000,
                        threads=args.native_threads,
-                       max_actions=args.native_max_actions)
+                       max_actions=args.native_max_actions,
+                       open_decklist=not args.classify_decklist)
     return gate_belief(actor, extractor, penta, decks, args.learner_deck,
                        games, 900000)
 
@@ -337,6 +338,19 @@ def main():
                          "actions (0 = expand everything). Above the cap a "
                          "decision is played greedily from a prefix and "
                          "emits no training row")
+    # OPEN DECKLISTS ARE THE ARCHITECTURE (decided 2026-08-22). The belief
+    # block gets the opponent's REAL decklist; only their HIDDEN HAND stays
+    # hidden, which is what "honest" means here. Classifying the deck from
+    # revealed cards was the old AAC default and it is measurably lossy:
+    # 76.6% accurate overall, but 0% on turn 1, 53% turn 2, 64% turn 3 --
+    # a quarter of decisions ran the unseen-pool maths against the wrong 60
+    # cards, worst exactly where planning matters. It also made our numbers
+    # incomparable to the 57.7% C++ reference, which came from the
+    # determinized lineage where decklists were always open.
+    ap.add_argument("--classify-decklist", action="store_true",
+                    help="opt back OUT to the old behaviour: infer the "
+                         "opponent's deck from its revealed cards instead "
+                         "of being given it (76.6%% accurate; 0%% on turn 1)")
     ap.add_argument("--python-gate", action="store_true",
                     help="with --native, still gate through the Python loop "
                          "(slower; the native gate is the default there)")
@@ -370,7 +384,8 @@ def main():
     copt = torch.optim.Adam(critic.parameters(), lr=args.critic_lr)
 
     runner = (f"NATIVE(threads={args.native_threads or 'all'},"
-              f"max_actions={args.native_max_actions})"
+              f"max_actions={args.native_max_actions},"
+              f"decklist={'classified' if args.classify_decklist else 'OPEN'})"
               if args.native else f"pool(workers={args.workers})")
     log(f"PAR-AAC start: games={args.games} runner={runner} "
         f"round_ep={args.round_episodes} hidden={args.hidden} "
@@ -414,7 +429,8 @@ def main():
             episodes, nstats = AN.stream_episodes(
                 spz, actor, args.hidden, args.belief, specs,
                 args.temperature, threads=args.native_threads,
-                max_actions=args.native_max_actions)
+                max_actions=args.native_max_actions,
+                open_decklist=not args.classify_decklist)
             capped += nstats["capped"]
             for recs, res in episodes:
                 played += 1
