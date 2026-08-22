@@ -1,18 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "Bash(./build/alpha-sim:*)",
-      "Bash(/Users/andrewjohnson/proj/magic-ai-vibes/build/alpha-sim:*)",
-      "Bash(/Users/andrewjohnson/proj/magic-ai-vibes-claude/build/alpha-sim:*)",
-      "Bash(/usr/bin/time -p ./build/alpha-sim:*)",
-      "Bash(/usr/bin/time -p /Users/andrewjohnson/proj/magic-ai-vibes/build/alpha-sim:*)",
-      "Bash(/usr/bin/time -p /Users/andrewjohnson/proj/magic-ai-vibes-claude/build/alpha-sim:*)",
-      "Bash(make:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git worktree:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
       "Bash(git -C:*)",
-      "Bash(for:*)"
+      "Bash(python3 monitor.py:*)",
+      "Bash(./sweep_status.sh:*)"
     ]
   }
 }

@@ -26,3 +26,7 @@ web/penta-telemetry.json
 # training run logs (results are recorded in RESTART_HANDOFF.md)
 penta-bot/*.log
 penta-bot/*.out
+
+# Claude Code: shared settings.json IS tracked; these are not
+.claude/worktrees/
+.claude/settings.local.json
