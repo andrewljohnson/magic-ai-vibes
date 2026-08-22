@@ -230,6 +230,10 @@ tr:last-child td{border-bottom:none}
 .tip b{font-weight:600}
 .tip .row{display:flex;align-items:center;gap:6px;justify-content:space-between}
 .foot{color:var(--text-muted);font-size:12px;margin-top:4px}
+.tog{display:inline-flex;align-items:center;gap:7px;margin:0 0 16px;
+  color:var(--text-secondary);font-size:12px;cursor:pointer;user-select:none}
+.tog input{cursor:pointer}
+.empty{color:var(--text-muted);font-size:13px;padding:6px 0}
 </style></head><body><div class="wrap">
 <h1>penta bot — training monitor</h1>
 <p class="sub">Evaluation: actor argmax vs the engine's handcrafted bot.
@@ -240,7 +244,7 @@ never a single gate.</p>
   <div class="chartbox"><svg id="chart" width="1040" height="380"></svg></div>
   <div class="legend" id="legend"></div>
 </div>
-<div class="card"><h2>Runs</h2>
+<div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
   <table><thead><tr>
     <th class="l">run</th><th>games</th><th>gates</th><th>mean</th>
     <th>last 8</th><th>best</th><th>entropy</th><th>g/s</th>
@@ -262,10 +266,17 @@ function draw(){
   // runs win the slots, then the largest stopped/finished ones; everything
   // else stays in the table below (which is the full record).
   const CAP=8;
-  const all=DATA.runs.filter(r=>r.gates.length);
-  const runs=all.slice().sort((a,b)=>
-      ((!a.done&&!a.stale)?0:1)-((!b.done&&!b.stale)?0:1)||b.games-a.games
-    ).slice(0,CAP);
+  // Default to runs that are actually training. Finished and stopped runs
+  // accumulate fast (one per experiment arm) and drown the live ones --
+  // 19 runs on an 8-hue chart repeats colours and buries what matters.
+  const all=DATA.runs.filter(r=>r.gates.length);   // the TABLE shows every run
+  // The CHART shows only what is training. Finished and stopped runs pile
+  // up one per experiment arm, and 19 series on an 8-hue palette repeats
+  // colours and buries the runs that matter. Falls back to the most recent
+  // runs when nothing is live, so the chart is never blank.
+  const chartable=(()=>{const live=all.filter(r=>!r.done&&!r.stale);
+    return live.length?live:all;})();
+  const runs=chartable.slice().sort((a,b)=>b.games-a.games).slice(0,CAP);
   const charted=new Set(runs.map(r=>r.name));
   const svg=document.getElementById("chart");
   const W=svg.clientWidth||1040,H=380,P={t:14,r:132,b:34,l:44};
@@ -327,7 +338,7 @@ function draw(){
   document.getElementById("legend").innerHTML=runs.map((r,i)=>
     `<span><i class="chip" style="background:${css(SERIES[i])}"></i>${r.name}</span>`
   ).join("")+(all.length>runs.length
-    ? `<span style="color:var(--text-muted)">+${all.length-runs.length} more in the table</span>` : "");
+    ? `<span style="color:var(--text-muted)">+${all.length-runs.length} more in the table below</span>` : "");
 
   // hover: nearest gate on any series
   const tip=document.getElementById("tip");
