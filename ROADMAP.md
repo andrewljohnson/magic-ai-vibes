@@ -119,6 +119,60 @@ scores what the local gate says it should.
 
 ---
 
+## 8. Make self-play bootstrap work
+
+Pure self-play from random **fails outright**: `--selfplay-frac 1.0`
+reached 10.9% on its first evaluation and then *declined* to ~5.7%, worse
+than flailing. The mechanism is measured, not guessed: **43.3% of its
+episodes hit the 600-decision cap**, versus 14.1% for the 50/50 run at the
+same stage. Two clueless actors cannot close a game, so games never end.
+
+And `compute_gae` opens with `if result is None: return []` — a capped
+game is **discarded entirely**. So the learner sees terminal signal from
+barely half its games, and only from the unrepresentative ones that
+happened to finish. It never learns to close, so more games never end.
+
+Ideas, best first. (1) is close to a prerequisite for the rest — shaping
+and curricula are moot while the episodes are being thrown away.
+
+**1. Bootstrap truncated episodes instead of discarding them.** Hitting a
+decision limit is *truncation*, not *termination*; the standard treatment
+(Pardo et al., "Time Limits in Reinforcement Learning") is to bootstrap
+the critic's value at the cut rather than drop the episode or score it as
+a loss. The GAE loop already computes `v_next = z if t == T-1 else V[t+1]`
+— for a truncated episode it should use `V(s_T)` in place of `z`. Cheap,
+principled, and it returns 43% of self-play experience *with the right
+sign*. This also helps the 50/50 runs, which still discard ~6%, and those
+are systematically the LONG games.
+
+**2. End stalled games as draws instead of running them to the cap.**
+Detect no progress (no life change, no board change over N turns) and
+score 0.5. Converts a discarded episode into a scored one, and shortens
+games, which raises throughput at the same time.
+
+**3. Anneal the curriculum rather than fixing it at 50/50.** Start at ~100%
+handcrafted, where games actually end, and decay toward self-play as the
+actor learns to close. Gets the bootstrapping early and reduces long-run
+exposure to the very opponent we score against. The current 0.5 was a
+design choice, never tuned — 0.75 measured worse, 1.0 fails.
+
+**4. Start-state curriculum: seed self-play from mid/late-game positions.**
+Sample positions out of handcrafted (or finished self-play) games and
+start self-play there, so terminal signal is dense from the first
+decision. This is the classic answer to sparse terminal reward, and it
+directly targets "neither side knows how to finish".
+
+**5. Warm-start from a heuristic prior.** An actor that can already close
+games makes self-play produce terminating games immediately. Note the
+scar: imitating a *perfect-information* teacher got WORSE with data here.
+A first_bot-style observation-only ordering does not have that defect,
+so it is not the same experiment.
+
+**6. Shape toward ending the game.** A small per-decision penalty, or
+reward for reducing opponent life. Listed last because it invites reward
+hacking (a bot that concedes fast scores well on a length penalty), and
+because shaping does nothing while the episodes carrying it are dropped.
+
 ## Architectures already tried
 
 So nobody re-proposes one of these as if it were new. Details and numbers
@@ -231,6 +285,24 @@ a population of past selves.
 non-transitive results (a new actor beating the old one but doing worse on
 the gate), which is the classic cycling signature. **Watch for it; we are
 not currently checking.**
+
+## Check this before anything else
+
+`hosted_policy.py`'s `choose()` docstring claims **"first_bot's bare
+ordering alone beats handcrafted ~73%"** — a fixed category order (land >
+cast > attack > the rest) with no network at all.
+
+Our trained actor is at ~51%.
+
+If that 73% is real and comparable, a trivial heuristic is 22 points ahead
+of everything in this repo, and the entire neural programme is
+underperforming a baseline we already wrote. If it is stale, mismeasured,
+or from a different setup, the claim needs deleting before someone plans
+around it.
+
+Either way it is cheap to settle: run the shaped ordering through the same
+400-game evaluation the actors use. **Do this before starting any item
+above** — it could reorder the whole roadmap.
 
 ## Open questions worth an experiment
 
