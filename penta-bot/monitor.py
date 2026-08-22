@@ -50,7 +50,10 @@ TARGET = 50.0          # the "path past 50%" milestone
 TS_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\]")
 GATE_RE = re.compile(
     r"GATE @(\d+) games: ([0-9.]+)%"
+    r"(?:.*?critic_loss=([0-9.]+))?"
     r"(?:.*?entropy=([0-9.]+))?"
+    r"(?:.*?G_mean=([0-9.-]+))?"
+    r"(?:.*?capped=(\d+))?"
     r"(?:.*?\[([0-9.]+) g/s\])?")
 GATE0_RE = re.compile(r"GATE @(\d+) games: actor vs handcrafted = ([0-9.]+)%")
 START_RE = re.compile(r"PAR-AAC start: (.*)")
@@ -101,8 +104,9 @@ def parse_log(path):
                 m = GATE0_RE.search(line)
                 if m:
                     gates.append({"games": int(m.group(1)),
-                                  "pct": float(m.group(2)),
-                                  "entropy": None, "gps": None})
+                                  "pct": float(m.group(2)), "closs": None,
+                                  "entropy": None, "gmean": None,
+                                  "capped": None, "gps": None, "ts": None})
                     continue
                 m = GATE_RE.search(line)
                 if m:
@@ -110,10 +114,14 @@ def parse_log(path):
                     if ts:
                         h, mi, sec = (int(x) for x in ts.groups())
                         stamps.append(h * 3600 + mi * 60 + sec)
-                    gates.append({
-                        "games": int(m.group(1)), "pct": float(m.group(2)),
-                        "entropy": float(m.group(3)) if m.group(3) else None,
-                        "gps": float(m.group(4)) if m.group(4) else None})
+                    g = {"games": int(m.group(1)), "pct": float(m.group(2)),
+                         "closs": float(m.group(3)) if m.group(3) else None,
+                         "entropy": float(m.group(4)) if m.group(4) else None,
+                         "gmean": float(m.group(5)) if m.group(5) else None,
+                         "capped": int(m.group(6)) if m.group(6) else None,
+                         "gps": float(m.group(7)) if m.group(7) else None,
+                         "ts": stamps[-1] if stamps else None}
+                    gates.append(g)
         mtime = os.path.getmtime(path)
     except OSError:
         return None
@@ -124,6 +132,27 @@ def parse_log(path):
     scored = [g for g in gates if g["games"] > 0]
     pcts = [g["pct"] for g in scored]
     recent = pcts[-8:]
+    # Derived per-interval series. The logged g/s is a CUMULATIVE average
+    # (games since start / elapsed since start), so it only ever decays
+    # smoothly and hides what a run is doing right now. Differencing games
+    # against the log timestamps gives the instantaneous rate, which is what
+    # reveals contention, a wedged run, or games getting longer as the actor
+    # strengthens. Same for `capped`, which is logged as a running total.
+    prev = None
+    for g in gates:
+        g["rate"] = None
+        g["capped_pct"] = None
+        if prev and g["ts"] is not None and prev["ts"] is not None:
+            dt = (g["ts"] - prev["ts"]) % 86400
+            dg = g["games"] - prev["games"]
+            if dt > 0 and dg > 0:
+                g["rate"] = round(dg / dt, 2)
+            if dg > 0 and g["capped"] is not None and prev["capped"] is not None:
+                g["capped_pct"] = round(
+                    100.0 * (g["capped"] - prev["capped"]) / dg, 1)
+        if g["games"] > 0:
+            prev = g
+
     idle = time.time() - mtime
     # median spacing between this run's own gates (wrapping midnight)
     deltas = sorted((b - a) % 86400 for a, b in zip(stamps, stamps[1:]))
@@ -234,6 +263,12 @@ tr:last-child td{border-bottom:none}
   color:var(--text-secondary);font-size:12px;cursor:pointer;user-select:none}
 .tog input{cursor:pointer}
 .empty{color:var(--text-muted);font-size:13px;padding:6px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:16px}
+.panel h3{font-size:12px;margin:0 0 1px;color:var(--text-primary);
+  font-weight:600}
+.panel .why{font-size:11px;color:var(--text-muted);margin:0 0 6px;
+  min-height:28px}
 </style></head><body><div class="wrap">
 <h1>penta bot — training monitor</h1>
 <p class="sub">Evaluation: actor argmax vs the engine's handcrafted bot.
@@ -243,6 +278,11 @@ never a single gate.</p>
 <div class="card"><h2>Gate rate vs games played</h2>
   <div class="chartbox"><svg id="chart" width="1040" height="380"></svg></div>
   <div class="legend" id="legend"></div>
+</div>
+<div class="card"><h2>Training health</h2>
+  <div class="grid" id="panels"></div>
+  <p class="foot">Same colours as above. Each panel has its own y scale —
+  never a shared one, they measure different things.</p>
 </div>
 <div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
   <table><thead><tr>
@@ -395,10 +435,67 @@ function draw(){
       <td class="l cfg">${r.done?"done — "+r.done
         :r.stale?`stopped — idle ${r.idle_min}m`+(r.cadence_min?` (gates ~${r.cadence_min}m)`:"")
         :(r.config||"").replace(/^games=\S+ /,"").slice(0,58)}</td></tr>`;}).join("");
+  panels(runs);
   document.getElementById("foot").textContent =
     "mean ± is the standard error of that run's gate mean. entropy below ~0.15 "
     + "with a flat curve means the policy has stopped exploring.";
 }
+// Small multiples. Each measures a different thing, so each gets its own
+// y scale; a shared axis would be meaningless and a dual axis is never the
+// answer. Series colours match the main chart so identity carries across.
+const PANELS=[
+  {k:"entropy", t:"Policy entropy", d:1,
+   why:"Leading indicator. Drifting to ~0.15 with a flat score = stopped exploring."},
+  {k:"rate", t:"Games / sec (actual)", d:1,
+   why:"Per-interval, not the log's cumulative average. Falls as an actor strengthens."},
+  {k:"capped_pct", t:"Episodes discarded %", d:1,
+   why:"Hit the 600-decision cap and were dropped. Long games are lost from training."},
+  {k:"closs", t:"Critic loss", d:2,
+   why:"Is the value estimate tracking? Rising with flat entropy is trouble."},
+];
+function panels(runs){
+  const box=document.getElementById("panels");
+  box.innerHTML=PANELS.map(p=>{
+    const W=230,H=94,P={t:8,r:8,b:16,l:34};
+    const series=runs.map((r,i)=>({i,name:r.name,
+      pts:r.gates.filter(g=>g.games>0&&g[p.k]!=null)
+                 .map(g=>[g.games,g[p.k]])})).filter(s=>s.pts.length>1);
+    if(!series.length) return `<div class="panel"><h3>${p.t}</h3>
+      <p class="why">${p.why}</p><p class="empty">no data yet</p></div>`;
+    const xs=series.flatMap(s=>s.pts.map(v=>v[0]));
+    const ys=series.flatMap(s=>s.pts.map(v=>v[1]));
+    const xh=Math.max(...xs)||1;
+    let lo=Math.min(...ys),hi=Math.max(...ys);
+    if(hi-lo<1e-9){hi=lo+1;}
+    const pad=(hi-lo)*0.12; lo-=pad; hi+=pad;
+    const X=v=>P.l+(W-P.l-P.r)*(v/xh);
+    const Y=v=>P.t+(H-P.t-P.b)*(1-(v-lo)/(hi-lo));
+    let g=`<line x1="${P.l}" y1="${Y(hi)}" x2="${W-P.r}" y2="${Y(hi)}"
+      stroke="${css("--grid")}" stroke-width="1"/>
+      <line x1="${P.l}" y1="${Y(lo)}" x2="${W-P.r}" y2="${Y(lo)}"
+      stroke="${css("--grid")}" stroke-width="1"/>
+      <text x="${P.l-5}" y="${Y(hi)+4}" text-anchor="end" font-size="10"
+      fill="${css("--text-muted")}">${hi.toFixed(p.d)}</text>
+      <text x="${P.l-5}" y="${Y(lo)+4}" text-anchor="end" font-size="10"
+      fill="${css("--text-muted")}">${lo.toFixed(p.d)}</text>`;
+    for(const s of series){
+      const c=css(SERIES[s.i]);
+      g+=`<polyline points="${s.pts.map(v=>`${X(v[0])},${Y(v[1])}`).join(" ")}"
+        fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round"
+        stroke-linecap="round"/>`;
+      const last=s.pts[s.pts.length-1];
+      g+=`<circle cx="${X(last[0])}" cy="${Y(last[1])}" r="3" fill="${c}"
+        stroke="${css("--surface-1")}" stroke-width="1.5"/>`;
+    }
+    const vals=series.map(s=>{const v=s.pts[s.pts.length-1][1];
+      return `<span style="color:${css(SERIES[s.i])}">●</span>
+        <span style="color:var(--text-secondary)">${v.toFixed(p.d)}</span>`;}).join(" ");
+    return `<div class="panel"><h3>${p.t}</h3><p class="why">${p.why}</p>
+      <svg width="${W}" height="${H}">${g}</svg>
+      <div style="font-size:11px;margin-top:2px">${vals}</div></div>`;
+  }).join("");
+}
+
 async function poll(){
   try{DATA=await (await fetch("/data")).json();draw();}catch(e){}
 }
