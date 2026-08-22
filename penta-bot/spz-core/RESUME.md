@@ -19,7 +19,46 @@
     (feature + target) on identical seeds before any native training row
     counts.
 
-## NEXT once row-lockstep passes
+## AAC NATIVE SELF-PLAY (2026-08-21) -- the current work
+
+[x] `aac.rs`: native AAC trajectory runner. Forks with BotGame::clone,
+    observes typed, featurizes with extract::features (belief block was
+    already ported), scores with an AAC `Actor` (afterstate scorer, tanh
+    hidden, NO sigmoid -- net::Mlp's squash belongs to the determinized
+    value net), softmax + splitmix64 sampling, emits the exact record
+    aac_torch's compute_gae / ppo_update_fast consume.
+[x] Ported for the honest actor: classify_deck + belief_deck_context (our
+    deck known, opponent's classified from REVEALED cards only), and
+    `DeckBook` -- classify_deck breaks ties by decklist FILE order, which
+    a HashMap cannot reproduce, hence serde_json preserve_order.
+[x] pybridge: `aac_stream_episodes` (one call per PPO round, games across
+    OS threads, GIL released, flat buffers back) and `aac_gate`.
+[x] ROW LOCKSTEP PASSES: candidate features, privileged rows, shaped
+    rewards and record/result structure BIT-EQUAL over 569 decisions /
+    5202 candidates vs the Python path. Logits agree to 1.4e-13 (numpy
+    uses blocked BLAS summation; native accumulates straight through).
+    Run: `.venv-torch/bin/python aac_lockstep.py --belief --hidden 256`
+[x] Throughput: 7.8 g/s end-to-end in the trainer vs the Python pool's
+    ~0.9 g/s ceiling.
+[x] The "native engine hang" was WIDE DECISIONS, not a stall: 21 of 240
+    gate games hold a decision offering >64 legal actions (max 538) and
+    the expansion is linear in that. 240 games = 47.8s capped at 64 vs
+    not finishing in 13 min uncapped. `max_actions` caps it; over the cap
+    a decision is played greedily from a prefix and emits NO row.
+[x] Actor forward batched over a decision's candidates -- one pass over
+    the 2.2 MB f64 w1 per DECISION instead of per candidate. Bit-exact
+    (same per-candidate accumulation order). 0.80 -> 0.24 s/game.
+
+## OPEN: per-process scaling
+One process saturates near 8 threads (8.5 g/s); FOUR processes at 8
+threads each reach ~26 g/s aggregate on the same box. So ~3x remains and
+the limit is per-process, not hardware. mimalloc moved it 8.0 -> 8.5, so
+allocator arenas are not the cause. Next suspects: the per-candidate
+feature Vec and full BotGame::clone, and cache pressure from the f64
+weight matrix (f32 weights would halve it, at the cost of the exact-f64
+lockstep). Workaround today: shard across 2-4 trainer processes.
+
+## NEXT (determinized runner -- older track, unchanged)
 1. end-to-end trainer integration: a --native-rows mode in trainer.py
    that calls spz_core.stream_rows per round (specs from matchup/league/
    learner_seat scheduling), reshapes into the replay ring, and runs the
@@ -42,4 +81,5 @@
   accessor patch (SPZ VENDOR PATCH) -- candidate upstream PR.
 
 ## Reload
-cd spz-core && cargo build --release && cp target/release/libspz_core.dylib ../spz_core.so
+cd spz-core && cargo build --release
+cp target/release/libspz_core.so ../spz_core.so   # .dylib on macOS

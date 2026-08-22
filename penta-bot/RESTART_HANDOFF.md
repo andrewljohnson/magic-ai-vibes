@@ -36,9 +36,12 @@ Asymmetric Actor-Critic (AAC), PyTorch PPO + GAE:
 
 ## Files
 
-- `aac_torch_par.py` — THE trainer (parallel, N-worker fork Pool). Has all the
-  throughput fixes + `--belief` + grow-init warm-start + best-actor saving +
-  native-hang watchdog. **This is the file to run.**
+- `aac_torch_par.py` — THE trainer. **This is the file to run**, now with
+  `--native`: episode generation moves to spz-core (see "NATIVE SELF-PLAY
+  LOOP" below) while PPO/GAE/critic/gating stay here. Without `--native`
+  it is the original N-worker fork Pool, watchdog and all.
+- `aac_native.py` — adapter for the native runner (weights out, records in).
+- `aac_lockstep.py` — the check that certifies native rows == Python rows.
 - `aac_torch.py` — single-process reference (MLP, decide, compute_gae,
   ppo_update, gate). Imported by the parallel trainer.
 - `aac_selfplay.py` — env helpers (_priv_features, tempo constants, MAX_DECISIONS).
@@ -65,6 +68,11 @@ on Linux. The engine SOURCE is vendored (Rust), so rebuild it — this reproduce
 the pinned engine 0.7.0 / protocol 22 (`lacker/penta ac6cd4d`). Needs Python
 3.13 and a current Rust (edition 2024 -> rustc >= 1.85).
 
+The engine binding pins `abi3-py313`, so it needs Python **3.13**. Ubuntu
+24.04 ships 3.12; `uv` installs 3.13 without touching the system python
+(and without patching the vendored engine's build config, which would
+make the "pinned engine" claim a lie).
+
 ```bash
 # 1. Rust engine -> Linux penta.so
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -73,12 +81,21 @@ cd penta-bot/vendor/penta/bindings/penta-py
 cargo build --release            # -> target/release/libpenta.so
 cp target/release/libpenta.so ../../../../engine-0.7.0/penta.so   # overwrite mac binary
 cd ../../../../                  # back to penta-bot
+# NOTE: the rebuilt .so is a LINUX binary. Leave it out of commits --
+# engine-0.7.0/penta.so is tracked as the macOS-ARM build.
 
-# 2. Python + torch (CUDA build auto-selected on a GPU box)
-python3 -m venv --system-site-packages .venv-torch
-.venv-torch/bin/pip install torch numpy
+# 2. Python 3.13 + torch
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv python install 3.13
+uv venv --python 3.13 .venv-torch
+uv pip install --python .venv-torch/bin/python torch numpy
 
-# 3. Sanity: must print 1081 (825 + 2*128 defs) -- confirms the Linux engine
+# 3. spz-core (the native self-play runner)
+cd spz-core && cargo build --release
+cp target/release/libspz_core.so ../spz_core.so && cd ..
+
+# 4. Sanity: must print 1081 (825 + 2*128 defs) -- confirms the Linux engine
 #    reproduces the same 128-def catalog, so the .npz actors transfer as-is.
 PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python -c \
   "from extractor import Extractor; print(Extractor(version=2, belief=True).size)"
@@ -125,45 +142,97 @@ print('400-game gate:', 100*gate_belief(a,ex,penta,load_decklists(),'Sligh',400,
 
 ## KNOWN ISSUES / THROUGHPUT
 
-- **Native engine hangs**: a worker occasionally spins/blocks in native code
-  (unbounded by MAX_DECISIONS). The watchdog (`--per-result-timeout`) kills +
-  rebuilds the pool and keeps completed episodes. STRONGER actors hang MORE
-  (~1/125 games at 44%+), dragging throughput to ~0.9 g/s. This is the current
-  ceiling for strong-actor runs.
+- **"Native engine hangs" — SOLVED, and they were never hangs.** They were
+  decisions with enormous legal-action lists (up to 538 vs a median 17),
+  where the afterstate expansion costs a fork + a feature extraction per
+  action. See "What the native engine hang actually was" below. The
+  `--native` runner caps the expansion; the fork-pool path still needs
+  `--per-result-timeout`.
 - **BLAS oversubscription** was fixed by pinning 1 thread/worker (baked into
   the script's env at the top). Do not remove.
 - Memory: use `--workers = physical_cores - 2`. fork start method loads torch
   ONCE (shared COW); workers use numpy+engine only.
 
-## NEXT STEPS (priority order — DECIDED 2026-08-21)
+## NATIVE SELF-PLAY LOOP -- DONE (2026-08-21)
 
-**#1 (USER-CHOSEN): Rust the self-play hot loop in `spz-core`.** The Python
-loop is capped at ~0.9 g/s by native engine HANGS (a worker spins/blocks in
-engine code; the watchdog absorbs it but it worsens as the actor strengthens).
-A native loop removes that tax and saturates all cores on the beefy Linux box.
-spz-core already has the pieces:
-  - `net.rs::Mlp` (load + forward) — reuse as the AAC ACTOR (afterstate scorer,
-    same features->scalar shape). Add softmax-over-afterstates + PRNG sampling.
-  - `extract.rs::features` — native feature extraction. ADD the belief block
-    (unseen-pool = decklist - seen; port `_belief_block` from extractor.py /
-    the old C++ `selfplay_zero.cpp`). Need both-seats extraction for the
-    privileged critic.
-  - `det_runner.rs::play_game` — native self-play runner; prior "--native-rows"
-    work already feeds trajectories to the Python trainer via `pybridge.rs`.
-  Concrete FIRST SLICE: emit AAC trajectories natively — per decision
-  {candidate afterstate features, chosen idx, logp_old, privileged (both-seat)
-  features, shaped reward, seat} + terminal result — and feed them to the
-  EXISTING Python PPO+GAE update (`ppo_update_fast` in aac_torch_par.py) and
-  gate. Keep the learner in torch (tiny, fast); only MOVE GENERATION to Rust.
-  Validate: a native-generated batch must reproduce the Python gate curve
-  (lockstep check — there's precedent: "Row-lockstep PASSES" in git log).
-  Build: `cd penta-bot/spz-core && cargo build --release`; exposed via pybridge.
+Step #1 below is BUILT and validated. Generation runs in Rust; the learner
+is untouched (Python still owns PPO, GAE, the critic, gating, saving).
 
-**#2: Once native generation runs, scale hard** — belief run 100k+ games (it
-peaked 45% at only 6k, still oscillating up; belief cols start at zero and need
-many games to mature — open question whether it climbs toward 57.7%), then
-bigger net (512; width ladder gave ~+5%/2x, diminishing but real).
+Files: `spz-core/src/aac.rs` (runner + AAC actor + honest deck
+classification), `pybridge.rs::aac_stream_episodes` / `aac_gate`,
+`aac_native.py` (adapter), `aac_lockstep.py` (the certification),
+`aac_torch_par.py --native`.
 
-**#3:** reward/λ sweeps, larger gate samples to cut variance.
+**Row lockstep PASSES.** `aac_lockstep.py` replays a native episode's
+chosen actions through the original Python path and compares. Candidate
+afterstate features, privileged critic rows, shaped rewards, and the
+record/result structure are BIT-EQUAL over 569 decisions / 5202
+candidates. Actor logits agree to 1.4e-13 -- not bit-equal by design,
+because numpy hands the dot product to BLAS (blocked, reordered
+summation) while the native scorer accumulates straight through in f64.
+4/569 argmax disagreements, all near-exact ties.
+
+```bash
+PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
+    --episodes 4 --hidden 256 --belief --actor aac_par_belief_best.npz
+```
+
+### Run the native trainer
+
+```bash
+PENTA_ENGINE_DIR=engine-0.7.0 nohup .venv-torch/bin/python aac_torch_par.py \
+  --native --native-threads <CORES-2> \
+  --belief --games 100000 --round-episodes 64 --hidden 256 \
+  --actor-lr 1e-3 --critic-lr 2e-3 --ppo-epochs 4 --entropy-beta 0.01 \
+  --gae-lambda 0.95 \
+  --init-actor aac_par_belief_actor.npz \
+  --gate-every 3000 --gate-games 400 --seed 1 \
+  --log belief_native.log --save-prefix aac_par_belief_native \
+  > belief_native.out 2>&1 &
+```
+`--gate-games` can now be 400 rather than 120: the gate is native and
+threaded, so a large-sample gate costs less than the round it validates.
+`--python-gate` forces the old Python gate for spot-checking.
+
+### What the "native engine hang" actually was
+
+Not a hang. The afterstate expansion costs one game fork + one feature
+extraction PER LEGAL ACTION. The median decision offers 17 candidates,
+but 21 of 240 gate games contain a decision offering more than 64, up to
+**538** -- roughly 30x a normal decision, several times per game. The old
+fork-pool worker was not stuck in native code, it was expanding an
+enormous action list, and `--per-result-timeout` killed it at 25s. Same
+240 games, 8 threads: **47.8s with `--native-max-actions 64`, versus not
+finishing in 13 minutes uncapped.**
+
+Above the cap the runner scores a prefix, plays the best of it, and emits
+NO training row -- a softmax over a truncated candidate set is not the
+distribution the actor sampled from, so it must not become a PPO target.
+`--native-max-actions 0` restores full expansion (what lockstep runs).
+
+## NEXT STEPS (priority order)
+
+**#1: scale the belief run.** This was #2 and is now unblocked. 100k+
+games (it peaked 45% at only 6k and was still oscillating up; the belief
+columns start at zero and need many games to mature -- open question
+whether it climbs toward the old C++ bot's 57.7%). Then a bigger net
+(512; the width ladder gave ~+5% per 2x, diminishing but real).
+
+**#2: the remaining throughput lever is per-process scaling.** Native
+generation measured **7.8 g/s** end-to-end in the trainer against the
+Python pool's ~0.9 g/s ceiling. But thread scaling inside ONE process
+saturates around 8 threads, while FOUR processes at 8 threads each hit
+~26 g/s aggregate on the same box -- so ~3x is still on the table and the
+limit is per-process, not hardware. mimalloc was tried and moved it only
+8.0 -> 8.5 g/s, so allocator arenas are not it; the next suspects are the
+remaining per-candidate allocation (a fresh feature Vec and a full
+`BotGame::clone` per candidate) and cache pressure from the 2.2 MB f64
+weight matrix. Cheap workaround available today: run 2-4 trainer
+processes and average their actors, or shard the games.
+
+**#3:** dedupe equivalent afterstates before scoring (many of those wide
+action lists are permutations that settle to identical afterstates --
+would cut the cap's cost AND remove its approximation), reward/lambda
+sweeps, larger gate samples to cut variance.
 
 See memory: `aac-parallel-throughput.md`, `penta-bot-arc.md`.
