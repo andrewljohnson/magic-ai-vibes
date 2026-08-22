@@ -1,76 +1,93 @@
-# Old School Magic — engine, bots, and arena
+# penta-bot
 
-A fast, deterministic C++20 engine for a compact Old School
-*Magic: The Gathering* card pool, with a browser arena and a ladder of
-bots. The five-deck metagame:
+Reinforcement learning for **lacker's penta** — a compact Magic: The
+Gathering engine. This repo trains one thing: the strongest **honest** bot
+we can, to play on lacker's server.
 
-- Green: 18 Forest, 9 Grizzly Bears, 8 Ironroot Treefolk, 4 Giant Growth,
-  1 Tsunami
-- Red: 15 Mountain, 9 Lightning Bolt, 7 Ironclaw Orcs, 4 Gray Ogre,
-  3 Hill Giant, 2 Fire Elemental
-- Blue: 15 Island, 1 Mox Sapphire, 1 Sol Ring, 1 Ancestral Recall,
-  1 Time Walk, 1 Braingeyser, 4 Flying Men, 4 Force Spike,
-  8 Counterspell, 4 Air Elemental
-- White: 22 Plains, 3 Millstone, 15 Moat
-- RU Aggro: 13 Mountain, 4 Island, 3 Flying Men, 5 Ironclaw Orcs,
-  2 Gray Ogre, 8 Hill Giant, 3 Lightning Bolt, 2 Disintegrate
+Everything else that used to live here (a C++ engine, a browser arena, a
+human-vs-bot play server) has been removed. We are not building an engine
+and we are not building a site.
 
-## Bots
-
-- **Random** — uniform over legal actions.
-- **Monte Carlo / Deep Monte Carlo** — random-continuation sampling.
-- **Handcoded Policy** — the compact rules-aware baseline.
-- **Self-Play Zero (SPZ)** — the champion. A value network learned purely
-  from mirror self-play outcomes, played with determinized rollout
-  lookahead and rules-only waste pruning. No hand-authored card values.
-  SPZ beats the Handcoded Policy ~58-60% in deck/seat/play-draw-balanced
-  paired benchmarks and pilots every metagame deck at or above the
-  Handcoded Policy's win rate.
-
-## Build and test
-
-```sh
-make            # selfplay-zero + web bridge
-make test       # engine, SPZ, bridge, and web test suites
+```
+RESULTS.md    what we measured, and what it means
+ROADMAP.md    what to try next
+penta-bot/    the bot: training, evaluation, monitor
 ```
 
-## Play in the browser
+## Honest
 
-```sh
-make web        # http://127.0.0.1:4173 (PORT=NNNN to change)
+The deployed actor sees only a **redacted observation** — its own hand,
+the public zones, and the opponent's hand *size*. It never sees the
+opponent's hidden hand. That constraint is the whole problem; everything
+in the design exists to get strength out of it.
+
+Decklists are **open**: the bot knows which of the built-in decks the
+opponent is piloting. Only their hand is hidden. (Inferring the deck from
+revealed cards was the old default and is still available behind
+`--classify-decklist`; it is 76.6% accurate and 0% on turn 1.)
+
+## Where it stands
+
+| | honest gate vs the built-in bot |
+|---|---|
+| the handcrafted bot we set out to beat | 31.6% |
+| best trained actor, 800-game gate | **51.1%** |
+
+See `RESULTS.md` for the full record and the error bars — gates are 400
+games (±2.5 points), so single gates are noise and only means count.
+
+## Setup
+
+Needs Rust and Python 3.13 (the engine binding pins `abi3-py313`).
+
+```bash
+# 1. build the engine binding for this platform
+cd penta-bot/vendor/penta/bindings/penta-py
+cargo build --release
+cp target/release/libpenta.so ../../../../engine-0.7.0/penta.so
+cd ../../../..
+
+# 2. python + torch
+uv venv --python 3.13 .venv-torch
+uv pip install --python .venv-torch/bin/python torch numpy
+
+# 3. the native self-play runner
+cd spz-core && cargo build --release
+cp target/release/libspz_core.so ../spz_core.so && cd ..
+
+# 4. sanity: must print 1081
+PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python -c \
+  "from extractor import Extractor; print(Extractor(version=2, belief=True).size)"
 ```
 
-The browser never invents rules: every button comes from the engine's
-legal-action list, and hidden information stays on the engine side.
+If step 4 prints anything else, the card catalog differs from the one the
+saved actors were trained against and they will not transfer.
 
-## SPZ training and benchmarks
+## Train
 
-```sh
-# Train a fresh champion (league self-play, then rollout fine-tuning):
-./build/selfplay-zero train --out build/spz.txt --iterations 120 \
-    --games 256 --threads 8 --seed 424243
-./build/selfplay-zero train --out build/spz-ft.txt --init build/spz.txt \
-    --iterations 40 --games 96 --threads 8 --rollout --lr 0.003 \
-    --eps-start 0.06 --eps-final 0.03 --seed 991177
-
-# Paired benchmark against a baseline:
-./build/selfplay-zero benchmark --model data/spz-champion-v6.txt \
-    --reps 20 --seed 101 --threads 8 --worlds 4 --rollout \
-    --baseline handcrafted
+```bash
+cd penta-bot
+PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_torch_par.py \
+  --native --native-threads 6 --belief --hidden 256 \
+  --games 200000 --gate-every 3000 --gate-games 400 \
+  --log myrun.log --save-prefix myrun
 ```
 
-The deployed champion lives at `data/spz-champion-v6.txt`.
+One process saturates around 3 cores, so **fill a big machine with
+several concurrent runs, not one wide one** — see RESULTS.md.
 
-## Live training monitor
+## Watch
 
-Add `--telemetry build/telemetry/telemetry.jsonl --probe-every 10
---probe-baseline data/spz-champion-v6.txt` to any `train` run, then:
-
-```sh
-cp web/training-monitor.html build/telemetry/monitor.html
-python3 -m http.server 4175 --directory build/telemetry --bind 127.0.0.1
+```bash
+cd penta-bot && python3 monitor.py     # -> http://localhost:8899
 ```
 
-Open <http://127.0.0.1:4175/monitor.html> for live strength-probe and
-loss charts (probes are 100-game paired sets vs Handcrafted and
-head-to-head vs the frozen champion).
+Reads the trainers' own logs. No dependencies, no build step.
+
+## Check
+
+```bash
+# native rows must stay bit-identical to the Python reference path
+PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
+    --episodes 3 --hidden 256 --belief --actor <actor>.npz
+```
