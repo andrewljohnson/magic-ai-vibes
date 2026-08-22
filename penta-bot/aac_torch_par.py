@@ -459,9 +459,22 @@ def main():
             sd_np = {k: v.detach().numpy()
                      for k, v in actor.state_dict().items()}
             np.savez(f"{args.save_prefix}_actor.npz", **sd_np)   # latest
+            # Checkpoint the CRITIC too. It is privileged (both seats'
+            # redacted observations) so it can never deploy as an honest
+            # actor -- but it is trained on real value targets, which the
+            # actor is not: the actor only ever sees a softmax over one
+            # decision's afterstates, so its logit has no absolute scale
+            # (see calibrate_aac_spzw.py). That makes the critic the
+            # candidate leaf evaluator for determinized search, where a
+            # sampled world supplies both hands by construction and using
+            # it stays honest. Until now every run discarded it at exit.
+            cr_np = {k: v.detach().numpy()
+                     for k, v in critic.state_dict().items()}
+            np.savez(f"{args.save_prefix}_critic.npz", **cr_np)
             if wr > best_wr:
                 best_wr = wr
                 np.savez(f"{args.save_prefix}_best.npz", **sd_np)
+                np.savez(f"{args.save_prefix}_best_critic.npz", **cr_np)
                 log(f"  new best {100*wr:.1f}% -> {args.save_prefix}_best.npz",
                     args.log)
     tail = f"{capped} capped" if args.native else f"{hangs} hangs"
