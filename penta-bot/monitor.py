@@ -153,6 +153,27 @@ def parse_log(path):
         if g["games"] > 0:
             prev = g
 
+    # A run's name says nothing about what it is testing, and after a few
+    # experiments nobody remembers which prefix meant what. Derive a short
+    # descriptor from the config the trainer logged at startup.
+    def cfg(pat, default=None):
+        m = re.search(pat, config)
+        return m.group(1) if m else default
+    decklist = cfg(r"decklist=(\w+)")
+    bits = []
+    if decklist:
+        bits.append("open decklists" if decklist.upper() == "OPEN"
+                    else "classified deck")
+    if cfg(r"hidden=(\d+)"):
+        bits.append("h" + cfg(r"hidden=(\d+)"))
+    for pat, fmt in ((r"ent=([0-9.]+)", "ent {}"),
+                     (r"gae_lam=([0-9.]+)", "λ {}"),
+                     (r"a_lr=([0-9.e-]+)", "lr {}")):
+        v = cfg(pat)
+        if v and v not in ("0.01", "0.95", "0.001"):   # only note non-defaults
+            bits.append(fmt.format(v))
+    label = " · ".join(bits)
+
     idle = time.time() - mtime
     # median spacing between this run's own gates (wrapping midnight)
     deltas = sorted((b - a) % 86400 for a, b in zip(stamps, stamps[1:]))
@@ -161,6 +182,7 @@ def parse_log(path):
     return {
         "name": name,
         "config": config,
+        "label": label,
         "done": done,
         "stale": done is None and idle > stale_after,
         "idle_min": int(idle // 60),
@@ -357,7 +379,9 @@ function draw(){
   const labs=runs.map((r,i)=>{const g=r.gates[r.gates.length-1];
     return {r,i,gx:X(g.games),gy:Y(g.pct),y:Y(g.pct),pct:g.pct};})
     .sort((a,b)=>a.y-b.y);
-  const GAP=15;
+  // Labels are two lines when a run has a descriptor, so the de-collision
+  // spacing has to account for the second line or they overlap again.
+  const GAP=runs.some(r=>r.label)?27:15;
   for(let k=1;k<labs.length;k++)
     if(labs[k].y-labs[k-1].y<GAP) labs[k].y=labs[k-1].y+GAP;
   const over=labs.length?labs[labs.length-1].y-(H-P.b):0;
@@ -372,11 +396,15 @@ function draw(){
           stroke="${css("--rule")}" stroke-width="1"/>`;
     s+=`<circle cx="${lx-1}" cy="${l.y-3}" r="3.5" fill="${c}"/>
         <text x="${lx+8}" y="${l.y}" font-size="11"
-        fill="${css("--text-secondary")}">${l.r.name} ${fmt(l.pct)}%</text>`;
+        fill="${css("--text-secondary")}">${l.r.name} ${fmt(l.pct)}%</text>`
+      + (l.r.label?`<text x="${lx+8}" y="${l.y+12}" font-size="10"
+        fill="${css("--text-muted")}">${l.r.label}</text>`:"");
   });
   svg.innerHTML=s;
   document.getElementById("legend").innerHTML=runs.map((r,i)=>
-    `<span><i class="chip" style="background:${css(SERIES[i])}"></i>${r.name}</span>`
+    `<span><i class="chip" style="background:${css(SERIES[i])}"></i>${r.name}`
+     + (r.label?` <span style="color:var(--text-muted)">(${r.label})</span>`:"")
+     + `</span>`
   ).join("")+(all.length>runs.length
     ? `<span style="color:var(--text-muted)">+${all.length-runs.length} more in the table below</span>` : "");
 
@@ -427,7 +455,8 @@ function draw(){
       : `<i class="chip" style="background:transparent;border:1px solid var(--rule)"></i>`;
     return `
     <tr class="${(r.done||r.stale)?"dead":""}">
-      <td class="l"><span class="name">${chip}${r.name}</span></td>
+      <td class="l"><span class="name">${chip}${r.name}</span>
+        ${r.label?`<div class="cfg" style="margin-left:17px">${r.label}</div>`:""}</td>
       <td>${r.games.toLocaleString()}</td><td>${r.n}</td>
       <td>${fmt(r.mean)}% <span class="cfg">±${fmt(r.se,2)}</span></td>
       <td>${fmt(r.recent)}%</td><td>${fmt(r.best)}%</td>
