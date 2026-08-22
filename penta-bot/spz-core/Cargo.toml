@@ -22,6 +22,13 @@ prof = []
 penta = { path = "../vendor/penta" }
 serde_json = { version = "1", features = ["preserve_order"] }
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py313"] }
+# Thread-caching allocator. The native AAC runner allocates hard in its
+# hot loop (a feature vector per candidate, a game clone per candidate),
+# and glibc's arena locks serialize that across threads: measured 8.0 g/s
+# from ONE process with 30 threads versus ~26 g/s aggregate from four
+# processes with 8 threads each -- same machine, same work, so the wall
+# was per-process allocator contention, not memory bandwidth.
+mimalloc = { version = "0.1", default-features = false }
 
 [profile.release]
 lto = false  # LTO miscompiled the cdylib -> SIGKILL at dlopen; disabled

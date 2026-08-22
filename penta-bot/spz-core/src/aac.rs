@@ -18,6 +18,8 @@
 use penta::protocol::{protocol_actions, BotGame, Opponent};
 use penta::{Action, PlayerId, PlayerObservation, Step};
 
+use std::collections::HashMap;
+
 use crate::decks::DeckBook;
 use crate::det_runner::seen_defs;
 use crate::extract::features;
@@ -71,15 +73,43 @@ impl Actor {
 
     /// Unsquashed logit for one afterstate feature row.
     pub fn score(&self, x: &[f32]) -> f64 {
-        debug_assert_eq!(x.len(), self.inputs);
-        let mut out = self.b2;
+        self.score_batch(x, 1)[0]
+    }
+
+    /// Logits for a whole decision's candidates at once (`m` rows of
+    /// `inputs`, row-major).
+    ///
+    /// THIS is the throughput-critical shape. Scoring candidates one at a
+    /// time re-streams the entire w1 matrix per candidate -- 256x1081 f64
+    /// is 2.2 MB, well past L2, so every candidate pays a trip to DRAM and
+    /// a pool of threads doing that saturates memory bandwidth long before
+    /// it saturates the cores (measured: 30 threads getting ~5 cores of
+    /// real work). Hoisting the hidden-unit loop OUTSIDE the candidate
+    /// loop reads each weight row once and reuses it across all m
+    /// candidates, cutting weight traffic by a factor of m.
+    ///
+    /// The per-candidate accumulation order is unchanged, so the results
+    /// are bit-identical to the one-at-a-time version -- the lockstep
+    /// check still holds.
+    pub fn score_batch(&self, cand: &[f32], m: usize) -> Vec<f64> {
+        debug_assert_eq!(cand.len(), m * self.inputs);
+        let mut out = vec![self.b2; m];
+        let mut pre = vec![0.0f64; m];
         for h in 0..self.hidden {
             let row = &self.w1[h * self.inputs..(h + 1) * self.inputs];
-            let mut pre = self.b1[h];
-            for (w, xi) in row.iter().zip(x) {
-                pre += w * f64::from(*xi);
+            let bias = self.b1[h];
+            for (j, p) in pre.iter_mut().enumerate() {
+                let x = &cand[j * self.inputs..(j + 1) * self.inputs];
+                let mut acc = bias;
+                for (w, xi) in row.iter().zip(x) {
+                    acc += w * f64::from(*xi);
+                }
+                *p = acc;
             }
-            out += self.w2[h] * pre.tanh();
+            let w2h = self.w2[h];
+            for (o, p) in out.iter_mut().zip(&pre) {
+                *o += w2h * p.tanh();
+            }
         }
         out
     }
@@ -114,24 +144,30 @@ pub struct Episode {
 /// Best-overlap built-in deck for a list of seen definitions -- a port of
 /// `hosted_policy.classify_deck`. Ties keep the FIRST deck in decklist
 /// file order (strict `>`), which is why `DeckBook` preserves that order.
-pub fn classify_deck<'a>(book: &'a DeckBook, seen: &[u16]) -> Option<&'a str> {
+/// `scratch` is a reusable {definition: seen count} buffer; it is cleared
+/// on entry. Passing one in keeps this off the allocator, which matters
+/// because it runs once per decision (see the hot-loop note in `Actor`).
+pub fn classify_deck<'a>(book: &'a DeckBook, seen: &[u16],
+                         scratch: &mut HashMap<u16, u32>) -> Option<&'a str> {
     if seen.is_empty() {
         return None;
+    }
+    // Python decrements a COPY of each decklist per seen card and counts
+    // the hits; that total is just the multiset intersection, so count the
+    // seen cards once and take sum-of-min per deck. Same number, no
+    // per-deck HashMap clone.
+    scratch.clear();
+    for d in seen {
+        *scratch.entry(*d).or_insert(0) += 1;
     }
     let mut best: Option<&str> = None;
     let mut best_score = -1.0f64;
     for (name, deck) in &book.order {
-        let mut pool = deck.clone();
-        let mut hits = 0usize;
-        for d in seen {
-            if let Some(c) = pool.get_mut(d) {
-                if *c > 0 {
-                    *c -= 1;
-                    hits += 1;
-                }
-            }
+        let mut hits = 0u32;
+        for (d, n) in scratch.iter() {
+            hits += (*n).min(deck.get(d).copied().unwrap_or(0));
         }
-        let score = hits as f64 / seen.len() as f64;
+        let score = f64::from(hits) / seen.len() as f64;
         if score > best_score {
             best_score = score;
             best = Some(name.as_str());
@@ -145,13 +181,14 @@ pub fn classify_deck<'a>(book: &'a DeckBook, seen: &[u16]) -> Option<&'a str> {
 /// (we pilot it); the opponent's is CLASSIFIED from its revealed cards
 /// only, never from its hidden hand.
 fn belief_context(tables: &Tables, book: &DeckBook, obs: &PlayerObservation,
-                  our_deck: &str) -> [Vec<i32>; 2] {
+                  our_deck: &str, scratch: &mut HashMap<u16, u32>)
+                  -> [Vec<i32>; 2] {
     if !tables.belief {
         return [Vec::new(), Vec::new()];
     }
     let mi = seat_idx(obs.viewer);
     let opp_seen = seen_defs(obs, flip(obs.viewer), false);
-    let opp_name = classify_deck(book, &opp_seen).unwrap_or(our_deck);
+    let opp_name = classify_deck(book, &opp_seen, scratch).unwrap_or(our_deck);
     let mut out = [Vec::new(), Vec::new()];
     out[mi] = tables.deck_slots(book.counts(our_deck));
     out[1 - mi] = tables.deck_slots(book.counts(opp_name));
@@ -207,7 +244,6 @@ fn expand_candidates(game: &BotGame, seat: PlayerId, m: usize,
                      actor: &Actor) -> Option<(Vec<f32>, Vec<f64>)> {
     let feat = tables.size;
     let mut cand: Vec<f32> = Vec::with_capacity(m * feat);
-    let mut logits: Vec<f64> = Vec::with_capacity(m);
     for i in 0..m {
         let mut copy = game.clone();
         if copy.act(i).is_err() {
@@ -215,10 +251,9 @@ fn expand_candidates(game: &BotGame, seat: PlayerId, m: usize,
         }
         let after = copy.core_game().observe(seat);
         let after_pg = copy.core_game().in_pregame();
-        let row = features(&after, after_pg, tables, deck_ctx);
-        logits.push(actor.score(&row));
-        cand.extend_from_slice(&row);
+        cand.extend(features(&after, after_pg, tables, deck_ctx));
     }
+    let logits = actor.score_batch(&cand, m);
     Some((cand, logits))
 }
 
@@ -254,6 +289,7 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
     let mut prev_own_power: [Option<f64>; 2] = [None, None];
     let mut n = 0usize;
     let mut max_seen = 0usize;
+    let mut scratch: HashMap<u16, u32> = HashMap::new();
 
     while game.result().is_none() && n < MAX_DECISIONS {
         let Some(seat) = game.decision_seat() else { break };
@@ -271,7 +307,8 @@ pub fn play_episode(actor: &Actor, tables: &Tables, book: &DeckBook,
         }
 
         let my_deck = if seat == PlayerId::One { d1 } else { d2 };
-        let deck_ctx = belief_context(tables, book, &obs, my_deck);
+        let deck_ctx = belief_context(tables, book, &obs, my_deck,
+                                      &mut scratch);
 
         // A pathologically wide decision: expand only a prefix, play the
         // best of it, and emit NO row. Recording a truncated candidate
@@ -368,6 +405,7 @@ pub fn gate_game(actor: &Actor, tables: &Tables, book: &DeckBook,
                                 seed).expect("game");
     let mut n = 0usize;
     let mut max_seen = 0usize;
+    let mut scratch: HashMap<u16, u32> = HashMap::new();
     while game.result().is_none() && n < MAX_DECISIONS {
         let Some(seat) = game.decision_seat() else { break };
         let obs = game.core_game().observe(seat);
@@ -378,7 +416,8 @@ pub fn gate_game(actor: &Actor, tables: &Tables, book: &DeckBook,
             0
         } else {
             let my_deck = if seat == PlayerId::One { d1 } else { d2 };
-            let deck_ctx = belief_context(tables, book, &obs, my_deck);
+            let deck_ctx = belief_context(tables, book, &obs, my_deck,
+                                          &mut scratch);
             let m = if max_actions > 0 { acts.len().min(max_actions) }
                     else { acts.len() };
             let Some((_, logits)) = expand_candidates(
