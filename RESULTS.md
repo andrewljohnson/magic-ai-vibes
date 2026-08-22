@@ -101,33 +101,43 @@ the old "+5% per 2x width" claim did not replicate.
 → Do not run another hyperparameter sweep expecting gains. The next win
 is structural.
 
-### Search with this actor loses badly
+### Search works — but only with the right net in each role
 
-The actor is **not a value function**. Nothing in AAC training anchors its
-logit's scale — the loss only sees a softmax over one decision's siblings.
-Logits span −142..+196, so after the value reader's sigmoid, 95.2% of
-afterstates saturate and **79.5% of decisions have every candidate within
-1e-6 of every other**. The search cannot tell moves apart.
+SUPERSEDES the earlier "search loses badly" finding, which was a wiring
+bug in the test harness, not a property of search.
 
-| config | score |
+`mcts.rs` implements the AlphaZero split: `action_prior()` reads
+`policy.head` for the PUCT prior, leaf evaluation reads `policy.value`.
+Every early test called `ismcts_gate(catalog, V, V, ...)` — the SAME file
+for both — so the prior came from the value head, which provably cannot
+rank sibling moves.
+
+| configuration | score |
 |---|---|
-| 1-ply argmax | **49.0%** |
-| ISMCTS iters=16, uncalibrated | 6.2% |
-| ISMCTS iters=16, Platt-calibrated | 37.5% |
+| value head as prior AND leaf | 6–12% |
+| greedy 1-ply, value head | 3.8% |
+| greedy 1-ply, actor | 50.7% |
+| **value head leaf + actor prior, cap 600** | **53.1%** |
 
-Calibration (`calibrate_aac_spzw.py`) genuinely works — saturation 95.2%
-→ 0%, and 6.2% → 37.5% on identical games — but calibrated search **still
-loses to no search at all**, at ~5000x the cost per game. And 37.5% is
-*flattered*: the ISMCTS runner takes the true decklists for both seats.
+**Why the two nets are not interchangeable.** Every afterstate in an
+episode carries the same label `z`, so the value head's loss never asks it
+to separate siblings. Measured within-decision spread: value head **0.026**
+median (20.6% of decisions under 0.01); actor **15.5 logits**. The value
+head knows if a position is winning; the actor knows which move to play.
+That is the policy/value split, and it is why both nets are needed.
 
-The diagnosis, and the precondition for retrying: the Platt fit buys
-~0.003 nats over base rate. A strong *relative ranker*, a worthless
-*absolute* win-probability estimate — exactly what MCTS backup needs.
-Calibration restores discrimination; it cannot add information the actor
-never learned.
+**The actor must be calibrated for the prior role** — `head.value()`
+applies a sigmoid and raw actor logits span −142..+196, so an uncalibrated
+prior saturates to 0/1. `calibrate_aac_spzw.py` handles it.
 
-→ Do not retry search with a better prompt. Retry it with a real value
-function (ROADMAP #1), and fix the runner's deck handling first.
+**Two harness details that made search look worse than it was.** The
+ISMCTS gate scores a capped game as a LOSS (`score: Some(0.0)`); the AAC
+gate scores it as a DRAW. And search was being run at `max_decisions=250`
+against the AAC gate's 600. Matching the cap removed all 5 capped games
+and moved the score 50.0% → 53.1%. **Compare across harnesses only after
+checking both conventions.**
+
+Cost remains the real objection: ~0.09 games/sec versus ~100 for 1-ply.
 
 ### The "heuristic beats handcrafted 73%" claim was false
 
