@@ -8,7 +8,7 @@ gain has to be structural.** The missing structure is a value function.
 
 ---
 
-## 1. Train a value function — the blocking gap
+## 1. Train a value function — DONE (head built), needs wiring into search
 
 ```
 policy  π(a|s)   ✓  the actor, ~50%

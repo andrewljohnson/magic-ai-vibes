@@ -142,7 +142,7 @@ def _worker_episode(task):
 
 
 def ppo_update_fast(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
-                    ent_beta, clip):
+                    ent_beta, clip, vhead=None, vopt=None, feat=None):
     """Vectorized PPO: one concatenated actor forward + segmented softmax over
     all decisions, instead of a per-decision Python loop. Removes the serial
     learner barrier that idles the workers -- and makes bigger nets ~free.
@@ -197,9 +197,23 @@ def ppo_update_fast(batch, actor, critic, aopt, copt, ppo_eps, ppo_epochs,
         val_loss.backward()
         nn.utils.clip_grad_norm_(critic.parameters(), clip)
         copt.step()
+        if vhead is not None:
+            # same targets, but only the acting seat's own half of the row
+            vh = vhead(priv[:, :feat])
+            vh_loss = ((vh - ret) ** 2).mean()
+            vopt.zero_grad()
+            vh_loss.backward()
+            nn.utils.clip_grad_norm_(vhead.parameters(), clip)
+            vopt.step()
     with torch.no_grad():
         V = critic(priv)
-    return {"critic_loss": float(val_loss.detach()),
+        vh_mse = float(((vhead(priv[:, :feat]) - ret) ** 2).mean()) \
+            if vhead is not None else 0.0
+        # variance of the targets: MSE below this means the head is
+        # genuinely predicting, not just emitting the mean
+        base_mse = float(((ret - ret.mean()) ** 2).mean())
+    return {"vhead_mse": vh_mse, "base_mse": base_mse,
+            "critic_loss": float(val_loss.detach()),
             "pol_loss": float(pol_loss.detach()),
             "entropy": float(ent.detach()), "V_mean": float(V.mean()),
             "G_mean": float(ret.mean())}
@@ -373,6 +387,21 @@ def main():
     DECKS = decks
 
     critic = AT.MLP(priv_dim, args.hidden).to(DEV)
+    # OBSERVATION-ONLY VALUE HEAD (ROADMAP #1). V(s) ~ P(win) from ONE
+    # seat's redacted view -- the piece that blocks search.
+    #
+    # The actor cannot serve as V: it is trained only on a softmax over one
+    # decision's siblings, so its logit is a relative ranking with no
+    # absolute scale, and Platt calibration measured it at ~0.003 nats over
+    # base rate. The critic HAS real value targets but is privileged (both
+    # seats) and may not deploy.
+    #
+    # This head is free to train: the privileged row is already
+    # [features(me), features(other)], so its first half IS the
+    # observation-only input, and it regresses the same returns the critic
+    # does. One extra small MLP per round, no new game generation.
+    vhead = AT.MLP(feat, args.hidden).to(DEV)
+    vopt = torch.optim.Adam(vhead.parameters(), lr=args.critic_lr)
     if args.init_actor:
         actor, of = load_actor(args.init_actor, feat, args.hidden)
         actor = actor.to(DEV)
@@ -459,7 +488,8 @@ def main():
                                             lam=args.gae_lambda))
         stats = ppo_update_fast(batch, actor, critic, aopt, copt,
                                 args.ppo_eps, args.ppo_epochs,
-                                args.entropy_beta, args.clip)
+                                args.entropy_beta, args.clip,
+                                vhead, vopt, feat)
         if played - last_gate >= args.gate_every:
             last_gate = played
             wr = native_or_python_gate(args, spz, actor, extractor, penta,
@@ -470,6 +500,7 @@ def main():
                 f"critic_loss={s.get('critic_loss',0):.3f} "
                 f"entropy={s.get('entropy',0):.3f} "
                 f"G_mean={s.get('G_mean',0):.3f} "
+                f"vhead={s.get('vhead_mse',0):.4f}/{s.get('base_mse',0):.4f} "
                 f"{'capped=' + str(capped) if args.native else 'hangs=' + str(hangs)}"
                 f" [{gps:.2f} g/s]",
                 args.log)
@@ -488,6 +519,9 @@ def main():
             cr_np = {k: v.detach().numpy()
                      for k, v in critic.state_dict().items()}
             np.savez(f"{args.save_prefix}_critic.npz", **cr_np)
+            np.savez(f"{args.save_prefix}_vhead.npz",
+                     **{k: v.detach().numpy()
+                        for k, v in vhead.state_dict().items()})
             if wr > best_wr:
                 best_wr = wr
                 np.savez(f"{args.save_prefix}_best.npz", **sd_np)
