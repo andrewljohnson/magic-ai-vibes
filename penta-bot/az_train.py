@@ -254,17 +254,53 @@ def main():
         acts = np.frombuffer(cand_b, dtype="<f4").reshape(-1, action_dim)
         visits = np.frombuffer(vis_b, dtype="<u4").astype(np.float32)
 
-        # value target: the seat's outcome, broadcast over its records
+        # Value target: the seat's outcome, broadcast over its records.
+        #
+        # A TRUNCATED game (result -1, hit the decision cap) is NOT a draw
+        # and must not be scored as one. Scoring it 0.5 pays a policy in a
+        # losing position better for dragging the game past the cap (0.5)
+        # than for losing it (0.0), which is a direct incentive to stall --
+        # and the gate then scores those same games as LOSSES. It showed up
+        # exactly that way: capped games in the gate climbed 3 -> 2 -> 11 ->
+        # 16 out of 120 across arms while gate wall clock went 182s -> 713s,
+        # because every capped game runs the full 600 searched decisions.
+        #
+        # We do not know who was winning, so we do not guess -- these
+        # records are dropped from BOTH heads. That removes the stall
+        # payoff without inventing an outcome from life totals, which would
+        # be a handcrafted signal (see the pure-build rule in AGENTS.md).
+        # A real DRAW (result 2) is a genuine 0.5 and is kept.
         z = np.zeros(n, dtype=np.float32)
+        keep = np.ones(n, dtype=bool)
         i = 0
         for e, k in enumerate(ep_rec):
             r = int(ep_res[e])
             for _ in range(int(k)):
-                if r == 2 or r < 0:
+                if r < 0:
+                    z[i] = 0.5
+                    keep[i] = False
+                elif r == 2:
                     z[i] = 0.5
                 else:
                     z[i] = 1.0 if r == seat[i] else 0.0
                 i += 1
+        dropped = int((~keep).sum())
+        if keep.any() and dropped:
+            # Drop truncated decisions, and their action rows with them.
+            off = np.zeros(n + 1, dtype=np.int64)
+            np.cumsum(m, out=off[1:])
+            rowkeep = np.concatenate(
+                [np.arange(off[i], off[i + 1]) for i in np.nonzero(keep)[0]])
+            acts = acts[rowkeep]
+            visits = visits[rowkeep]
+            state = state[keep]
+            m = m[keep]
+            z = z[keep]
+            n = int(keep.sum())
+        if n == 0:
+            log(f"round {rnd}: every game truncated, nothing to learn from",
+                args.log)
+            continue
 
         # REPLAY BUFFER. Previously each round trained `--epochs` passes on
         # only that round's ~4.7k decisions and then discarded them. That is
@@ -377,7 +413,7 @@ def main():
             f"({args.games/max(gen,1e-9):.2f} g/s) {n} decisions | "
             f"fin={100*fin:.0f}% pol_ce={float(ploss):.4f} "
             f"pol_ent={pol_ent:.3f} tgt_ent={tgt_ent:.3f} "
-            f"vmse={vmse:.4f}/{base:.4f}", args.log)
+            f"vmse={vmse:.4f}/{base:.4f} drop={dropped}", args.log)
 
         # Strength check against the engine's built-in bot, with search --
         # the only number that says whether the loop is actually improving.
