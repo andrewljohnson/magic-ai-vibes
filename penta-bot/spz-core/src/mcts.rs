@@ -193,12 +193,24 @@ pub struct MctsConfig {
     /// runs forever and the gate win% stays bounded. Search-only entries
     /// ignore this. Default 800 (the historical uncapped-ish limit).
     pub max_decisions: usize,
+    /// Hard cap on how deep ONE iteration may descend before it stops and
+    /// evaluates where it stands.
+    ///
+    /// The descent stops when it reaches an action it has never tried
+    /// (`n == 0`). Once the tree is deep enough that the greedy path is
+    /// fully expanded, that condition can stay false for hundreds of plies,
+    /// so a single iteration plays out an entire game -- paying an opponent
+    /// model call every ply. It shows up as a CLIFF rather than a slope:
+    /// measured, iters 2/3/4 cost 0.2/0.3/0.4s for 600 decisions, and
+    /// iters=6 did not finish in 120s.
+    pub max_depth: usize,
 }
 
 impl Default for MctsConfig {
     fn default() -> Self {
         MctsConfig {
             iters: 200,
+            max_depth: 400,
             c_puct: 1.5,
             inert: false,
             use_dominance: true,
@@ -310,8 +322,23 @@ impl<'a> Ismcts<'a> {
         let mut path: Vec<ActionKey> = Vec::new();
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
+        let mut depth = 0usize;
         let leaf: f64;
         loop {
+            // Bound EVERY ply, not just our branching nodes. Three arms
+            // below (opponent ply, forced action, dominance-narrowed-to-one)
+            // `continue` without descending the tree, so a cap that only
+            // counted tree nodes could not stop them. A cold near-uniform
+            // policy head makes greedy argmax pick index 0 at every
+            // opponent ply, and if action 0 does not advance the game the
+            // descent spins forever at depth zero -- measured as a hard
+            // hang before decision 25 at iters=8, while iters=4 finished
+            // 600 decisions in 0.4s.
+            depth += 1;
+            if depth > self.cfg.max_depth {
+                leaf = timed!(4, self.leaf_eval(world));
+                break;
+            }
             if let Some(t) = terminal_value(world, self.our_seat) {
                 leaf = t;
                 break;
@@ -483,6 +510,12 @@ impl<'a> Ismcts<'a> {
         let exps: Vec<f64> = logits.iter().map(|l| (l - maxl).exp()).collect();
         let sum: f64 = exps.iter().sum::<f64>().max(1e-12);
 
+        // Parent visit count -- the numerator of the canonical PUCT
+        // exploration term.
+        let total_n: u32 = avail.iter()
+            .map(|&i| node.stats.get(&actions[i]).map(|s| s.n).unwrap_or(0))
+            .sum();
+
         let mut best_i = avail[0];
         let mut best_key = actions[avail[0]].clone();
         let mut best_first = true;
@@ -493,8 +526,20 @@ impl<'a> Ismcts<'a> {
             let (n, w, a) = node.stats.get(&actions[i])
                 .map(|s| (s.n, s.w, s.a)).unwrap_or((0, 0.0, 0));
             let q = if n > 0 { w / n as f64 } else { 0.0 };
+            // Canonical AlphaZero PUCT. The previous form here was
+            //     c * P * sqrt(ln A(a) / (1 + N(a)))
+            // which is far too weak to escape the Q=0 default that
+            // unvisited actions carry. On a [0,1] value scale Q=0 is the
+            // WORST possible score, so an unvisited sibling had to out-run
+            // a visited action's real Q on the exploration term alone --
+            // and it could not. Measured consequence: the median decision
+            // put ALL 32 visits on ONE action (normalised visit entropy
+            // 0.000, top-action share 1.000), making "search" barely more
+            // than a 1-ply greedy pick and giving the policy target no
+            // distribution to learn from.
+            let _ = a;
             let explore = self.cfg.c_puct * p
-                * ((a.max(1) as f64).ln().max(0.0) / (1.0 + n as f64)).sqrt();
+                * (total_n as f64).max(1.0).sqrt() / (1.0 + n as f64);
             let puct = q + explore;
             // Max PUCT; tie -> higher prior; tie -> lower action index.
             if puct > best_puct

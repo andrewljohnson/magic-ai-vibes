@@ -340,6 +340,7 @@ fn ismcts_choose_at(
         redeterminize_m: 1,
         opponent: parse_opponent(&opponent)?,
         max_decisions: 800,
+        max_depth: 400,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -395,6 +396,7 @@ fn ismcts_choose(
         redeterminize_m: 1,
         opponent: parse_opponent(&opponent)?,
         max_decisions: 800,
+        max_depth: 400,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -442,6 +444,7 @@ fn ismcts_gate(
         redeterminize_m: redeterminize_m.max(1),
         opponent: parse_opponent(&opponent)?,
         max_decisions,
+        max_depth: 400,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
@@ -523,6 +526,7 @@ fn ismcts_stream_rows(
         redeterminize_m: redeterminize_m.max(1),
         opponent: parse_opponent(&opponent)?,
         max_decisions,
+        max_depth: 400,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
@@ -891,60 +895,66 @@ fn aac_gate(
         names, sums, counts))
 }
 
+/// The width of one action encoding, so Python can size its policy head.
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value)]
+fn az_action_dim(catalog_json: String, belief: bool) -> PyResult<usize> {
+    let mut t = Tables::load(&catalog_json)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    t.set_belief(belief);
+    Ok(crate::action_feat::width(&t))
+}
+
 /// AlphaZero self-play: both seats driven by search, emitting the visit
-/// distribution as a policy target alongside the outcome as a value target.
+/// distribution as a policy target and the outcome as a value target.
 ///
-/// Returns, in order:
+/// `policy_path` is the factorised head az_train.py writes; the search
+/// takes its PUCT priors and its opponent model from it, which is what
+/// makes a searched decision cost ~8 ms instead of ~1790 ms.
+///
 /// ```text
-/// 0 cand_bytes   f32, sum(m)*feat      candidate afterstate features
-/// 1 rec_u32      u32, 3*n_records      m, then visit-sum, then chosen
-/// 2 visit_bytes  u32, sum(m)           search visit counts per candidate
-/// 3 priv_bytes   f32, n_records*2*feat privileged critic input
-/// 4 seat         u8,  n_records        0 = p1, 1 = p2
-/// 5 ep_records   u32, n_episodes       records per episode
-/// 6 ep_result    i8,  n_episodes       0 p1, 1 p2, 2 draw, -1 capped
-/// 7 feat         usize                 feature width
+/// 0 cand_bytes   f32, sum(m)*action_dim  ACTION encodings (not afterstates)
+/// 1 rec_u32      u32, 3*n_records        m, visit-sum, chosen
+/// 2 visit_bytes  u32, sum(m)             visit counts per action
+/// 3 priv_bytes   f32, n_records*2*feat   privileged rows
+/// 4 seat         u8,  n_records          0 = p1, 1 = p2
+/// 5 ep_records   u32, n_episodes
+/// 6 ep_result    i8,  n_episodes         0 p1, 1 p2, 2 draw, -1 capped
+/// 7 feat         usize                   STATE feature width
 /// ```
 #[pyfunction]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 fn az_stream_episodes(
     py: Python<'_>,
-    catalog_json: String, value_path: String, head_path: String,
-    weight: f64, iters: usize, c_puct: f64, budget: usize,
-    decklists_path: String, max_actions: usize, threads: usize,
-    opponent: String,
+    catalog_json: String, value_path: String, policy_path: String,
+    iters: usize, c_puct: f64, decklists_path: String,
+    max_actions: usize, threads: usize,
     specs: Vec<(String, String, u64)>,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                pyo3::Bound<'_, pyo3::types::PyBytes>,
                pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u8>, Vec<u32>,
                Vec<i8>, usize)> {
     use pyo3::types::PyBytes;
-    let policy = build_policy(&catalog_json, &value_path, &head_path, weight,
-                              0, 1, budget, 999, 999)
+    let mut policy = build_policy(&catalog_json, &value_path, &value_path,
+                                  0.0, 0, 1, 400, 999, 999)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    policy.fast_head = Some(crate::action_feat::PolicyHead::load(&policy_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?);
     let decks = decks::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let book = decks::DeckBook::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let feat = policy.tables.size;
     let cfg = crate::mcts::MctsConfig {
-        iters, c_puct, inert: false, use_dominance: true,
+        iters, c_puct, inert: false,
+        // The dominance prune was 55% of search time and its job -- drop
+        // actions with no upside versus passing -- is what the policy head
+        // should learn. Off.
+        use_dominance: false,
         leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
-        // The opponent MODEL inside the tree -- how we assume the other
-        // seat will reply while searching. "greedy" models them with our
-        // own policy, which is the principled choice but runs a full 1-ply
-        // afterstate argmax at EVERY opponent node of EVERY iteration:
-        // measured 1.9s per decision at iters=8, i.e. ~95x what the phase
-        // profile predicts. "handcrafted" asks the engine's built-in policy
-        // directly, with no net evaluation at all.
-        //
-        // Note the tension with the pure-build rule: handcrafted here is a
-        // SIMULATOR assumption about the opponent's replies, not a training
-        // opponent -- the games are still self-play. But it does put the
-        // built-in bot's judgement inside our search, so it is a real
-        // choice and not merely a speed knob.
-        opponent: parse_opponent(&opponent)?,
+        opponent: crate::mcts::OpponentModel::Greedy,
         max_decisions: crate::az::MAX_DECISIONS,
+        max_depth: 400,
     };
     let n_threads = thread_count(threads, specs.len());
     let policy = std::sync::Arc::new(policy);
@@ -979,7 +989,7 @@ fn az_stream_episodes(
 
     let mut cand: Vec<f32> = Vec::new();
     let mut rec: Vec<u32> = Vec::new();
-    let mut visit_sum: Vec<u32> = Vec::new();
+    let mut vsum: Vec<u32> = Vec::new();
     let mut chosen: Vec<u32> = Vec::new();
     let mut visits: Vec<u32> = Vec::new();
     let mut privileged: Vec<f32> = Vec::new();
@@ -992,19 +1002,18 @@ fn az_stream_episodes(
         for r in ep.records {
             cand.extend_from_slice(&r.cand);
             rec.push(r.m as u32);
-            visit_sum.push(r.visits.iter().sum());
+            vsum.push(r.visits.iter().sum());
             chosen.push(r.chosen as u32);
             visits.extend_from_slice(&r.visits);
             privileged.extend_from_slice(&r.privileged);
             seat.push(r.seat);
         }
     }
-    let mut vbytes = Vec::with_capacity(visits.len() * 4);
-    for v in &visits { vbytes.extend_from_slice(&v.to_le_bytes()); }
-    rec.extend(visit_sum);
+    let mut vb = Vec::with_capacity(visits.len() * 4);
+    for v in &visits { vb.extend_from_slice(&v.to_le_bytes()); }
+    rec.extend(vsum);
     rec.extend(chosen);
-    Ok((PyBytes::new(py, &f32_bytes(&cand)), rec,
-        PyBytes::new(py, &vbytes),
+    Ok((PyBytes::new(py, &f32_bytes(&cand)), rec, PyBytes::new(py, &vb),
         PyBytes::new(py, &f32_bytes(&privileged)), seat, ep_records,
         ep_result, feat))
 }
@@ -1012,6 +1021,7 @@ fn az_stream_episodes(
 #[pymodule]
 fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(az_stream_episodes, m)?)?;
+    m.add_function(wrap_pyfunction!(az_action_dim, m)?)?;
     m.add_function(wrap_pyfunction!(aac_stream_episodes, m)?)?;
     m.add_function(wrap_pyfunction!(aac_gate, m)?)?;
     m.add_function(wrap_pyfunction!(lockstep_trace, m)?)?;

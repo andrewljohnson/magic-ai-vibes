@@ -306,6 +306,35 @@ pub struct PolicyHead {
 }
 
 impl PolicyHead {
+    /// Load the flat binary az_train.py writes: three u64 dims (hidden,
+    /// state, action), then ws, b1, wa, w2, b2 as f64.
+    pub fn load(path: &str) -> Result<Self, String> {
+        let b = std::fs::read(path).map_err(|e| e.to_string())?;
+        if b.len() < 24 { return Err("policy head too short".into()); }
+        let u = |o: usize| u64::from_le_bytes(
+            b[o..o + 8].try_into().unwrap()) as usize;
+        let (hidden, state_dim, action_dim) = (u(0), u(8), u(16));
+        let need = 24 + 8 * (hidden * state_dim + hidden
+                             + hidden * action_dim + hidden + 1);
+        if b.len() != need {
+            return Err(format!("policy head size {} != expected {need}",
+                               b.len()));
+        }
+        let mut off = 24;
+        let mut take = |n: usize| {
+            let v: Vec<f64> = b[off..off + 8 * n].chunks_exact(8)
+                .map(|c| f64::from_le_bytes(c.try_into().unwrap())).collect();
+            off += 8 * n;
+            v
+        };
+        let ws = take(hidden * state_dim);
+        let b1 = take(hidden);
+        let wa = take(hidden * action_dim);
+        let w2 = take(hidden);
+        let b2 = take(1)[0];
+        Ok(PolicyHead { hidden, state_dim, action_dim, ws, wa, b1, w2, b2 })
+    }
+
     /// Precompute `Ws · state + b1` — once per node, reused by every action.
     pub fn state_pre(&self, state: &[f32]) -> Vec<f64> {
         debug_assert_eq!(state.len(), self.state_dim);

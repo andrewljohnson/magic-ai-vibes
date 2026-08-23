@@ -30,6 +30,19 @@ use crate::tables::Tables;
 
 pub const MAX_DECISIONS: usize = 600;
 
+/// Draw an index proportional to visit counts (temperature 1).
+fn sample_visits(visits: &[u32], prng: &mut SplitMix64) -> usize {
+    let total: u64 = visits.iter().map(|&v| v as u64).sum();
+    if total == 0 { return 0; }
+    let mut r = (prng.next_f64() * total as f64) as u64;
+    for (i, &v) in visits.iter().enumerate() {
+        let v = v as u64;
+        if r < v { return i; }
+        r -= v;
+    }
+    visits.len() - 1
+}
+
 fn seat_idx(s: PlayerId) -> usize { if s == PlayerId::One { 0 } else { 1 } }
 fn flip(s: PlayerId) -> PlayerId {
     if s == PlayerId::One { PlayerId::Two } else { PlayerId::One }
@@ -37,7 +50,10 @@ fn flip(s: PlayerId) -> PlayerId {
 
 /// One searched decision.
 pub struct Record {
-    /// `m * feat` candidate afterstate features, row-major.
+    /// `m * action_dim` ACTION encodings, row-major -- what the
+    /// factorised policy head scores. Not afterstate features: producing
+    /// those costs a game clone each, which is the cost this whole design
+    /// removed.
     pub cand: Vec<f32>,
     pub m: usize,
     /// Search visit count per candidate -- normalised, this is the policy
@@ -70,7 +86,6 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
                                    decisions: 0 },
     };
     let mut prng = SplitMix64::new(seed ^ 0xA17E);
-    let feat = tables.size;
     let mut records = Vec::new();
     let mut scratch = std::collections::HashMap::new();
     let mut n = 0usize;
@@ -108,6 +123,22 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
             search.search(&game, &mut prng)
         };
 
+        // SAMPLE the move from the visit distribution; do not play the
+        // argmax. AlphaZero plays proportional to visits during self-play
+        // (temperature 1) and saves the argmax for evaluation, and the
+        // reason shows up starkly at a cold start: with a near-uniform
+        // policy the visit counts tie, argmax resolves every tie to the
+        // lowest index, and the game walks the same non-advancing action
+        // forever. Measured: 0 of 24 self-play games reached a result,
+        // while a uniformly random policy finished 10 of 12. Every episode
+        // scoring `z = 0.5` gives the value head nothing to learn from,
+        // which silently disables half the loop.
+        let played = if wide || visits.is_empty() {
+            best
+        } else {
+            sample_visits(&visits, &mut prng)
+        };
+
         if !wide && !visits.is_empty() {
             let pregame = game.core_game().in_pregame();
             let obs_other = game.core_game().observe(flip(seat));
@@ -115,24 +146,20 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
             privileged.extend(features(&obs_other, pregame, tables,
                                        &deck_slots));
             let m = acts.len().min(visits.len());
-            let mut cand: Vec<f32> = Vec::with_capacity(m * feat);
-            let mut ok = true;
-            for i in 0..m {
-                let mut copy = game.clone();
-                if copy.act(i).is_err() { ok = false; break; }
-                let after = copy.core_game().observe(seat);
-                let pg = copy.core_game().in_pregame();
-                cand.extend(features(&after, pg, tables, &deck_slots));
-            }
-            if ok {
-                records.push(Record {
-                    cand, m, visits: visits[..m].to_vec(),
-                    chosen: best.min(m - 1), privileged, seat: mi as u8,
-                });
-            }
+            let cand = crate::action_feat::encode_all(&acts[..m], &obs,
+                                                      tables);
+            records.push(Record {
+                cand, m, visits: visits[..m].to_vec(),
+                chosen: played.min(m - 1), privileged, seat: mi as u8,
+            });
         }
-        if game.act(best).is_err() { break; }
+        if game.act(played).is_err() { break; }
         n += 1;
+        #[cfg(feature = "prof")]
+        if n % 25 == 0 {
+            println!("    .. decision {n}, {} searched, last m={}",
+                     records.len(), acts.len());
+        }
     }
 
     let result = match game.result() {
@@ -181,7 +208,15 @@ mod prof_tests {
         // numbers it produces are meaningless; the POINT is the timing --
         // does replacing per-action simulation with per-action encoding
         // collapse search cost as the 441x microbenchmark predicts?
-        let policy = if std::env::var("AZ_FAST").as_deref() == Ok("1") {
+        // AZ_HEADFILE loads the REAL trained head, so the profile measures
+        // exactly what the training bridge runs rather than a stand-in.
+        let policy = if let Ok(hf) = std::env::var("AZ_HEADFILE") {
+            let fh = crate::action_feat::PolicyHead::load(&hf)
+                .expect("policy head");
+            println!("  loaded head: hidden={} state={} action={}",
+                     fh.hidden, fh.state_dim, fh.action_dim);
+            Policy { fast_head: Some(fh), ..policy }
+        } else if std::env::var("AZ_FAST").as_deref() == Ok("1") {
             let sd = policy.tables.size;
             let ad = crate::action_feat::width(&policy.tables);
             let h = 64usize;
@@ -210,6 +245,7 @@ mod prof_tests {
                 crate::mcts::OpponentModel::Handcrafted
             } else { crate::mcts::OpponentModel::Greedy },
             max_decisions: MAX_DECISIONS,
+            max_depth: 400,
         };
         crate::mcts::prof::reset();
         let t0 = std::time::Instant::now();
