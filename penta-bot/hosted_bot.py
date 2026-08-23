@@ -118,7 +118,10 @@ def play_room(server, room, token, policy, move_budget):
             obs = view["observation"]
             t0 = time.time()
             try:
-                index = policy.choose(obs)
+                try:
+                    index = policy.choose(obs, raw_json=json.dumps(obs))
+                except TypeError:
+                    index = policy.choose(obs)
             except Exception as error:
                 index = fallback_choice(obs)
                 log.write(json.dumps({"t": "choose-error",
@@ -190,6 +193,11 @@ def main():
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
 
+    # The engine is loaded whenever a dir is given, because the AAC actor
+    # NEEDS it: without reconstruction it scores approximated afterstates
+    # and drops from 56% to 3.8%. --actor therefore takes precedence over
+    # the legacy determinized brain, rather than the other way round.
+    engine = None
     if args.engine_dir:
         import importlib.util
         spec = importlib.util.spec_from_file_location(
@@ -197,6 +205,16 @@ def main():
         engine = importlib.util.module_from_spec(spec)
         sys.modules["penta"] = engine
         spec.loader.exec_module(engine)
+
+    if args.actor:
+        from hosted_policy import AacPolicy
+        policy = AacPolicy(args.actor, hidden=args.actor_hidden,
+                           our_deck=args.deck, engine=engine)
+        kind = "reconstructed afterstates" if engine else \
+            "APPROXIMATED afterstates -- pass --engine-dir, this scores 3.8%"
+        print(f"AAC actor: {args.actor} deck={args.deck} ({kind})",
+              flush=True)
+    elif args.engine_dir:
         from hosted_policy import DeterminizedPolicy
         policy = DeterminizedPolicy(
             engine, our_deck=args.deck, k_worlds=args.k_worlds,
@@ -207,15 +225,8 @@ def main():
               f"{engine.engine_version()}/p{engine.protocol_version()}, "
               f"K={args.k_worlds}", flush=True)
     else:
-        if args.actor:
-            from hosted_policy import AacPolicy
-            policy = AacPolicy(args.actor, hidden=args.actor_hidden,
-                               our_deck=args.deck)
-            print(f"policy: AAC actor {args.actor} (deck {args.deck})",
-                  flush=True)
-        else:
-            policy = HostedPolicy(weight=args.weight,
-                                  value_path=args.value_net)
+        policy = HostedPolicy(weight=args.weight,
+                              value_path=args.value_net)
     state = load_or_register(args.server, args.name, args.deck)
     done = []
     beats = 0
