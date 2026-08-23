@@ -341,6 +341,8 @@ fn ismcts_choose_at(
         opponent: parse_opponent(&opponent)?,
         max_decisions: 800,
         max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -397,6 +399,8 @@ fn ismcts_choose(
         opponent: parse_opponent(&opponent)?,
         max_decisions: 800,
         max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -445,6 +449,8 @@ fn ismcts_gate(
         opponent: parse_opponent(&opponent)?,
         max_decisions,
         max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
     };
     run_gate(py, policy, decks, book, cfg, specs, workers, classify)
 }
@@ -489,6 +495,8 @@ fn az_gate(
         opponent: crate::mcts::OpponentModel::Handcrafted,
         max_decisions,
         max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
     };
     run_gate(py, policy, decks, book, cfg, specs, workers, classify)
 }
@@ -581,6 +589,8 @@ fn ismcts_stream_rows(
         opponent: parse_opponent(&opponent)?,
         max_decisions,
         max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
@@ -982,7 +992,7 @@ fn az_stream_episodes(
     py: Python<'_>,
     catalog_json: String, value_path: String, policy_path: String,
     iters: usize, c_puct: f64, decklists_path: String,
-    max_actions: usize, threads: usize,
+    max_actions: usize, threads: usize, root_noise: f64,
     specs: Vec<(String, String, u64)>,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                pyo3::Bound<'_, pyo3::types::PyBytes>,
@@ -1009,6 +1019,10 @@ fn az_stream_episodes(
         opponent: crate::mcts::OpponentModel::Greedy,
         max_decisions: crate::az::MAX_DECISIONS,
         max_depth: 400,
+        // Generation ONLY. The gate must score the policy the loop
+        // actually produced, so it leaves this at zero.
+        root_noise_frac: root_noise,
+        root_noise_alpha: 1.0,
     };
     let n_threads = thread_count(threads, specs.len());
     let policy = std::sync::Arc::new(policy);

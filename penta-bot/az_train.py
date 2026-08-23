@@ -142,6 +142,13 @@ def main():
     ap.add_argument("--log", default="az.log")
     ap.add_argument("--save-prefix", default="az")
     ap.add_argument("--learner-deck", default="Sligh")
+    ap.add_argument("--root-noise", type=float, default=0.25,
+                    help="Dirichlet fraction mixed into the ROOT prior "
+                         "during generation (AlphaZero uses 0.25). Without "
+                         "it the visit counts -- which are the policy's own "
+                         "training target -- sharpen the policy, which "
+                         "sharpens the visits, and the loop converges "
+                         "prematurely instead of learning.")
     args = ap.parse_args()
 
     spz = AN.load_spz_core()
@@ -165,6 +172,7 @@ def main():
 
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
+        f"root_noise={args.root_noise} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
 
     gopps = [d for d in decks if d != args.learner_deck]
@@ -180,7 +188,8 @@ def main():
         t0 = time.time()
         out = spz.az_stream_episodes(
             catalog, val_path, pol_path, args.iters, 1.5,
-            "builtin-decklists.json", args.max_actions, args.threads, specs)
+            "builtin-decklists.json", args.max_actions, args.threads,
+            args.root_noise, specs)
         (cand_b, rec, vis_b, priv_b, seat, ep_rec, ep_res, feat) = out
         gen = time.time() - t0
 

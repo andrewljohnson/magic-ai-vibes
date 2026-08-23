@@ -109,6 +109,10 @@ struct ActionStat {
     a: u32,   // availability: iterations this action was legal at this node
     prior: f64,      // cached policy-head afterstate score (softmax logit)
     prior_set: bool, // whether `prior` has been computed
+    /// Root-only Dirichlet noise, already normalised over the root's
+    /// available set. Zero everywhere else; only read when the node has
+    /// `has_noise` set.
+    noise: f64,
 }
 
 /// One OUR information-set node. Stats are keyed by the determinization-
@@ -116,6 +120,9 @@ struct ActionStat {
 #[derive(Default)]
 struct Node {
     stats: HashMap<ActionKey, ActionStat>,
+    /// Whether `stats[..].noise` carries a Dirichlet draw to mix into the
+    /// priors. Set on the ROOT only, and only during self-play.
+    has_noise: bool,
 }
 
 /// Arena of nodes plus a path index: a node's identity IS the sequence of
@@ -204,6 +211,23 @@ pub struct MctsConfig {
     /// measured, iters 2/3/4 cost 0.2/0.3/0.4s for 600 decisions, and
     /// iters=6 did not finish in 120s.
     pub max_depth: usize,
+    /// Fraction of the root prior replaced by Dirichlet noise during
+    /// self-play (AlphaZero uses 0.25). Zero disables it.
+    ///
+    /// WITHOUT THIS THE LOOP EATS ITSELF. A sharper policy gives peaked
+    /// priors, peaked priors concentrate visits, and the visit counts are
+    /// the very target the policy is trained on -- so sharpness feeds
+    /// sharpness. Measured on the cold start: normalised search-target
+    /// entropy fell 0.965 -> 0.226 in nineteen rounds while the fraction
+    /// of games reaching a result fell 88% -> 58% and games got longer.
+    /// That is premature convergence, not learning.
+    ///
+    /// Noise belongs to GENERATION only. An evaluation gate must score the
+    /// policy the loop actually produced, so the gate leaves this at 0.
+    pub root_noise_frac: f64,
+    /// Dirichlet concentration. AlphaZero scales it to the branching
+    /// factor (~10 / typical legal moves); decisions here offer ~7.
+    pub root_noise_alpha: f64,
 }
 
 impl Default for MctsConfig {
@@ -211,6 +235,8 @@ impl Default for MctsConfig {
         MctsConfig {
             iters: 200,
             max_depth: 400,
+            root_noise_frac: 0.0,
+            root_noise_alpha: 1.0,
             c_puct: 1.5,
             inert: false,
             use_dominance: true,
@@ -232,6 +258,38 @@ pub struct Ismcts<'a> {
     pub opp_deck: &'a str,
     pub our_seat: PlayerId,
     pub cfg: MctsConfig,
+}
+
+/// Gamma(shape, 1) by Marsaglia-Tsang, with the standard boost for
+/// shape < 1. Needed only to build a Dirichlet draw for the root prior.
+fn gamma_sample(shape: f64, prng: &mut SplitMix64) -> f64 {
+    if shape < 1.0 {
+        let u = prng.next_f64().max(1e-12);
+        return gamma_sample(shape + 1.0, prng) * u.powf(1.0 / shape);
+    }
+    let d = shape - 1.0 / 3.0;
+    let c = 1.0 / (9.0 * d).sqrt();
+    loop {
+        // Box-Muller normal from two uniforms.
+        let u1 = prng.next_f64().max(1e-12);
+        let u2 = prng.next_f64();
+        let x = (-2.0 * u1.ln()).sqrt()
+            * (2.0 * std::f64::consts::PI * u2).cos();
+        let v = 1.0 + c * x;
+        if v <= 0.0 { continue; }
+        let v = v * v * v;
+        let u = prng.next_f64().max(1e-12);
+        if u < 1.0 - 0.0331 * x * x * x * x { return d * v; }
+        if u.ln() < 0.5 * x * x + d * (1.0 - v + v.ln()) { return d * v; }
+    }
+}
+
+/// Dirichlet(alpha, ..., alpha) of length `n`.
+fn dirichlet(n: usize, alpha: f64, prng: &mut SplitMix64) -> Vec<f64> {
+    let mut g: Vec<f64> = (0..n).map(|_| gamma_sample(alpha, prng)).collect();
+    let sum: f64 = g.iter().sum::<f64>().max(1e-12);
+    for v in g.iter_mut() { *v /= sum; }
+    g
 }
 
 impl<'a> Ismcts<'a> {
@@ -522,7 +580,13 @@ impl<'a> Ismcts<'a> {
         let mut best_puct = f64::NEG_INFINITY;
         let mut best_prior = f64::NEG_INFINITY;
         for (pos, &i) in avail.iter().enumerate() {
-            let p = exps[pos] / sum;
+            let mut p = exps[pos] / sum;
+            if node.has_noise {
+                let eps = self.cfg.root_noise_frac;
+                let nz = node.stats.get(&actions[i])
+                    .map(|s| s.noise).unwrap_or(0.0);
+                p = (1.0 - eps) * p + eps * nz;
+            }
             let (n, w, a) = node.stats.get(&actions[i])
                 .map(|s| (s.n, s.w, s.a)).unwrap_or((0, 0.0, 0));
             let q = if n > 0 { w / n as f64 } else { 0.0 };
@@ -629,6 +693,23 @@ impl<'a> Ismcts<'a> {
         }
 
         let mut tree = Tree::new();
+        // Root Dirichlet noise, sampled ONCE per real decision and mixed
+        // into the prior inside `select`. This is what stops the loop from
+        // eating itself: the visit counts are the policy's own training
+        // target, so without an injected floor of exploration a slightly
+        // sharper policy produces sharper visits, which train it sharper
+        // still.
+        if self.cfg.root_noise_frac > 0.0 && root_avail.len() > 1 {
+            let nz = dirichlet(root_avail.len(),
+                               self.cfg.root_noise_alpha, prng);
+            let root_idx = tree.get_or_create(&[]);
+            for (k, &i) in root_avail.iter().enumerate() {
+                tree.arena[root_idx].stats
+                    .entry(root_actions[i].clone())
+                    .or_default().noise = nz[k];
+            }
+            tree.arena[root_idx].has_noise = true;
+        }
         // One handcrafted opponent instance reused across all iterations (a
         // cheap Arc-catalog clone; its only state is mulligan bookkeeping,
         // inert on a mid-game reconstruction). Built even for the Greedy path
