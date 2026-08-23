@@ -278,6 +278,20 @@ def main():
     # next net learns from. We keep the best-gated weights, and revert to
     # them when a gate comes back clearly below best.
     best = {"rate": None, "policy": None, "value": None, "round": None}
+    # Consecutive reverts, and the gates that produced them.
+    #
+    # "Best" is a MAX over noisy 300-game evaluations, so it is partly a
+    # max-of-noise statistic (RESULTS.md says this about best-of-N numbers
+    # generally). A best that is one lucky SE high can never be cleared
+    # again: every honest gate reads below it, reverts, and the run freezes.
+    # That happened -- 44.0% promoted at round 79, then 38.3% and 38.0% on
+    # nets descended from it, pooling to 38.2% +/- 2.0.
+    #
+    # So after two consecutive reverts we accept the evidence and
+    # RECALIBRATE the recorded best down to what those gates actually
+    # measured, keeping the same weights. The bar becomes fair again and
+    # the run can move.
+    reverts = []
     # Per-deck sampling weight for self-play pairings, refreshed from each
     # gate's matchup breakdown. Uniform until the first gate.
     #
@@ -559,10 +573,12 @@ def main():
                 export_policy(policy, pol_path.replace(".azp", "_best.azp"),
                               state_dim, action_dim)
                 export_value(value, val_path.replace(".spzw", "_best.spzw"))
+                reverts = []
                 log(f"    PROMOTED: new best {100*rate:.1f}%"
                     + (f" (was {100*prev:.1f}%)" if prev is not None else
                        " (first gate)"), args.log)
             elif args.revert_on_regress and rate < best["rate"] - 2 * se:
+                reverts.append(rate)
                 policy.load_state_dict(best["policy"])
                 value.load_state_dict(best["value"])
                 # Adam's moments describe a trajectory that led somewhere
@@ -576,6 +592,17 @@ def main():
                 log(f"    REVERTED to round {best['round']} "
                     f"({100*best['rate']:.1f}%): this gate {100*rate:.1f}% "
                     f"is more than 2 SE below best", args.log)
+                if len(reverts) >= 2:
+                    # Two honest measurements below the record; the record
+                    # was the outlier, not these.
+                    recal = sum(reverts) / len(reverts)
+                    log(f"    RECALIBRATED best {100*best['rate']:.1f}% -> "
+                        f"{100*recal:.1f}% ({len(reverts)} consecutive gates "
+                        f"below it pool to that; the record was a high "
+                        f"reading, and an unclearable bar freezes the run)",
+                        args.log)
+                    best["rate"] = recal
+                    reverts = []
             else:
                 log(f"    kept (best {100*best['rate']:.1f}% "
                     f"@ round {best['round']})", args.log)
