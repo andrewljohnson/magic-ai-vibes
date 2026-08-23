@@ -205,6 +205,32 @@ bot. The trained actor is ~47 points ahead of it.
 been corrected. Worth remembering as a lesson about uncited numbers in
 comments: it nearly reordered the roadmap.
 
+### Truncation scoring: fixes stalling, does NOT move win rate
+
+Two arms, identical but for how a game hitting the decision cap is
+labelled. `drop` removes those records; `loss` scores 0.0 for both seats,
+matching what the gate already does.
+
+| | drop | loss |
+|---|---|---|
+| gate @ round 39 | 16.7% | 24.2% |
+| gate @ round 79 | 24.2% | 20.0% |
+| self-play games finishing | 69–88% | **88–96%** |
+| capped games in gate | 3, but excursions to **43** | 35 → **4** |
+
+The mechanism works and is worth keeping: penalising truncation makes
+games finish, and it removes the stall excursions the `drop` rule allowed
+(nothing corrects a behaviour that produces no gradient). But the WIN RATE
+is unchanged -- the two arms cross over between gates and are
+indistinguishable pooled.
+
+→ Keep `--truncation loss`, for the objective/metric alignment and the
+stall fix, not for strength.
+
+→ **A 120-game gate has SE ±3.8.** Comparing arms a few points apart at
+that precision is comparing noise, which is what the crossover above
+actually shows. Use ≥300 games before believing an arm difference.
+
 ### How strong is the AZ policy improvement operator? ~6 points
 
 MEASURED 2026-08-23 on the az_main checkpoint (~8k self-play games).
