@@ -446,6 +446,51 @@ fn ismcts_gate(
         max_decisions,
         max_depth: 400,
     };
+    run_gate(py, policy, decks, book, cfg, specs, workers, classify)
+}
+
+/// Gate an ALPHAZERO checkpoint: the value net scores leaves, the
+/// factorised `.azp` head supplies PUCT priors. `ismcts_gate` cannot do
+/// this -- it builds both roles from `Mlp` files, and the AZ policy head
+/// is not an `Mlp`, so without this there is no way to measure whether the
+/// AZ loop is getting stronger.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn az_gate(
+    py: Python<'_>,
+    catalog_json: String, value_path: String, policy_path: String,
+    iters: usize, c_puct: f64, decklists_path: String,
+    specs: Vec<(String, String, bool, u64)>, workers: usize,
+    max_decisions: usize, classify: bool,
+) -> PyResult<(usize, usize, usize, usize)> {
+    let policy = build_policy(&catalog_json, &value_path, &value_path,
+                              0.0, 0, 1, 400, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let fh = crate::action_feat::PolicyHead::load(&policy_path)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+            format!("policy head {policy_path}: {e}")))?;
+    let policy = crate::policy::Policy { fast_head: Some(fh), ..policy };
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let book = decks::DeckBook::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert: false, use_dominance: false,
+        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        opponent: crate::mcts::OpponentModel::Handcrafted,
+        max_decisions,
+        max_depth: 400,
+    };
+    run_gate(py, policy, decks, book, cfg, specs, workers, classify)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_gate(
+    py: Python<'_>, policy: crate::policy::Policy,
+    decks: crate::decks::Decks, book: crate::decks::DeckBook,
+    cfg: crate::mcts::MctsConfig,
+    specs: Vec<(String, String, bool, u64)>, workers: usize, classify: bool,
+) -> PyResult<(usize, usize, usize, usize)> {
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
     } else { workers }.min(specs.len().max(1));
@@ -1031,6 +1076,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ismcts_choose_at, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_choose, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_gate, m)?)?;
+    m.add_function(wrap_pyfunction!(az_gate, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;

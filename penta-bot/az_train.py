@@ -141,6 +141,7 @@ def main():
     ap.add_argument("--gate-games", type=int, default=200)
     ap.add_argument("--log", default="az.log")
     ap.add_argument("--save-prefix", default="az")
+    ap.add_argument("--learner-deck", default="Sligh")
     args = ap.parse_args()
 
     spz = AN.load_spz_core()
@@ -165,6 +166,8 @@ def main():
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
+
+    gopps = [d for d in decks if d != args.learner_deck]
 
     seed = 1
     for rnd in range(args.rounds):
@@ -232,13 +235,51 @@ def main():
         export_value(value, val_path)
 
         with torch.no_grad():
-            ent = float(-(pi * logp).sum() / n)
+            # Entropy of the POLICY, not the cross-entropy to the target --
+            # those were previously the same expression, so the column
+            # carried no information beyond pol_ce.
+            p_pol = logp.exp()
+            pol_ent = float(-(p_pol * logp).sum() / n)
+            # Entropy of the SEARCH TARGET, normalised per decision so
+            # decisions with different action counts are comparable. This is
+            # the health metric for search itself: 1.0 means the visits are
+            # uniform (no opinion), 0.0 means every visit landed on one
+            # action. A mis-scaled PUCT term pinned this at 0.000 and made
+            # search a 1-ply greedy pick; it should START near 1.0 at a cold
+            # start and FALL as the value head learns.
+            tgt_ent = float((torch.zeros(n).scatter_add(
+                0, segs, -(pi * torch.log(pi + 1e-12)))
+                / torch.log(ct.float().clamp(min=2))).mean())
             vmse = float(((torch.sigmoid(value(st)) - zt) ** 2).mean())
             base = float(((zt - zt.mean()) ** 2).mean())
+        # Fraction of games that reached a real result. Unfinished games all
+        # score z = 0.5, so a low finish rate means the value head is being
+        # trained on a constant and the loop is only half running.
+        fin = sum(1 for r in ep_res if int(r) >= 0) / max(len(ep_res), 1)
         log(f"round {rnd}: {args.games} games {gen:.0f}s "
             f"({args.games/max(gen,1e-9):.2f} g/s) {n} decisions | "
-            f"pol_ce={float(ploss):.4f} ent={ent:.3f} "
+            f"fin={100*fin:.0f}% pol_ce={float(ploss):.4f} "
+            f"pol_ent={pol_ent:.3f} tgt_ent={tgt_ent:.3f} "
             f"vmse={vmse:.4f}/{base:.4f}", args.log)
+
+        # Strength check against the engine's built-in bot, with search --
+        # the only number that says whether the loop is actually improving.
+        # Everything else (losses, entropies) can look healthy while the
+        # bot gets no better.
+        if args.gate_every and (rnd + 1) % args.gate_every == 0:
+            gspecs = [(args.learner_deck if g % 2 == 0 else gopps[g % len(gopps)],
+                       gopps[g % len(gopps)] if g % 2 == 0 else args.learner_deck,
+                       g % 2 == 0, 900_000 + g)
+                      for g in range(args.gate_games)]
+            t1 = time.time()
+            w, d, f, cap = spz.az_gate(
+                catalog, val_path, pol_path, args.iters, 1.5,
+                "builtin-decklists.json", gspecs, args.threads, 600, True)
+            rate = (w + 0.5 * d) / max(f, 1)
+            se = (rate * (1 - rate) / max(f, 1)) ** 0.5
+            log(f"  GATE round {rnd}: {100*rate:.1f}% +/- {100*se:.1f} "
+                f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
+                f"[{time.time()-t1:.0f}s]", args.log)
 
 
 if __name__ == "__main__":
