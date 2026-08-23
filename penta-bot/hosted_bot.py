@@ -86,7 +86,7 @@ def fallback_choice(obs):
     return best["index"]
 
 
-def play_room(server, room, token, policy, move_budget):
+def play_room(server, room, token, policy, move_budget, max_room_secs=900):
     headers = {"x-penta-token": token}
     log_path = os.path.join(
         LOG_DIR, f"{time.strftime('%Y%m%d-%H%M%S')}-{room}.jsonl")
@@ -95,6 +95,18 @@ def play_room(server, room, token, policy, move_budget):
     t_start = time.time()
     with open(log_path, "w") as log:
         while not _shutdown:
+            # A room that never resolves used to hang the daemon forever:
+            # the opponent walks away, the server declares nothing, and this
+            # loop polls until the process dies. Give up and let the caller
+            # mark it done so presence is not held hostage by one game.
+            if time.time() - t_start > max_room_secs:
+                log.write(json.dumps({"t": "abandoned",
+                                      "seconds": round(time.time() - t_start),
+                                      "moves": moves}) + "\n")
+                print(f"game {room}: abandoned after "
+                      f"{round(time.time() - t_start)}s with no result",
+                      flush=True)
+                return
             try:
                 view = _request(f"{server}/_game/{room}/opponent",
                                 headers=headers)
@@ -228,38 +240,61 @@ def main():
         policy = HostedPolicy(weight=args.weight,
                               value_path=args.value_net)
     state = load_or_register(args.server, args.name, args.deck)
-    done = []
-    beats = 0
+
+    # Heartbeat on its OWN thread. It used to share the main loop with
+    # play_room, so while a game was in progress nothing was sent -- and
+    # the presence window is 45s. One game that never resolved took the bot
+    # offline and left it there, still running, invisible in the registry.
+    # Presence must not depend on what a game is doing.
+    import queue
+    import threading
+    invites = queue.Queue()
+    hb = {"state": state, "done": [], "beats": 0}
+    lock = threading.Lock()
+
+    def heartbeat_loop():
+        while not _shutdown:
+            try:
+                with lock:
+                    sid, tok = hb["state"]["id"], hb["state"]["token"]
+                    done, hb["done"] = hb["done"], []
+                reply = _request(f"{args.server}/_bots/{sid}/heartbeat",
+                                 {"token": tok, "done": done})
+                hb["beats"] += 1
+                if hb["beats"] % 360 == 1:      # roughly hourly
+                    print(f"heartbeat ok ({hb['beats']} total)", flush=True)
+                for inv in reply.get("invites", ()):
+                    invites.put(inv)
+            except urllib.error.HTTPError as error:
+                if 400 <= error.code < 500:
+                    print(f"heartbeat {error.code}: re-registering",
+                          flush=True)
+                    with lock:
+                        hb["state"] = register(args.server, args.name,
+                                               args.deck)
+            except urllib.error.URLError as error:
+                print(f"server unreachable: {error}", flush=True)
+            time.sleep(args.heartbeat)
+
+    threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    seen = set()
     while not _shutdown:
         try:
-            reply = _request(
-                f"{args.server}/_bots/{state['id']}/heartbeat",
-                {"token": state["token"], "done": done})
-            done = []
-            beats += 1
-            if beats % 360 == 1:  # roughly hourly
-                print(f"heartbeat ok ({beats} total)", flush=True)
-        except urllib.error.HTTPError as error:
-            if 400 <= error.code < 500:
-                print(f"heartbeat {error.code}: re-registering", flush=True)
-                state = register(args.server, args.name, args.deck)
-                continue
-            time.sleep(args.heartbeat)
+            invite = invites.get(timeout=args.heartbeat)
+        except queue.Empty:
             continue
-        except urllib.error.URLError as error:
-            print(f"server unreachable: {error}", flush=True)
-            time.sleep(args.heartbeat)
+        room = invite["room"]
+        if room in seen:            # the same invite can arrive twice
             continue
-        for invite in reply.get("invites", ()):
-            room = invite["room"]
-            print(f"invite: room {room}", flush=True)
-            try:
-                play_room(args.server, room, invite["token"], policy,
-                          args.move_budget)
-            finally:
-                done.append(room)
-        if not reply.get("invites"):
-            time.sleep(args.heartbeat)
+        seen.add(room)
+        print(f"invite: room {room}", flush=True)
+        try:
+            play_room(args.server, room, invite["token"], policy,
+                      args.move_budget)
+        finally:
+            with lock:
+                hb["done"].append(room)
 
 
 if __name__ == "__main__":
