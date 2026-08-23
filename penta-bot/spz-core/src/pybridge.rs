@@ -475,7 +475,16 @@ fn az_gate(
     let book = decks::DeckBook::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let cfg = crate::mcts::MctsConfig {
-        iters, c_puct, inert: false, use_dominance: false,
+        // Dominance pruning ON for the gate. It is a CERTIFIED prune, so it
+        // only removes provably-dominated actions and cannot weaken play --
+        // and without it every wide decision (up to 538 candidates) is
+        // searched in full. Measured: a 200-game gate took 422s, roughly
+        // half the wall clock of the ten training rounds it was scoring.
+        //
+        // Self-play generation deliberately leaves it OFF: there the visit
+        // vector is a training target, and a target over a pruned action
+        // set is not the distribution the policy is asked to reproduce.
+        iters, c_puct, inert: false, use_dominance: true,
         leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
         opponent: crate::mcts::OpponentModel::Handcrafted,
         max_decisions,

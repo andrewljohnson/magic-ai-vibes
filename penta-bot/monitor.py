@@ -58,6 +58,17 @@ GATE_RE = re.compile(
 GATE0_RE = re.compile(r"GATE @(\d+) games: actor vs handcrafted = ([0-9.]+)%")
 MATCH_RE = re.compile(r"MATCHUPS (.+)")
 START_RE = re.compile(r"PAR-AAC start: (.*)")
+# --- AlphaZero loop (az_train.py) ---------------------------------------
+# Different shape from the AAC logs: strength arrives on its own GATE line
+# every --gate-every rounds, while the per-round line carries throughput
+# and the health metrics. Both are folded into the SAME gate dict the AAC
+# path produces, so the chart, table and small multiples need no changes.
+AZ_START_RE = re.compile(r"AZ cold start: (.*)")
+AZ_ROUND_RE = re.compile(
+    r"round (\d+): (\d+) games \d+s \(([0-9.]+) g/s\).*?"
+    r"fin=(\d+)%.*?pol_ent=([0-9.]+).*?tgt_ent=([0-9.]+).*?"
+    r"vmse=([0-9.]+)/([0-9.]+)")
+AZ_GATE_RE = re.compile(r"GATE round \d+: ([0-9.]+)%")
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
 
@@ -90,11 +101,55 @@ def live_prefixes():
 def parse_log(path):
     name = os.path.basename(path)[:-4]
     gates, config, done = [], "", None
+    az, az_games, az_last = False, 0, {}
     stamps = []
     matchups = []
     try:
         with open(path, errors="replace") as f:
             for line in f:
+                m = AZ_START_RE.search(line)
+                if m:
+                    config = m.group(1).strip()
+                    az = True
+                    continue
+                if az:
+                    m = AZ_ROUND_RE.search(line)
+                    if m:
+                        az_games += int(m.group(2))
+                        az_last = {
+                            "gps": float(m.group(3)),
+                            "fin": int(m.group(4)),
+                            "entropy": float(m.group(5)),
+                            "tgt_ent": float(m.group(6)),
+                            "vmse": float(m.group(7)),
+                            "vbase": float(m.group(8)),
+                        }
+                        ts = TS_RE.match(line)
+                        if ts:
+                            h, mi, sec = (int(x) for x in ts.groups())
+                            stamps.append(h * 3600 + mi * 60 + sec)
+                        continue
+                    m = AZ_GATE_RE.search(line)
+                    if m:
+                        gates.append({
+                            "games": az_games, "pct": float(m.group(1)),
+                            # vmse against its own baseline is this loop's
+                            # analogue of critic_loss: below 1.0 means the
+                            # value head beats predicting the mean.
+                            "closs": (az_last.get("vmse", 0.0)
+                                      / max(az_last.get("vbase", 1e-9), 1e-9)
+                                      if az_last else None),
+                            "entropy": az_last.get("entropy"),
+                            # tgt_ent is the search-health metric: it should
+                            # start near 1.0 and FALL as the value head
+                            # learns. Flat near 1.0 means search has no
+                            # opinion; pinned at 0.0 means it is not
+                            # branching at all.
+                            "gmean": az_last.get("tgt_ent"),
+                            "capped": None, "gps": az_last.get("gps"),
+                            "ts": stamps[-1] if stamps else None})
+                        continue
+                    continue
                 m = MATCH_RE.search(line)
                 if m:
                     matchups = []
@@ -174,6 +229,17 @@ def parse_log(path):
         return m.group(1) if m else default
     decklist = cfg(r"decklist=(\w+)")
     bits = []
+    # An AZ run's config has none of the AAC keys, so without this it would
+    # render with a blank label. Name what actually distinguishes it.
+    if az:
+        bits.append("AlphaZero")
+        if cfg(r"iters=(\d+)"):
+            bits.append(cfg(r"iters=(\d+)") + " sims")
+        if cfg(r"hidden=(\d+)"):
+            bits.append("h" + cfg(r"hidden=(\d+)"))
+        return_label = " · ".join(bits)
+    else:
+        return_label = None
     if decklist:
         bits.append("open decklists" if decklist.upper() == "OPEN"
                     else "classified deck")
@@ -185,7 +251,7 @@ def parse_log(path):
         v = cfg(pat)
         if v and v not in ("0.01", "0.95", "0.001"):   # only note non-defaults
             bits.append(fmt.format(v))
-    label = " · ".join(bits)
+    label = return_label if return_label is not None else " · ".join(bits)
 
     idle = time.time() - mtime
     # median spacing between this run's own gates (wrapping midnight)
