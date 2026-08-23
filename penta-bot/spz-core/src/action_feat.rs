@@ -65,6 +65,13 @@ fn subject_def(a: &Action, obs: &PlayerObservation) -> Option<u16> {
         | Action::ActivateManaAbility { source, .. } => on_field(source.0),
         Action::DeclareAttacker { attacker, .. } => on_field(attacker.0),
         Action::DeclareBlocker { blocker, .. } => on_field(blocker.0),
+        // Which card is being discarded/bottomed is the decision; identify
+        // the selection by its first card so it lands in the definition
+        // block rather than collapsing to "a discard".
+        Action::DiscardCards { cards } | Action::BottomCards { cards } =>
+            cards.first().and_then(|c| in_hand(c.0)),
+        Action::ChooseUntap { permanents } =>
+            permanents.first().and_then(|p| on_field(p.0)),
         _ => None,
     }
 }
@@ -89,10 +96,55 @@ fn subject_def(a: &Action, obs: &PlayerObservation) -> Option<u16> {
 ///  11  divided-damage amount on the first target / 8
 const N_TARGET: usize = 12;
 
+/// EXTRA block, added after a collision audit found 41.6% of decisions
+/// contained two legal actions encoding identically -- positions where the
+/// policy head could only guess. Causes, by frequency:
+///
+///   ActivateAbility     10166   only the SOURCE was encoded, so a
+///                               permanent with two abilities looked the
+///                               same twice (Mishra's Factory animating vs
+///                               tapping, Library drawing vs making mana)
+///   ActivateManaAbility  1197   the COLOR was absent: a dual tapped for
+///                               white and for blue were one vector
+///   DiscardCards          280   which card was being discarded
+///   PlayLand              133   the play option
+///   CastSpell              70   modes / sacrifices / play option
+///
+///   0..8   ability slot (AbilityId bucketed) -- WHICH ability
+///   8..14  mana color one-hot (W U B R G C)
+///  14..18  play option bucket
+///     18   number of objects in a multi-select / 4
+///     19   a sacrifice is being paid
+///     20   number of modes chosen / 4
+const N_EXTRA: usize = 21;
+
 /// Width of the encoding: kinds + card-definition slot + cost bucket
 /// + subject scalars + the target block.
 pub fn width(t: &Tables) -> usize {
-    N_KINDS + t.defs + N_COST_BUCKETS + 4 + N_TARGET
+    N_KINDS + t.defs + N_COST_BUCKETS + 4 + N_TARGET + N_EXTRA
+}
+
+/// Which ability of a source is being used. Two abilities on one permanent
+/// differ only here, so without it they are the same action to the net.
+fn ability_slot(o: &penta::AbilityOrigin) -> usize {
+    let raw = match o {
+        penta::AbilityOrigin::Printed { ability, .. } => ability.0 as usize,
+        penta::AbilityOrigin::Granted { source_ability, .. } =>
+            source_ability.0 as usize + 4,
+        penta::AbilityOrigin::IntrinsicBasicLand(_) => 7,
+    };
+    raw % 8
+}
+
+fn color_slot(c: penta::ManaColor) -> usize {
+    match c {
+        penta::ManaColor::White => 0,
+        penta::ManaColor::Blue => 1,
+        penta::ManaColor::Black => 2,
+        penta::ManaColor::Red => 3,
+        penta::ManaColor::Green => 4,
+        penta::ManaColor::Colorless => 5,
+    }
 }
 
 /// Fill the target block from a list of target selections.
@@ -185,6 +237,40 @@ pub fn encode(a: &Action, obs: &PlayerObservation, t: &Tables,
                 out[tb + 4] = f32::from(p.power.unwrap_or(0)) / 8.0;
                 out[tb + 5] = f32::from(p.toughness.unwrap_or(0)) / 8.0;
                 out[tb + 6] = 1.0;
+            }
+        }
+        _ => {}
+    }
+
+    let ex = tb + N_TARGET;
+    match a {
+        Action::ActivateAbility { ability, cost_object, .. } => {
+            out[ex + ability_slot(ability)] = 1.0;
+            out[ex + 19] = if cost_object.is_some() { 1.0 } else { 0.0 };
+        }
+        Action::ActivateManaAbility { ability, color, .. } => {
+            out[ex + ability_slot(ability)] = 1.0;
+            out[ex + 8 + color_slot(*color)] = 1.0;
+        }
+        Action::PlayLand { option, .. } => {
+            out[ex + 14 + (option.0 as usize % 4)] = 1.0;
+        }
+        Action::CastSpell { choices, sacrifices, .. } => {
+            out[ex + 14 + (choices.play_option().0 as usize % 4)] = 1.0;
+            out[ex + 19] = if sacrifices.is_empty() { 0.0 } else { 1.0 };
+            out[ex + 20] = choices.modes().len() as f32 / 4.0;
+        }
+        Action::DiscardCards { cards } | Action::BottomCards { cards } => {
+            out[ex + 18] = cards.len() as f32 / 4.0;
+        }
+        Action::ChooseUntap { permanents } => {
+            out[ex + 18] = permanents.len() as f32 / 4.0;
+        }
+        Action::ChooseDecision { decision, options } => {
+            out[ex + 14 + (*decision as usize % 4)] = 1.0;
+            out[ex + 18] = options.len() as f32 / 4.0;
+            if let Some(o) = options.first() {
+                out[ex + (*o as usize % 8)] = 1.0;
             }
         }
         _ => {}
@@ -385,6 +471,99 @@ mod tests {
                  idxs.len(), differing);
         assert!(differing > 0,
                 "the same spell at different targets must not collapse");
+    }
+
+    /// AUDIT: how often do two DISTINCT legal actions encode identically?
+    /// A collision means the policy head physically cannot tell them apart,
+    /// so it must guess -- the same defect that made the value head useless
+    /// for ranking. Reasoning about which card interactions matter is
+    /// guesswork; counting collisions over real games is not.
+    #[test]
+    fn collision_audit() {
+        let t = tables();
+        let w = width(&t);
+        let step = |acts: &[penta::Action]| -> usize {
+            let rank = |a: &penta::Action| match a {
+                penta::Action::PlayLand { .. } => 0,
+                penta::Action::CastSpell { .. } => 1,
+                penta::Action::DeclareAttacker { .. } => 2,
+                penta::Action::PassPriority => 9,
+                _ => 5,
+            };
+            (0..acts.len()).min_by_key(|&i| (rank(&acts[i]), i)).unwrap_or(0)
+        };
+        let mut decisions = 0usize;
+        let mut colliding_decisions = 0usize;
+        let mut pairs = 0usize;
+        let mut colliding_pairs = 0usize;
+        let mut benign = 0usize;
+        let mut harmful = 0usize;
+        let mut by_kind: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for seed in 0..40u64 {
+            let mut g = BotGame::new("Sligh", "The Deck",
+                                     Opponent::Handcrafted, PlayerId::Two,
+                                     seed).expect("game");
+            for _ in 0..600 {
+                let Some(seat) = g.decision_seat() else { break };
+                let obs = g.core_game().observe(seat);
+                let acts = protocol_actions(&obs);
+                if acts.len() > 1 {
+                    let enc = encode_all(&acts, &obs, &t);
+                    decisions += 1;
+                    let mut hit = false;
+                    for i in 0..acts.len() {
+                        for j in (i + 1)..acts.len() {
+                            pairs += 1;
+                            if enc[i * w..(i + 1) * w]
+                                == enc[j * w..(j + 1) * w]
+                            {
+                                colliding_pairs += 1;
+                                // BENIGN vs HARMFUL. Two identical
+                                // Mountains both offering "tap for red" are
+                                // interchangeable -- encoding them the same
+                                // is correct, and the policy head loses
+                                // nothing by not distinguishing them. A
+                                // collision only costs us when the two
+                                // actions are genuinely different plays.
+                                let same = subject_def(&acts[i], &obs)
+                                    == subject_def(&acts[j], &obs)
+                                    && std::mem::discriminant(&acts[i])
+                                       == std::mem::discriminant(&acts[j]);
+                                if same { benign += 1; } else {
+                                    harmful += 1;
+                                    hit = true;
+                                    let k = format!("{:?}", acts[i]);
+                                    let k = k.split_whitespace().next()
+                                        .unwrap_or("?").trim_matches('{')
+                                        .to_string();
+                                    *by_kind.entry(k).or_default() += 1;
+                                }
+                            }
+                        }
+                    }
+                    if hit { colliding_decisions += 1; }
+                }
+                if g.act(step(&acts)).is_err() { break; }
+            }
+        }
+        let mut kinds: Vec<_> = by_kind.into_iter().collect();
+        kinds.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+        println!("\n  decisions with >1 action: {decisions}");
+        println!("  decisions containing a HARMFUL collision: {} ({:.1}%)",
+                 colliding_decisions,
+                 100.0 * colliding_decisions as f64 / decisions.max(1) as f64);
+        println!("  colliding action PAIRS: {} of {} ({:.1}%)",
+                 colliding_pairs, pairs,
+                 100.0 * colliding_pairs as f64 / pairs.max(1) as f64);
+        println!("    benign (same card + same kind, interchangeable): {} ({:.1}%)",
+                 benign, 100.0 * benign as f64 / colliding_pairs.max(1) as f64);
+        println!("    HARMFUL (genuinely different plays): {} ({:.2}% of all pairs)",
+                 harmful, 100.0 * harmful as f64 / pairs.max(1) as f64);
+        println!("  by action kind:");
+        for (k, n) in kinds.iter().take(8) {
+            println!("    {:<28} {}", k, n);
+        }
     }
 
     #[test]
