@@ -30,6 +30,8 @@ import os
 import sys
 import time
 
+import random
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -146,6 +148,13 @@ def main():
     ap.add_argument("--log", default="az.log")
     ap.add_argument("--save-prefix", default="az")
     ap.add_argument("--learner-deck", default="Sligh")
+    ap.add_argument("--deck-weight", type=float, default=2.0,
+                    help="How hard to skew self-play pairings toward decks "
+                         "the last gate lost to: w = 1 + k*(1 - winrate). "
+                         "0 restores uniform rotation. The gate showed a "
+                         "clean split -- slow decks beaten, aggro decks "
+                         "scoring zero -- so uniform pairing spends as many "
+                         "games on solved matchups as on lost ones.")
     ap.add_argument("--root-noise", type=float, default=0.25,
                     help="Dirichlet fraction mixed into the ROOT prior "
                          "during generation (AlphaZero uses 0.25). Without "
@@ -177,19 +186,43 @@ def main():
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
         f"root_noise={args.root_noise} buffer={args.buffer_rounds} "
+        f"deck_weight={args.deck_weight} "
         f"batch={args.batch} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
 
     gopps = [d for d in decks if d != args.learner_deck]
 
     buf = []
+    # Per-deck sampling weight for self-play pairings, refreshed from each
+    # gate's matchup breakdown. Uniform until the first gate.
+    #
+    # The first matchup grid was lopsided in a very specific way: the bot
+    # beat the slow decks (The Deck 55.6%, Robots 50.0%, Artifacts 37.5%)
+    # and scored ZERO against aggro (Counterburn, Goblins, GR Aggro, Lion
+    # Dib Bolt, Erhnamgeddon), with Mono Black, Jeskai and White Weenie
+    # near 11%. Uniform pairing spends the same number of games on decks
+    # already solved as on the ones losing every game.
+    deck_w = {d: 1.0 for d in decks}
 
+    def sample_deck(rng):
+        tot = sum(deck_w[d] for d in decks)
+        x = rng.random() * tot
+        for d in decks:
+            x -= deck_w[d]
+            if x <= 0:
+                return d
+        return decks[-1]
+
+    rng = random.Random(12345)
     seed = 1
     for rnd in range(args.rounds):
         specs = []
         for g in range(args.games):
-            d1 = decks[(seed + g) % len(decks)]
-            d2 = decks[(seed + g * 7 + 3) % len(decks)]
+            if args.deck_weight > 0:
+                d1, d2 = sample_deck(rng), sample_deck(rng)
+            else:
+                d1 = decks[(seed + g) % len(decks)]
+                d2 = decks[(seed + g * 7 + 3) % len(decks)]
             specs.append((d1, d2, seed * 1000 + g))
         seed += 1
         t0 = time.time()
@@ -370,6 +403,14 @@ def main():
                 log("  MATCHUPS " + " ".join(
                     f"{o.replace(' ', '_')}={100*v[0]/v[1]:.1f}"
                     for o, v in agg.items()), args.log)
+                if args.deck_weight > 0:
+                    for o, v in agg.items():
+                        deck_w[o] = 1.0 + args.deck_weight * (
+                            1.0 - v[0] / v[1])
+                    top = sorted(deck_w.items(), key=lambda kv: -kv[1])[:4]
+                    log("  WEIGHTS " + " ".join(
+                        f"{k.replace(' ', '_')}={w:.2f}" for k, w in top),
+                        args.log)
 
 
 if __name__ == "__main__":
