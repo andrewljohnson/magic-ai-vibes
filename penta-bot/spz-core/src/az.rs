@@ -143,3 +143,74 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
     };
     Episode { records, result, decisions: n }
 }
+
+#[cfg(all(test, feature = "prof"))]
+mod prof_tests {
+    use super::*;
+
+    /// Where does a REAL self-play episode spend its time? The existing
+    /// profile in mcts.rs measures one synthetic mid-game position and
+    /// predicts ~20ms per decision; the actual az path costs 1.9s. A 95x
+    /// gap means that profile does not describe this workload, so measure
+    /// this one directly.
+    ///
+    /// `cargo test --release --features prof az_profile -- --nocapture`
+    #[test]
+    fn az_profile() {
+        const CATALOG: &str = "../pinned-catalog.json";
+        const DECKLISTS: &str = "../builtin-decklists.json";
+        let value = std::env::var("AZ_VALUE").expect("AZ_VALUE");
+        let head = std::env::var("AZ_HEAD").expect("AZ_HEAD");
+        let iters: usize = std::env::var("AZ_ITERS")
+            .ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+        let opp = std::env::var("AZ_OPP").unwrap_or_else(|_| "greedy".into());
+
+        let mut tables = crate::tables::Tables::load(
+            &std::fs::read_to_string(CATALOG).unwrap()).unwrap();
+        let v = crate::net::Mlp::load(&value).unwrap();
+        tables.set_belief(v.inputs > tables.v2_size);
+        let policy = Policy {
+            tables, value: v, head: crate::net::Mlp::load(&head).unwrap(),
+            weight: 0.0,
+            search: crate::policy::SearchConfig {
+                top_k: 0, playouts: 1, budget: 400, playout_max_eval: 999 },
+            max_eval: 999,
+        };
+        let decks = crate::decks::load(DECKLISTS).unwrap();
+        let book = crate::decks::DeckBook::load(DECKLISTS).unwrap();
+        let cfg = MctsConfig {
+            iters, c_puct: 1.5, inert: false,
+            leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+            use_dominance: std::env::var("AZ_DOM").as_deref() != Ok("0"),
+            opponent: if opp == "handcrafted" {
+                crate::mcts::OpponentModel::Handcrafted
+            } else { crate::mcts::OpponentModel::Greedy },
+            max_decisions: MAX_DECISIONS,
+        };
+        crate::mcts::prof::reset();
+        let t0 = std::time::Instant::now();
+        let ep = play_episode(&policy, &policy.tables, &decks, &book,
+                              "Sligh", "Goblins", 5000, &cfg, 64);
+        let total = t0.elapsed().as_nanos() as u64;
+        let acc = crate::mcts::prof::snapshot();
+        let sum: u64 = acc.iter().sum();
+        println!("\n=== AZ episode profile (iters={iters}, opp={opp}) ===");
+        println!("total {:.1}s for {} decisions ({} searched)",
+                 total as f64 / 1e9, ep.decisions, ep.records.len());
+        println!("per searched decision: {:.0} ms",
+                 total as f64 / 1e6 / ep.records.len().max(1) as f64);
+        let (calls, rows) = crate::mcts::prof::counts();
+        println!("  prior batches: {}, action-rows: {}, rows/batch: {:.1}",
+                 calls, rows, rows as f64 / calls.max(1) as f64);
+        println!("  -> {:.2} ms per action-row in action_prior",
+                 acc[2] as f64 / 1e6 / rows.max(1) as f64);
+        for i in 0..crate::mcts::prof::N {
+            println!("  {:>14}: {:>8.2} s ({:>5.1}%)",
+                     crate::mcts::prof::NAMES[i], acc[i] as f64 / 1e9,
+                     100.0 * acc[i] as f64 / total as f64);
+        }
+        println!("  {:>14}: {:>8.2} s ({:>5.1}%)", "descent/other",
+                 total.saturating_sub(sum) as f64 / 1e9,
+                 100.0 * total.saturating_sub(sum) as f64 / total as f64);
+    }
+}

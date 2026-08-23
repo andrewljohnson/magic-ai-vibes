@@ -43,6 +43,38 @@ impl Mlp {
         Ok(Mlp { inputs, hidden, w1, b1, w2, b2 })
     }
 
+    /// Values for `m` rows at once (`m * inputs`, row-major).
+    ///
+    /// Same reason as Actor::score_batch: evaluating one row at a time
+    /// re-streams the whole w1 matrix per row, and at 256x1081 f64 that is
+    /// 2.2 MB -- past L2, so every row pays a trip to memory. Hoisting the
+    /// hidden loop outside the row loop reads each weight row once and
+    /// reuses it across all m. Accumulation order per row is unchanged, so
+    /// results are bit-identical to calling value() in a loop.
+    pub fn value_batch(&self, rows: &[f32], m: usize) -> Vec<f64> {
+        debug_assert_eq!(rows.len(), m * self.inputs);
+        let mut out = vec![self.b2; m];
+        let mut pre = vec![0.0f64; m];
+        for h in 0..self.hidden {
+            let w = &self.w1[h * self.inputs..(h + 1) * self.inputs];
+            let bias = self.b1[h];
+            for (j, p) in pre.iter_mut().enumerate() {
+                let x = &rows[j * self.inputs..(j + 1) * self.inputs];
+                let mut acc = bias;
+                for (wi, xi) in w.iter().zip(x) {
+                    acc += wi * f64::from(*xi);
+                }
+                *p = acc;
+            }
+            let w2h = self.w2[h];
+            for (o, p) in out.iter_mut().zip(&pre) {
+                *o += w2h * p.tanh();
+            }
+        }
+        out.iter_mut().for_each(|o| *o = 1.0 / (1.0 + (-*o).exp()));
+        out
+    }
+
     pub fn value(&self, x: &[f32]) -> f64 {
         debug_assert_eq!(x.len(), self.inputs);
         let mut out = self.b2;

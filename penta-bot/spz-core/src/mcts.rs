@@ -63,7 +63,22 @@ pub mod prof {
     pub fn add(bucket: usize, ns: u64) {
         ACC.with(|a| a[bucket].set(a[bucket].get() + ns));
     }
-    pub fn reset() { ACC.with(|a| for c in a { c.set(0); }); }
+    pub fn reset() { ACC.with(|a| for c in a { c.set(0); }); CALLS.with(|c| c.set(0)); ROWS.with(|r| r.set(0)); }
+    thread_local! {
+        static CALLS: Cell<u64> = const { Cell::new(0) };
+        static ROWS: Cell<u64> = const { Cell::new(0) };
+    }
+    /// How many prior BATCHES and how many action-rows within them. If rows
+    /// per batch is small, batching cannot help and the cost is the
+    /// per-action engine work (clone + apply + observe + featurize), not
+    /// the net.
+    pub fn count(rows: usize) {
+        CALLS.with(|c| c.set(c.get() + 1));
+        ROWS.with(|r| r.set(r.get() + rows as u64));
+    }
+    pub fn counts() -> (u64, u64) {
+        (CALLS.with(Cell::get), ROWS.with(Cell::get))
+    }
     pub fn snapshot() -> [u64; N] {
         ACC.with(|a| std::array::from_fn(|i| a[i].get()))
     }
@@ -226,8 +241,41 @@ impl<'a> Ismcts<'a> {
         }
     }
 
-    /// Policy-head afterstate score for OUR action `i` in `world` (the
-    /// softmax logit cached as the PUCT prior).
+    /// Policy-head afterstate scores for a SET of our actions, in one
+    /// batched net pass. See the call site: doing these individually
+    /// dominated search time.
+    fn action_priors(&self, world: &Game, seat: PlayerId,
+                     actions: &[Action], want: &[usize]) -> Vec<f64> {
+        #[cfg(feature = "prof")]
+        prof::count(want.len());
+        let feat = self.policy.tables.size;
+        let mut out = vec![0.0f64; want.len()];
+        let mut rows: Vec<f32> = Vec::with_capacity(want.len() * feat);
+        let mut slots: Vec<usize> = Vec::with_capacity(want.len());
+        for (k, &i) in want.iter().enumerate() {
+            let mut copy = world.clone();
+            if copy.apply(seat, actions[i].clone()).is_err() {
+                continue;                       // leaves out[k] at 0.0
+            }
+            if let Some(t) = terminal_value(&copy, seat) {
+                out[k] = t;
+                continue;
+            }
+            rows.extend(features(&copy.observe(seat), copy.in_pregame(),
+                                 &self.policy.tables, self.deck_slots));
+            slots.push(k);
+        }
+        if !slots.is_empty() {
+            let v = self.policy.head.value_batch(&rows, slots.len());
+            for (j, &k) in slots.iter().enumerate() {
+                out[k] = v[j];
+            }
+        }
+        out
+    }
+
+    /// Single-action form, kept for the tests that exercise it.
+    #[allow(dead_code)]
     fn action_prior(&self, world: &Game, seat: PlayerId,
                     actions: &[Action], i: usize) -> f64 {
         let mut copy = world.clone();
@@ -313,16 +361,29 @@ impl<'a> Ismcts<'a> {
 
             let node_idx = tree.get_or_create(&path);
             // Ensure priors + bump availability for every legal action here.
+            //
+            // Priors are computed in ONE batched pass over the actions that
+            // still need one. Doing them individually re-streamed the head
+            // net's weight matrix per action and was 64% of AZ self-play
+            // time; a node's actions are all evaluated against the same
+            // weights, so one pass over them costs what one action used to.
+            let need: Vec<usize> = avail.iter().copied()
+                .filter(|&i| !tree.arena[node_idx].stats
+                    .get(&actions[i]).map(|s| s.prior_set).unwrap_or(false))
+                .collect();
+            if !need.is_empty() {
+                let priors = timed!(2,
+                    self.action_priors(world, seat, &actions, &need));
+                for (k, &i) in need.iter().enumerate() {
+                    let st = tree.arena[node_idx].stats
+                        .entry(actions[i].clone()).or_default();
+                    st.prior = priors[k];
+                    st.prior_set = true;
+                }
+            }
             for &i in &avail {
-                let key = actions[i].clone();
-                let need_prior = !tree.arena[node_idx].stats
-                    .get(&key).map(|s| s.prior_set).unwrap_or(false);
-                let prior = if need_prior {
-                    timed!(2, self.action_prior(world, seat, &actions, i))
-                } else { 0.0 };
-                let s = tree.arena[node_idx].stats.entry(key).or_default();
-                if need_prior { s.prior = prior; s.prior_set = true; }
-                s.a += 1;
+                tree.arena[node_idx].stats
+                    .entry(actions[i].clone()).or_default().a += 1;
             }
             // PUCT select over the available set.
             let (sel_i, sel_key, first_visit) =

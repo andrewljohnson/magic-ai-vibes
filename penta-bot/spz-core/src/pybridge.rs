@@ -911,6 +911,7 @@ fn az_stream_episodes(
     catalog_json: String, value_path: String, head_path: String,
     weight: f64, iters: usize, c_puct: f64, budget: usize,
     decklists_path: String, max_actions: usize, threads: usize,
+    opponent: String,
     specs: Vec<(String, String, u64)>,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                pyo3::Bound<'_, pyo3::types::PyBytes>,
@@ -928,7 +929,20 @@ fn az_stream_episodes(
     let cfg = crate::mcts::MctsConfig {
         iters, c_puct, inert: false, use_dominance: true,
         leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
-        opponent: crate::mcts::OpponentModel::Greedy,
+        // The opponent MODEL inside the tree -- how we assume the other
+        // seat will reply while searching. "greedy" models them with our
+        // own policy, which is the principled choice but runs a full 1-ply
+        // afterstate argmax at EVERY opponent node of EVERY iteration:
+        // measured 1.9s per decision at iters=8, i.e. ~95x what the phase
+        // profile predicts. "handcrafted" asks the engine's built-in policy
+        // directly, with no net evaluation at all.
+        //
+        // Note the tension with the pure-build rule: handcrafted here is a
+        // SIMULATOR assumption about the opponent's replies, not a training
+        // opponent -- the games are still self-play. But it does put the
+        // built-in bot's judgement inside our search, so it is a real
+        // choice and not merely a speed knob.
+        opponent: parse_opponent(&opponent)?,
         max_decisions: crate::az::MAX_DECISIONS,
     };
     let n_threads = thread_count(threads, specs.len());

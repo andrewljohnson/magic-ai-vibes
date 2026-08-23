@@ -86,21 +86,35 @@ impl Policy {
         if actions.len() <= 1 {
             return 0;
         }
-        let mut best = 0usize;
-        let mut best_v = f64::NEG_INFINITY;
+        // Collect the non-terminal afterstates first and score them in ONE
+        // batched pass. This runs at every opponent node of every search
+        // iteration and was 18.8% of AZ self-play time; scoring row by row
+        // re-streams the 2.2 MB weight matrix each time.
+        let feat = self.tables.size;
+        let mut rows: Vec<f32> = Vec::with_capacity(actions.len() * feat);
+        let mut idx: Vec<usize> = Vec::with_capacity(actions.len());
+        let mut fixed: Vec<(usize, f64)> = Vec::new();
         for i in 0..actions.len() {
             let mut copy = g.clone();
             if copy.apply(seat, actions[i].clone()).is_err() {
                 continue;
             }
-            let v = match terminal_value(&copy, seat) {
-                Some(t) => t,
+            match terminal_value(&copy, seat) {
+                Some(t) => fixed.push((i, t)),
                 None => {
-                    let f = features(&copy.observe(seat), copy.in_pregame(),
-                                     &self.tables, decks);
-                    self.value.value(&f)
+                    rows.extend(features(&copy.observe(seat),
+                                         copy.in_pregame(), &self.tables,
+                                         decks));
+                    idx.push(i);
                 }
-            };
+            }
+        }
+        let scored = if idx.is_empty() { Vec::new() }
+                     else { self.value.value_batch(&rows, idx.len()) };
+        let mut best = 0usize;
+        let mut best_v = f64::NEG_INFINITY;
+        for (k, i) in idx.iter().copied().enumerate() {
+            let v = scored[k];
             if v > best_v { best_v = v; best = i; }
         }
         best
