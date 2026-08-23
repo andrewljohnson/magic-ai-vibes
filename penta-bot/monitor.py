@@ -409,8 +409,15 @@ never a single gate.</p>
   never a shared one, they measure different things.</p>
 </div>
 <div class="card"><h2>Win rate by opponent deck</h2>
-  <p class="foot" style="margin:0 0 10px">Latest evaluation per live run.
-  One aggregate number hides everything that matters here.</p>
+  <p class="foot" style="margin:0 0 10px">Our bot pilots <b>Sligh</b> in
+  every one of these games; the named deck is piloted by the engine's
+  <b>built-in handcrafted bot</b>, which scores 31.6% overall. Seats
+  alternate. Latest evaluation per live run — one aggregate number hides
+  everything that matters here.<br>
+  The <b>Sligh mirror is absent by construction</b>: the gate builds its
+  opponent list as every deck EXCEPT the one we pilot. Measured separately
+  at round 239 it is 53.3% ± 4.6, our strongest matchup — we know that deck
+  best because we pilot it every game.</p>
   <div id="grid"></div>
 </div>
 <div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
