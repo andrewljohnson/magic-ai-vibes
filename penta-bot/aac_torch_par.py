@@ -341,6 +341,25 @@ def main():
     ap.add_argument("--gae-lambda", type=float, default=0.95)
     ap.add_argument("--temperature", type=float, default=1.0)
     ap.add_argument("--learner-deck", default="Sligh")
+    # Pilot EVERY archetype, not just --learner-deck. The belief block
+    # already feeds our own decklist in, so the net can condition on which
+    # deck it is piloting without any architecture change -- this is purely
+    # a sampling question.
+    #
+    # The case for: we lose to aggro (30% vs White Weenie / BWR Aggro) and
+    # have only ever seen those decks from the receiving end. Piloting them
+    # teaches what they do. It also turns 14 matchups into 210 and should
+    # regularise against memorising Sligh-specific lines.
+    #
+    # The case against: 1/15th the Sligh experience per game, and single-
+    # deck learning is nowhere near saturated.
+    #
+    # Evaluation stays on --learner-deck either way, so the number remains
+    # comparable to every other run.
+    ap.add_argument("--pilot-all-decks", action="store_true",
+                    help="train piloting all archetypes, not just "
+                         "--learner-deck; evaluation still measures "
+                         "--learner-deck so numbers stay comparable")
     ap.add_argument("--selfplay-frac", type=float, default=0.5)
     ap.add_argument("--gate-every", type=int, default=4000)
     ap.add_argument("--gate-games", type=int, default=120)
@@ -401,6 +420,7 @@ def main():
     extractor = Extractor(version=2, belief=args.belief)
     decks = load_decklists()                     # {name: {def: count}}
     opps = [d for d in decks if d != args.learner_deck]
+    all_decks = list(decks)
     feat = extractor.size                        # 825 or 1081 (belief)
     priv_dim = 2 * feat
     BELIEF = args.belief                          # inherited by forked workers
@@ -461,9 +481,12 @@ def main():
             mode = "selfplay" if rng.random() < args.selfplay_frac \
                 else "handcrafted"
             ls = "p1" if rng.random() < 0.5 else "p2"
-            od = opps[rng.randrange(len(opps))]
-            d1, d2 = (args.learner_deck, od) if ls == "p1" \
-                else (od, args.learner_deck)
+            if args.pilot_all_decks:
+                my = all_decks[rng.randrange(len(all_decks))]
+                od = all_decks[rng.randrange(len(all_decks))]
+            else:
+                my, od = args.learner_deck, opps[rng.randrange(len(opps))]
+            d1, d2 = (my, od) if ls == "p1" else (od, my)
             tasks.append((w, args.temperature, mode, ls, d1, d2, ep_seed))
             ep_seed += 1
         batch = []
