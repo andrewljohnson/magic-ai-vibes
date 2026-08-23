@@ -182,14 +182,15 @@ mod tests {
         use crate::mcts::OpponentModel;
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let mut c = cfg(24, 1);
         assert_eq!(c.opponent, OpponentModel::Handcrafted,
                    "handcrafted must be the default in-tree opponent");
         c.max_decisions = 400;
         let mut x = Vec::new();
         let mut y = Vec::new();
-        let out = play_ismcts_game(&policy, &policy.tables, &decks,
-            "Goblins", "The Deck", true, 42, &c, false, &mut x, &mut y);
+        let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
+            "Goblins", "The Deck", true, 42, &c, true, false, &mut x, &mut y);
         let s = out.score.expect("game must finish");
         assert!(s == 0.0 || s == 0.5 || s == 1.0);
         assert!(!out.capped, "a 400-cap Goblins game should finish naturally");
@@ -201,12 +202,13 @@ mod tests {
         use crate::mcts::OpponentModel;
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let mut c = cfg(16, 1);
         c.opponent = OpponentModel::Greedy;
         let mut x = Vec::new();
         let mut y = Vec::new();
-        let out = play_ismcts_game(&policy, &policy.tables, &decks,
-            "Goblins", "The Deck", true, 7, &c, false, &mut x, &mut y);
+        let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
+            "Goblins", "The Deck", true, 7, &c, true, false, &mut x, &mut y);
         let s = out.score.expect("game must finish");
         assert!(s == 0.0 || s == 0.5 || s == 1.0);
     }
@@ -218,12 +220,13 @@ mod tests {
     fn move_cap_terminates_long_game() {
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let mut c = cfg(8, 1);
         c.max_decisions = 3;  // far too few OUR decisions to end a game
         let mut x = Vec::new();
         let mut y = Vec::new();
-        let out = play_ismcts_game(&policy, &policy.tables, &decks,
-            "Goblins", "The Deck", true, 42, &c, true, &mut x, &mut y);
+        let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
+            "Goblins", "The Deck", true, 42, &c, true, true, &mut x, &mut y);
         assert_eq!(out.score, Some(0.0), "capped game scores as a loss");
         assert!(out.capped, "hitting the cap must flag `capped`");
         assert_eq!(out.rows, 0, "a capped game records no training rows");
@@ -235,10 +238,11 @@ mod tests {
     fn game_completes_and_scores() {
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let mut x = Vec::new();
         let mut y = Vec::new();
-        let out = play_ismcts_game(&policy, &policy.tables, &decks,
-            "Goblins", "The Deck", true, 42, &cfg(24, 1), true, &mut x, &mut y);
+        let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
+            "Goblins", "The Deck", true, 42, &cfg(24, 1), true, true, &mut x, &mut y);
         let score = out.score.expect("game must finish");
         assert!(score == 0.0 || score == 0.5 || score == 1.0);
         // Rows: one target per row, feature width consistent.
@@ -254,10 +258,11 @@ mod tests {
     fn redeterminize_m_completes() {
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let mut x = Vec::new();
         let mut y = Vec::new();
-        let out = play_ismcts_game(&policy, &policy.tables, &decks,
-            "Sligh", "White Weenie", false, 7, &cfg(32, 4), true,
+        let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
+            "Sligh", "White Weenie", false, 7, &cfg(32, 4), true, true,
             &mut x, &mut y);
         assert!(out.score.is_some(), "game must finish");
         assert_eq!(y.len(), out.rows);
@@ -269,13 +274,14 @@ mod tests {
     fn gate_tally_is_plausible() {
         let policy = make_policy(-4.0);
         let decks = crate::decks::load(DECKLISTS).expect("decks");
+        let book = crate::decks::DeckBook::load(DECKLISTS).expect("book");
         let n = 6;
         let mut wins = 0; let mut draws = 0; let mut finished = 0;
         let mut x = Vec::new(); let mut y = Vec::new();
         for g in 0..n {
-            let out = play_ismcts_game(&policy, &policy.tables, &decks,
+            let out = play_ismcts_game(&policy, &policy.tables, &decks, &book,
                 "Goblins", "The Deck", g % 2 == 0, 100 + g as u64,
-                &cfg(16, 1), false, &mut x, &mut y);
+                &cfg(16, 1), true, false, &mut x, &mut y);
             if let Some(s) = out.score {
                 finished += 1;
                 if s == 1.0 { wins += 1; } else if s == 0.5 { draws += 1; }

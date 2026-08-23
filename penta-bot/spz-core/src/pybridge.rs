@@ -890,8 +890,113 @@ fn aac_gate(
         names, sums, counts))
 }
 
+/// AlphaZero self-play: both seats driven by search, emitting the visit
+/// distribution as a policy target alongside the outcome as a value target.
+///
+/// Returns, in order:
+/// ```text
+/// 0 cand_bytes   f32, sum(m)*feat      candidate afterstate features
+/// 1 rec_u32      u32, 3*n_records      m, then visit-sum, then chosen
+/// 2 visit_bytes  u32, sum(m)           search visit counts per candidate
+/// 3 priv_bytes   f32, n_records*2*feat privileged critic input
+/// 4 seat         u8,  n_records        0 = p1, 1 = p2
+/// 5 ep_records   u32, n_episodes       records per episode
+/// 6 ep_result    i8,  n_episodes       0 p1, 1 p2, 2 draw, -1 capped
+/// 7 feat         usize                 feature width
+/// ```
+#[pyfunction]
+#[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+fn az_stream_episodes(
+    py: Python<'_>,
+    catalog_json: String, value_path: String, head_path: String,
+    weight: f64, iters: usize, c_puct: f64, budget: usize,
+    decklists_path: String, max_actions: usize, threads: usize,
+    specs: Vec<(String, String, u64)>,
+) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
+               pyo3::Bound<'_, pyo3::types::PyBytes>,
+               pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u8>, Vec<u32>,
+               Vec<i8>, usize)> {
+    use pyo3::types::PyBytes;
+    let policy = build_policy(&catalog_json, &value_path, &head_path, weight,
+                              0, 1, budget, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let book = decks::DeckBook::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let feat = policy.tables.size;
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert: false, use_dominance: true,
+        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        opponent: crate::mcts::OpponentModel::Greedy,
+        max_decisions: crate::az::MAX_DECISIONS,
+    };
+    let n_threads = thread_count(threads, specs.len());
+    let policy = std::sync::Arc::new(policy);
+    let decks = std::sync::Arc::new(decks);
+    let book = std::sync::Arc::new(book);
+    let cfg = std::sync::Arc::new(cfg);
+    let specs = std::sync::Arc::new(specs);
+    let cursor = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    let mut episodes: Vec<(usize, crate::az::Episode)> = py.detach(|| {
+        let mut handles = Vec::new();
+        for _ in 0..n_threads {
+            let (policy, decks, book, cfg, specs, cursor) =
+                (policy.clone(), decks.clone(), book.clone(), cfg.clone(),
+                 specs.clone(), cursor.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                while let Some(i) = next_index(&cursor, specs.len()) {
+                    let (d1, d2, seed) = &specs[i];
+                    out.push((i, crate::az::play_episode(
+                        &policy, &policy.tables, &decks, &book, d1, d2,
+                        *seed, &cfg, max_actions)));
+                }
+                out
+            }));
+        }
+        let mut all = Vec::new();
+        for h in handles { all.extend(h.join().expect("az thread panicked")); }
+        all
+    });
+    episodes.sort_by_key(|(i, _)| *i);
+
+    let mut cand: Vec<f32> = Vec::new();
+    let mut rec: Vec<u32> = Vec::new();
+    let mut visit_sum: Vec<u32> = Vec::new();
+    let mut chosen: Vec<u32> = Vec::new();
+    let mut visits: Vec<u32> = Vec::new();
+    let mut privileged: Vec<f32> = Vec::new();
+    let mut seat: Vec<u8> = Vec::new();
+    let mut ep_records: Vec<u32> = Vec::new();
+    let mut ep_result: Vec<i8> = Vec::new();
+    for (_, ep) in episodes {
+        ep_records.push(ep.records.len() as u32);
+        ep_result.push(ep.result);
+        for r in ep.records {
+            cand.extend_from_slice(&r.cand);
+            rec.push(r.m as u32);
+            visit_sum.push(r.visits.iter().sum());
+            chosen.push(r.chosen as u32);
+            visits.extend_from_slice(&r.visits);
+            privileged.extend_from_slice(&r.privileged);
+            seat.push(r.seat);
+        }
+    }
+    let mut vbytes = Vec::with_capacity(visits.len() * 4);
+    for v in &visits { vbytes.extend_from_slice(&v.to_le_bytes()); }
+    rec.extend(visit_sum);
+    rec.extend(chosen);
+    Ok((PyBytes::new(py, &f32_bytes(&cand)), rec,
+        PyBytes::new(py, &vbytes),
+        PyBytes::new(py, &f32_bytes(&privileged)), seat, ep_records,
+        ep_result, feat))
+}
+
 #[pymodule]
 fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(az_stream_episodes, m)?)?;
     m.add_function(wrap_pyfunction!(aac_stream_episodes, m)?)?;
     m.add_function(wrap_pyfunction!(aac_gate, m)?)?;
     m.add_function(wrap_pyfunction!(lockstep_trace, m)?)?;
