@@ -213,7 +213,11 @@ def parse_log(path):
         mtime = os.path.getmtime(path)
     except OSError:
         return None
-    if not gates:
+    # A run with no gate YET is still a live run worth showing. AZ gates
+    # every --gate-every rounds, so a fresh run had no gate for ~30 minutes
+    # and was invisible here -- leaving the page showing only long-dead
+    # runs, which reads exactly like stale data.
+    if not gates and not az_games:
         return None
     # The @0 gate is only 40 games; keep it on the curve but never let it
     # into a mean, or it drags the number around by pure noise.
@@ -292,7 +296,7 @@ def parse_log(path):
         # AZ run only emits a gate every --gate-every rounds, so reading
         # the count off gates[-1] under-reported it by up to that many
         # rounds -- 960 shown against 1,824 played.
-        "games": max(gates[-1]["games"], az_games),
+        "games": max(gates[-1]["games"] if gates else 0, az_games),
         "n": len(pcts),
         "last": pcts[-1] if pcts else None,
         "best": max(pcts) if pcts else None,
