@@ -85,8 +85,14 @@ reference path.
 
 | | win rate vs the engine's built-in bot |
 |---|---|
-| the built-in bot we set out to beat | 31.6% |
+| **parity with the built-in bot** | **50.0%** |
 | best trained actor, 800-game evaluation | **51.1%** |
+| pure AZ self-play from random, ~17k games | 37–43% |
+
+The bar is **50%** — the gate scores our win rate head-to-head against the
+built-in bot, so anything below 50% is losing to it. (A "31.6%" baseline
+appeared here for months; it was a confidence-interval bound copied from
+the abandoned C++ project, not a bot's score. See RESULTS.md.)
 
 Evaluations are 400 games (±2.5 points), so single numbers are noise and
 only means count. Full record and error bars in `RESULTS.md`.

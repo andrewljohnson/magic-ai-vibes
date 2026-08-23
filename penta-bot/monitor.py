@@ -44,8 +44,16 @@ STALE_INTERVALS = 3.0       # ... or before 3x its own gate spacing
 # in the UI that compares runs uses a MEAN over gates for this reason; a
 # single gate is not a result.
 GATE_SE = 2.5
-BASELINE = 31.6        # handcrafted bot: the bar the project set out to beat
-TARGET = 50.0          # the "path past 50%" milestone
+# PARITY with the built-in bot is 50% -- the gate scores OUR win rate in
+# head-to-head games against it, so below 50% is losing to it.
+#
+# A BASELINE of 31.6 sat here for months labelled "the bar the project set
+# out to beat". It was the lower bound of a 95% confidence interval from
+# the abandoned C++ alpha-sim, for a LEARNED challenger vs handcrafted --
+# never the handcrafted bot's own score, which is 50% against itself by
+# symmetry. It made every run look ~18 points better than it was.
+BASELINE = 50.0        # parity with the built-in bot
+TARGET = 50.0
 
 TS_RE = re.compile(r"^\[(\d\d):(\d\d):(\d\d)\]")
 GATE_RE = re.compile(
@@ -411,7 +419,7 @@ never a single gate.</p>
 <div class="card"><h2>Win rate by opponent deck</h2>
   <p class="foot" style="margin:0 0 10px">Our bot pilots <b>Sligh</b> in
   every one of these games; the named deck is piloted by the engine's
-  <b>built-in handcrafted bot</b>, which scores 31.6% overall. Seats
+  <b>built-in handcrafted bot</b>. 50% is parity; below that we lose. Seats
   alternate. Latest evaluation per live run — one aggregate number hides
   everything that matters here.<br>
   The <b>Sligh mirror is absent by construction</b>: the gate builds its
@@ -474,7 +482,7 @@ function draw(){
     s+=`<text x="${X(g)}" y="${H-12}" text-anchor="middle" font-size="11"
         fill="${css("--text-muted")}">${Math.round(g/1000)}k</text>`;}
   // annotated reference lines: the bar we beat, and the milestone
-  for(const [v,lab] of [[DATA.baseline,"handcrafted 31.6%"],[DATA.target,"50%"]]){
+  for(const [v,lab] of [[DATA.baseline,"parity with built-in bot 50%"]]){
     if(v<lo||v>hi)continue;
     s+=`<line x1="${P.l}" y1="${Y(v)}" x2="${W-P.r}" y2="${Y(v)}"
         stroke="${css("--rule")}" stroke-width="1" stroke-dasharray="4 4"/>

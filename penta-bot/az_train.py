@@ -462,7 +462,7 @@ def main():
             # BOTH conventions, because they are not comparable. This gate
             # inherits play_ismcts_game's rule that a capped game is a LOSS,
             # while the AAC gate every historical number here was scored on
-            # (the 31.6% built-in baseline, the ~51% actor) counts it a
+            # (the ~51% actor) counts it a
             # DRAW. With 16 of 120 games capped that is an 6.7-point
             # difference, so quoting one number against the other's history
             # would be wrong. See RESULTS.md.

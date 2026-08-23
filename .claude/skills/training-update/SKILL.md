@@ -13,7 +13,7 @@ python3 training_report.py --all     # include stopped and finished
 ```
 
 It prints a table (games, evaluations, mean±SE, last-8, best, entropy,
-games/sec, sparkline) and an ASCII chart with the 31.6% built-in-bot line
+games/sec, sparkline) and an ASCII chart with the 50% parity line
 and the 50% target marked. Liveness comes from the process table, so
 "live" means a trainer process actually exists.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Parallel PyTorch AAC (PPO+GAE) for the Penta MTG bot.
 
-Same recipe as aac_torch.py (proven to beat the 31.6% baseline: PPO clipped
+Same recipe as aac_torch.py (the line that reached parity, 51.1%: PPO clipped
 surrogate + GAE + privileged critic + tempo shaping), but self-play episode
 COLLECTION runs across N worker processes -- the ~8x throughput multiplier that
 makes "bigger net + far more games" runnable. Workers score afterstates with a

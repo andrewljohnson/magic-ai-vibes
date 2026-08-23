@@ -73,7 +73,7 @@ def main():
     print(f"first_bot bare ordering (NO net): {100 * rate:.1f}% "
           f"± {100 * se:.1f} over {args.games} games")
     print(f"  trained actor for comparison:   ~51%")
-    print(f"  built-in handcrafted baseline:   31.6%")
+    print(f"  parity with the built-in bot:    50.0%")
 
 
 if __name__ == "__main__":

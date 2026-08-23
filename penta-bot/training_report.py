@@ -26,7 +26,7 @@ if HERE not in sys.path:
 import monitor  # noqa: E402
 
 SPARK = "▁▂▃▄▅▆▇█"
-BASELINE = 31.6
+BASELINE = 50.0   # parity with the built-in bot; see RESULTS.md
 TARGET = 50.0
 
 
@@ -72,7 +72,7 @@ def plot(runs, width=64, height=16):
         if abs(pct - TARGET) < (y_hi - y_lo) / (height - 1) / 2:
             tag = "  = 50% target"
         elif abs(pct - BASELINE) < (y_hi - y_lo) / (height - 1) / 2:
-            tag = "  - 31.6% built-in bot"
+            tag = "  - 50% parity with built-in bot"
         lines.append(f"{pct:5.1f}% |{''.join(cells)}|{tag}")
     lines.append("       +" + "-" * width + "+")
     lines.append(f"        0{' ' * (width - 12)}{x_hi / 1000:.0f}k games")

@@ -198,14 +198,34 @@ cast > attack > rest) with no network. If true, a trivial heuristic would
 have been 22 points ahead of every net here.
 
 Measured with `gate_heuristic.py`, 400 games, the same protocol the actors
-are scored on: **3.9% ± 1.0**. Not 73%, and well below the 31.6% built-in
-bot. The trained actor is ~47 points ahead of it.
+are scored on: **3.9% ± 1.0**. Not 73%, and far below the 50% that
+would be parity with the built-in bot. The trained actor is ~47 points ahead of it.
 
 → The neural approach is not behind a trivial baseline. The docstring has
 been corrected. Worth remembering as a lesson about uncited numbers in
 comments: it nearly reordered the roadmap.
 
-### The pure self-play build beats the built-in bot: 37.5%
+### The pure self-play build reaches 37–43% — it does NOT beat the bot
+
+**CORRECTED 2026-08-23.** An earlier version of this section claimed 37.5%
+"beats the built-in bot's 31.6%". That was wrong, and the error was in the
+BASELINE, not the measurement.
+
+The gate scores OUR win rate in head-to-head games against the built-in
+handcrafted bot (`mcts_runner.rs`: `z = 1.0 if winner == our_seat`). So
+the bar for beating it is **50%**, by definition. 37.5% means we lose
+62.5% of those games.
+
+The "31.6%" traces to the abandoned C++ alpha-sim, where it was the LOWER
+BOUND of a 95% confidence interval for a *learned* challenger against
+handcrafted ("Aggregate: 76-124 (38.0%), 95% interval 31.6%-44.9%"). It
+was never the handcrafted bot's own score, and it could not be -- a bot's
+win rate against itself is 50% by symmetry. It was copied into README.md,
+RESULTS.md, monitor.py, training_report.py and gate_heuristic.py as "the
+bar the project set out to beat" and repeated for months.
+
+→ **Parity is 50%.** The only line here that has ever cleared it is the
+AAC actor at 51.1% ±1.8, and only just.
 
 2026-08-23, run `az_long`, both nets from random init, no handcrafted
 bootstrapping anywhere in the loop (the pure-build rule in AGENTS.md).
@@ -215,7 +235,7 @@ bootstrapping anywhere in the loop (the pure-build rule in AGENTS.md).
 | 59 | 9.3% (34.8% as draws) | 153 / 300 | half the games never resolved |
 | 119 | **37.5% ± 2.8** | **0 / 300** | 112W 1D 187L |
 
-**37.5% is above the built-in bot's 31.6%**, and because ZERO games were
+37.5% is well BELOW the 50% that is parity, and because ZERO games were
 capped the two scoring conventions agree exactly -- there is no
 capped-as-loss / capped-as-draw ambiguity to argue about for the first
 time here.
@@ -231,8 +251,8 @@ Lions DIB 47.7, BWR Aggro / Erhnamgeddon / Troll Disk 33.3, Goblins /
 Jeskai 31.8, White Weenie 28.6, Artifacts / Lion Dib Bolt 23.8, Mono
 Black 18.2, GR Aggro 14.3.
 
-→ Still behind the AAC line's 47.5–51%, but that took ~100k games and this
-is ~6k. The remaining weak matchups are aggro, same as ROADMAP A.
+→ Behind the AAC line's 47.5–51% and behind parity (50%). The AAC line
+took ~100k games and this is ~6k. The remaining weak matchups are aggro, same as ROADMAP A.
 
 ### Truncation scoring: fixes stalling, does NOT move win rate
 
@@ -346,10 +366,10 @@ plus 16 efficiency cores at ~51% clock under load — so "32 cores" is not
 
 The strength curve has never plateaued.
 
-| stage | evaluation |
+| stage | win rate vs the built-in bot |
 |---|---|
-| the built-in bot we set out to beat | 31.6% |
-| **pure AZ self-play, ~6k games, 0 capped** | **37.5% ±2.8** |
+| **PARITY with the built-in bot (the actual bar)** | **50.0%** |
+| pure AZ self-play, ~17k games, 0 capped | 37–43% (losing) |
 | 256-net + belief features (old champion) | 45.0% (200 games, ±3.5) |
 | native loop, 100k games | 47.5% mean / 49.9% best (32 evals) |
 | **same actor, 800-game evaluation** | **51.1% ±1.8** |

@@ -227,7 +227,7 @@ in `RESULTS.md`.
 
 | approach | outcome |
 |---|---|
-| TD(λ) self-play value net, greedy afterstate eval (the SPZ lineage) | the 31.6%-era bot; superseded |
+| TD(λ) self-play value net, greedy afterstate eval (the SPZ lineage) | pre-AAC era; superseded |
 | Determinized search / ISMCTS over a value+policy blend | the old C++ 57.7% reference came from here, with decklists known |
 | Winner-imitation policy head + DAgger | imitating a perfect-information teacher got WORSE with more data |
 | **Asymmetric actor-critic, PPO + GAE** | **current, ~51%** |
