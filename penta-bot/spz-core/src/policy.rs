@@ -29,6 +29,12 @@ pub struct Policy {
     pub tables: Tables,
     pub value: Mlp,
     pub head: Mlp,
+    /// Optional fast policy head: state -> scores over legal actions, with
+    /// NO per-action simulation. When present the search takes its PUCT
+    /// priors from here instead of `head`, which needed a game clone and a
+    /// feature extraction per action (measured 13.15 ms/action, ~90% of
+    /// search time). See action_feat.
+    pub fast_head: Option<crate::action_feat::PolicyHead>,
     pub weight: f64,
     pub search: SearchConfig,
     pub max_eval: usize,

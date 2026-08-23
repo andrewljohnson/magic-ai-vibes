@@ -12,8 +12,10 @@
 //! and the current observation, with no simulation at all. The policy net
 //! then factorises:
 //!
-//!     h_a   = tanh(Ws · state + Wa · action_a + b1)
-//!     score = w2 · h_a + b2
+//! ```text
+//! h_a   = tanh(Ws · state + Wa · action_a + b1)
+//! score = w2 · h_a + b2
+//! ```
 //!
 //! `Ws · state` is computed ONCE per node; only `Wa · action_a` is per
 //! action, and `action_a` is ~150 dims against the state's 1081. So a

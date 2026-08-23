@@ -175,7 +175,31 @@ mod prof_tests {
             search: crate::policy::SearchConfig {
                 top_k: 0, playouts: 1, budget: 400, playout_max_eval: 999 },
             max_eval: 999,
+            fast_head: None
         };
+        // AZ_FAST=1 attaches a randomly-initialised fast policy head. The
+        // numbers it produces are meaningless; the POINT is the timing --
+        // does replacing per-action simulation with per-action encoding
+        // collapse search cost as the 441x microbenchmark predicts?
+        let policy = if std::env::var("AZ_FAST").as_deref() == Ok("1") {
+            let sd = policy.tables.size;
+            let ad = crate::action_feat::width(&policy.tables);
+            let h = 64usize;
+            let mut seed = 12345u64;
+            let mut rnd = || {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+                ((seed >> 33) as f64 / (1u64 << 31) as f64 - 0.5) * 0.1
+            };
+            let fh = crate::action_feat::PolicyHead {
+                hidden: h, state_dim: sd, action_dim: ad,
+                ws: (0..h * sd).map(|_| rnd()).collect(),
+                wa: (0..h * ad).map(|_| rnd()).collect(),
+                b1: vec![0.0; h],
+                w2: (0..h).map(|_| rnd()).collect(),
+                b2: 0.0,
+            };
+            Policy { fast_head: Some(fh), ..policy }
+        } else { policy };
         let decks = crate::decks::load(DECKLISTS).unwrap();
         let book = crate::decks::DeckBook::load(DECKLISTS).unwrap();
         let cfg = MctsConfig {

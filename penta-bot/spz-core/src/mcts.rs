@@ -331,10 +331,32 @@ impl<'a> Ismcts<'a> {
                         opp.choose_action(&obs)
                     }
                     OpponentModel::Greedy => {
-                        // Value-net 1-ply argmax over opponent afterstates.
                         let actions = protocol_actions(&obs);
-                        let i = self.policy.greedy_index_with(
-                            world, seat, &actions, self.deck_slots);
+                        let i = if let Some(fh) =
+                            self.policy.fast_head.as_ref()
+                        {
+                            // Same fix as the PUCT prior: model the
+                            // opponent by ENCODING their actions rather
+                            // than simulating each one. greedy_index_with
+                            // clones and featurises per action, which was
+                            // 65% of search time once the prior was fast.
+                            let state = features(&obs, world.in_pregame(),
+                                                 &self.policy.tables,
+                                                 self.deck_slots);
+                            let pre = fh.state_pre(&state);
+                            let enc = crate::action_feat::encode_all(
+                                &actions, &obs, &self.policy.tables);
+                            let sc = fh.scores(&pre, &enc, actions.len());
+                            let mut best = 0usize;
+                            for (j, v) in sc.iter().enumerate() {
+                                if *v > sc[best] { best = j; }
+                                let _ = v;
+                            }
+                            best
+                        } else {
+                            self.policy.greedy_index_with(
+                                world, seat, &actions, self.deck_slots)
+                        };
                         actions.into_iter().nth(i)
                     }
                 });
@@ -367,6 +389,49 @@ impl<'a> Ismcts<'a> {
             // net's weight matrix per action and was 64% of AZ self-play
             // time; a node's actions are all evaluated against the same
             // weights, so one pass over them costs what one action used to.
+            // FAST PATH: one state encoding for the node, then a cheap
+            // per-action term. No game clones, no per-action featurisation.
+            if let Some(fh) = self.policy.fast_head.as_ref() {
+                let need: Vec<usize> = avail.iter().copied()
+                    .filter(|&i| !tree.arena[node_idx].stats
+                        .get(&actions[i]).map(|s| s.prior_set).unwrap_or(false))
+                    .collect();
+                if !need.is_empty() {
+                    let priors = timed!(2, {
+                        let obs = world.observe(seat);
+                        let state = features(&obs, world.in_pregame(),
+                                             &self.policy.tables,
+                                             self.deck_slots);
+                        let pre = fh.state_pre(&state);
+                        let picked: Vec<penta::Action> =
+                            need.iter().map(|&i| actions[i].clone()).collect();
+                        let enc = crate::action_feat::encode_all(
+                            &picked, &obs, &self.policy.tables);
+                        fh.scores(&pre, &enc, picked.len())
+                    });
+                    for (k, &i) in need.iter().enumerate() {
+                        let st = tree.arena[node_idx].stats
+                            .entry(actions[i].clone()).or_default();
+                        st.prior = priors[k];
+                        st.prior_set = true;
+                    }
+                }
+                for &i in &avail {
+                    tree.arena[node_idx].stats
+                        .entry(actions[i].clone()).or_default().a += 1;
+                }
+                let (sel_i, sel_key, first_visit) =
+                    self.select(&tree.arena[node_idx], &actions, &avail);
+                visited.push((node_idx, sel_key.clone()));
+                let _ = world.apply(seat, actions[sel_i].clone());
+                path.push(sel_key);
+                if first_visit {
+                    leaf = timed!(4, self.leaf_eval(world));
+                    break;
+                }
+                continue;
+            }
+
             let need: Vec<usize> = avail.iter().copied()
                 .filter(|&i| !tree.arena[node_idx].stats
                     .get(&actions[i]).map(|s| s.prior_set).unwrap_or(false))
@@ -610,6 +675,7 @@ mod tests {
             search: crate::policy::SearchConfig {
                 top_k: 0, playouts: 1, budget: 400, playout_max_eval: 999,
             },
+            fast_head: None,
             max_eval: 999,
         }
     }
@@ -859,6 +925,7 @@ mod tests {
                         top_k: 0, playouts: 1, budget: 400,
                         playout_max_eval: 999 },
                     max_eval: 999,
+                    fast_head: None,
                 }
             }
             _ => make_policy(-4.0),

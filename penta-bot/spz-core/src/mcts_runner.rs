@@ -166,6 +166,7 @@ mod tests {
             search: crate::policy::SearchConfig {
                 top_k: 0, playouts: 1, budget: 400, playout_max_eval: 999,
             },
+            fast_head: None,
             max_eval: 999,
         }
     }
