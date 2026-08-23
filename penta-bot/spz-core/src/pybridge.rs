@@ -501,7 +501,14 @@ fn az_gate(
         // RESULTS.md clocks at ~13ms per action row. Self-play runs with
         // it off. AZ_GATE_DOM=1 re-enables it for measurement.
         use_dominance: std::env::var("AZ_GATE_DOM").as_deref() == Ok("1"),
-        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        // AZ_GATE_PLAYOUT=1 replaces the value net at the leaf with a real
+        // rollout to the end. A diagnostic: search stopped improving on its
+        // own prior (40.0% with 32 sims vs 39.3% with 1), which happens
+        // when the leaf evaluator cannot separate sibling lines -- then Q
+        // is noise and PUCT just follows the prior. If a rollout leaf makes
+        // search strong again, the value head is the bottleneck.
+        leaf_playout: std::env::var("AZ_GATE_PLAYOUT").as_deref() == Ok("1"),
+        leaf_blend: false, redeterminize_m: 1,
         opponent: crate::mcts::OpponentModel::Handcrafted,
         max_decisions,
         max_depth: 400,
