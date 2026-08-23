@@ -190,13 +190,18 @@ def gate(spz_core, actor, hidden, belief, learner_deck, games, seed_base,
     run across native threads instead of one Python loop -- so a 400-game
     confirmation stops costing more than the training round it validates.
 
-    Returns the score rate, or (rate, decisions, widest) with full=True.
+    Returns the score rate, or (rate, decisions, widest, matchups) with
+    full=True, where `matchups` is the per-opponent-deck breakdown. One
+    aggregate hides a bot that crushes half the field and is unplayable
+    into the other half -- which is the part worth fixing.
     """
     w1, b1, w2, b2 = flat_weights(actor)
-    rate, decisions, widest = spz_core.aac_gate(
+    rate, decisions, widest, names, sums, counts = spz_core.aac_gate(
         _catalog(catalog_json), decklists_path or DECKLISTS, belief, hidden,
         w1, b1, w2, b2, learner_deck, games, seed_base, threads, max_actions,
         open_decklist)
     if full:
-        return rate, np.asarray(decisions), np.asarray(widest)
+        matchups = [{"deck": n, "rate": (s / c if c else None), "games": c}
+                    for n, s, c in zip(names, sums, counts)]
+        return rate, np.asarray(decisions), np.asarray(widest), matchups
     return rate

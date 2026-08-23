@@ -817,7 +817,7 @@ fn aac_gate(
     threads: usize,
     max_actions: usize,
     open_decklist: bool,
-) -> PyResult<(f64, Vec<u32>, Vec<u32>)> {
+) -> PyResult<(f64, Vec<u32>, Vec<u32>, Vec<String>, Vec<f64>, Vec<u32>)> {
     let (actor, tables, book) = build_aac(&catalog_json, &decklists_path,
                                           belief, hidden, w1, b1, w2, b2)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -868,9 +868,26 @@ fn aac_gate(
     });
     per_game.sort_by_key(|r| r.0);
     let score: f64 = per_game.iter().map(|r| r.1).sum();
+    // Per-opponent breakdown. One aggregate number hides that a bot can be
+    // dominant into half the field and unplayable into the other half,
+    // which is the thing you actually want to fix.
+    let mut names: Vec<String> = Vec::new();
+    let mut sums: Vec<f64> = Vec::new();
+    let mut counts: Vec<u32> = Vec::new();
+    for (i, o) in opps.iter().enumerate() {
+        names.push(o.clone());
+        let mut s = 0.0;
+        let mut n = 0u32;
+        for r in &per_game {
+            if r.0 % opps.len() == i { s += r.1; n += 1; }
+        }
+        sums.push(s);
+        counts.push(n);
+    }
     Ok((score / games as f64,
         per_game.iter().map(|r| r.2).collect(),
-        per_game.iter().map(|r| r.3).collect()))
+        per_game.iter().map(|r| r.3).collect(),
+        names, sums, counts))
 }
 
 #[pymodule]

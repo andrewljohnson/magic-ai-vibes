@@ -306,13 +306,14 @@ def native_or_python_gate(args, spz, actor, extractor, penta, decks, games):
     of in one Python loop. --python-gate forces the Python path (useful
     for spot-checking the two against each other mid-run)."""
     if args.native and not args.python_gate:
-        return AN.gate(spz, actor, args.hidden, args.belief,
-                       args.learner_deck, games, 900000,
-                       threads=args.native_threads,
-                       max_actions=args.native_max_actions,
-                       open_decklist=not args.classify_decklist)
+        rate, _dec, _w, matchups = AN.gate(
+            spz, actor, args.hidden, args.belief, args.learner_deck, games,
+            900000, threads=args.native_threads,
+            max_actions=args.native_max_actions,
+            open_decklist=not args.classify_decklist, full=True)
+        return rate, matchups
     return gate_belief(actor, extractor, penta, decks, args.learner_deck,
-                       games, 900000)
+                       games, 900000), None
 
 
 def log(msg, path):
@@ -437,8 +438,8 @@ def main():
         f"belief={args.belief} feat={feat} "
         f"a_lr={args.actor_lr} ppo_epochs={args.ppo_epochs} "
         f"ent={args.entropy_beta} gae_lam={args.gae_lambda}", args.log)
-    wr0 = native_or_python_gate(args, spz, actor, extractor, penta, decks,
-                                40)
+    wr0, _mu0 = native_or_python_gate(args, spz, actor, extractor, penta,
+                                      decks, 40)
     log(f"GATE @0 games: actor vs handcrafted = {100*wr0:.1f}%",
         args.log)
 
@@ -508,8 +509,9 @@ def main():
                                 vhead, vopt, feat)
         if played - last_gate >= args.gate_every:
             last_gate = played
-            wr = native_or_python_gate(args, spz, actor, extractor, penta,
-                                       decks, args.gate_games)
+            wr, matchups = native_or_python_gate(args, spz, actor, extractor,
+                                                 penta, decks,
+                                                 args.gate_games)
             gps = played / (time.time() - t0)
             s = stats or {}
             log(f"GATE @{played} games: {100*wr:.1f}% | "
@@ -520,6 +522,14 @@ def main():
                 f"{'capped=' + str(capped) if args.native else 'hangs=' + str(hangs)}"
                 f" [{gps:.2f} g/s]",
                 args.log)
+            if matchups:
+                # Per-opponent breakdown. The aggregate hides everything
+                # that matters: a 51% bot measured 96.7% into The Deck and
+                # 30.0% into White Weenie. Logged so the monitor can grid it
+                # and so a plateau can be read as "which matchup".
+                log("  MATCHUPS " + " ".join(
+                    f"{m['deck'].replace(' ', '_')}={100 * m['rate']:.0f}"
+                    for m in matchups if m["rate"] is not None), args.log)
             sd_np = {k: v.detach().numpy()
                      for k, v in actor.state_dict().items()}
             np.savez(f"{args.save_prefix}_actor.npz", **sd_np)   # latest

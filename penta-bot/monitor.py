@@ -56,6 +56,7 @@ GATE_RE = re.compile(
     r"(?:.*?capped=(\d+))?"
     r"(?:.*?\[([0-9.]+) g/s\])?")
 GATE0_RE = re.compile(r"GATE @(\d+) games: actor vs handcrafted = ([0-9.]+)%")
+MATCH_RE = re.compile(r"MATCHUPS (.+)")
 START_RE = re.compile(r"PAR-AAC start: (.*)")
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
@@ -90,9 +91,21 @@ def parse_log(path):
     name = os.path.basename(path)[:-4]
     gates, config, done = [], "", None
     stamps = []
+    matchups = []
     try:
         with open(path, errors="replace") as f:
             for line in f:
+                m = MATCH_RE.search(line)
+                if m:
+                    matchups = []
+                    for pair in m.group(1).split():
+                        if "=" in pair:
+                            k, v = pair.rsplit("=", 1)
+                            try:
+                                matchups.append((k.replace("_", " "), float(v)))
+                            except ValueError:
+                                pass
+                    continue
                 m = START_RE.search(line)
                 if m:
                     config = m.group(1).strip()
@@ -183,6 +196,7 @@ def parse_log(path):
         "name": name,
         "config": config,
         "label": label,
+        "matchups": matchups,
         "done": done,
         "stale": done is None and idle > stale_after,
         "idle_min": int(idle // 60),
@@ -291,6 +305,12 @@ tr:last-child td{border-bottom:none}
   font-weight:600}
 .panel .why{font-size:11px;color:var(--text-muted);margin:0 0 6px;
   min-height:28px}
+.mu{border-collapse:collapse;font-size:12px}
+.mu td,.mu th{padding:5px 8px;white-space:nowrap}
+.mu th{color:var(--text-muted);font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.04em;text-align:left}
+.mu td.v{text-align:right;font-variant-numeric:tabular-nums;
+  border-radius:4px;color:var(--text-primary)}
 </style></head><body><div class="wrap">
 <h1>penta bot — training monitor</h1>
 <p class="sub">Evaluation: actor argmax vs the engine's handcrafted bot.
@@ -305,6 +325,11 @@ never a single gate.</p>
   <div class="grid" id="panels"></div>
   <p class="foot">Same colours as above. Each panel has its own y scale —
   never a shared one, they measure different things.</p>
+</div>
+<div class="card"><h2>Win rate by opponent deck</h2>
+  <p class="foot" style="margin:0 0 10px">Latest evaluation per live run.
+  One aggregate number hides everything that matters here.</p>
+  <div id="grid"></div>
 </div>
 <div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
   <table><thead><tr>
@@ -465,6 +490,7 @@ function draw(){
         :r.stale?`stopped — idle ${r.idle_min}m`+(r.cadence_min?` (gates ~${r.cadence_min}m)`:"")
         :(r.config||"").replace(/^games=\S+ /,"").slice(0,58)}</td></tr>`;}).join("");
   panels(runs);
+  grid(runs);
   document.getElementById("foot").textContent =
     "mean ± is the standard error of that run's gate mean. entropy below ~0.15 "
     + "with a flat curve means the policy has stopped exploring.";
@@ -523,6 +549,36 @@ function panels(runs){
       <svg width="${W}" height="${H}">${g}</svg>
       <div style="font-size:11px;margin-top:2px">${vals}</div></div>`;
   }).join("");
+}
+
+// Win rate per opponent deck. SEQUENTIAL colour (one hue, light->dark) --
+// this is magnitude, not identity, so a categorical palette would be wrong
+// and a rainbow worse. 50% is the meaningful midpoint, so the scale is
+// diverging around it: below is warm, above is cool.
+function grid(runs){
+  const rs=runs.filter(r=>r.matchups&&r.matchups.length);
+  const box=document.getElementById("grid");
+  if(!rs.length){box.innerHTML=
+    `<p class="empty">No matchup data yet — logged at each evaluation.</p>`;
+   return;}
+  const decks=rs[0].matchups.map(m=>m[0]);
+  const cell=v=>{
+    if(v==null) return `<td class="v">—</td>`;
+    // 0 at 20%, 1 at 80%; midpoint 50% is neutral
+    const t=Math.max(0,Math.min(1,(v-20)/60));
+    const bg = t<0.5
+      ? `color-mix(in oklab, var(--s2) ${Math.round((0.5-t)*160)}%, transparent)`
+      : `color-mix(in oklab, var(--s1) ${Math.round((t-0.5)*160)}%, transparent)`;
+    return `<td class="v" style="background:${bg}">${v.toFixed(0)}%</td>`;
+  };
+  box.innerHTML=`<div style="overflow-x:auto"><table class="mu">
+    <tr><th>run</th>${decks.map(d=>`<th style="text-align:right">${d}</th>`).join("")}</tr>
+    ${rs.map(r=>{
+      const by=Object.fromEntries(r.matchups);
+      return `<tr><td>${r.name}</td>${decks.map(d=>cell(by[d])).join("")}</tr>`;
+    }).join("")}</table></div>
+    <p class="foot">Blue above 50%, orange below. Sligh is the deck we
+    pilot; these are the fourteen it faces.</p>`;
 }
 
 async function poll(){
