@@ -125,6 +125,13 @@ rank sibling moves.
 | greedy 1-ply, actor | 50.7% |
 | **value head leaf + actor prior, cap 600** | **53.1%** |
 
+**Read that 53.1% as unproven.** It is 17W–15L over **32 games** — a
+standard error of **±8.8 points**. Against greedy's 50.7% the difference
+is a quarter of one standard error. The wiring fix above is real (6–12% →
+~50% is far outside noise); "search then beats greedy" is not established
+by this number, and the search-vs-greedy comparison still needs a few
+hundred games. Do not plan around a +2.4 point search premium.
+
 **Why the two nets are not interchangeable.** Every afterstate in an
 episode carries the same label `z`, so the value head's loss never asks it
 to separate siblings. Measured within-decision spread: value head **0.026**
@@ -144,6 +151,44 @@ and moved the score 50.0% → 53.1%. **Compare across harnesses only after
 checking both conventions.**
 
 Cost remains the real objection: ~0.09 games/sec versus ~100 for 1-ply.
+
+### PUCT was mis-scaled, and it made search nearly a 1-ply greedy pick
+
+FOUND 2026-08-22, while cold-starting the AlphaZero loop. The exploration
+term read
+
+    c_puct * P(a) * sqrt( ln A(a) / (1 + N(a)) )
+
+where canonical AlphaZero PUCT is
+
+    c_puct * P(a) * sqrt( N_parent ) / (1 + N(a)).
+
+Unvisited actions default to **Q = 0**, which on a [0,1] value scale is
+the *worst possible* score. So an unvisited sibling had to beat a visited
+action's real Q on the exploration term alone, and the `ln` form is far
+too weak to do it: once the first action tried returned any decent value,
+the search never looked at a sibling again.
+
+Measured on cold-start self-play, 32 iterations per decision:
+
+| | before | after |
+|---|---|---|
+| median normalised visit entropy | 0.000 | 0.997 |
+| median top-action visit share | 1.000 | 0.375 |
+
+A median top-action share of **1.000** means the typical decision put all
+32 visits on ONE action. Search was doing almost no searching.
+
+→ Every search number recorded before this date — including the 53.1%
+above — was produced by a search that barely branched. They are lower
+bounds on what search can do, not measurements of it. **Re-measure
+anything you intend to rely on.**
+
+→ General lesson, and this is the fifth time on this project that the bug
+was a SCALE rather than a learning failure (saturated actor logits, the
+double-squashed value head, the value head regressing shaped return, the
+peaked cold-start priors, now this). When something learns but does not
+improve, print the range and the entropy before changing the algorithm.
 
 ### The "heuristic beats handcrafted 73%" claim was false
 
