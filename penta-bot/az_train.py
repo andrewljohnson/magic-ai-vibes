@@ -121,6 +121,51 @@ def export_value(net, path):
         f.write(np.array([float(sd["f2.bias"][0])], dtype="<f8").tobytes())
 
 
+def import_policy(net, path):
+    """Inverse of export_policy -- load exported weights back into torch.
+
+    Lets a run continue from an existing checkpoint instead of restarting
+    from random, which matters once a run has tens of thousands of games
+    in it.
+    """
+    with open(path, "rb") as f:
+        hidden, state_dim, action_dim = np.frombuffer(f.read(24), dtype="<u8")
+        w = np.frombuffer(f.read(), dtype="<f8")
+    hidden, state_dim, action_dim = int(hidden), int(state_dim), int(action_dim)
+    o = 0
+    def take(n, shape):
+        nonlocal o
+        v = w[o:o + n].reshape(shape).copy(); o += n
+        return torch.as_tensor(v, dtype=torch.float32)
+    sd = {
+        "ws.weight": take(hidden * state_dim, (hidden, state_dim)),
+        "ws.bias": take(hidden, (hidden,)),
+        "wa.weight": take(hidden * action_dim, (hidden, action_dim)),
+        "out.weight": take(hidden, (1, hidden)),
+        "out.bias": take(1, (1,)),
+    }
+    net.load_state_dict(sd)
+    return hidden, state_dim, action_dim
+
+
+def import_value(net, path):
+    with open(path, "rb") as f:
+        hidden, inputs = np.frombuffer(f.read(16), dtype="<u8")
+        w = np.frombuffer(f.read(), dtype="<f8")
+    hidden, inputs = int(hidden), int(inputs)
+    o = 0
+    def take(n, shape):
+        nonlocal o
+        v = w[o:o + n].reshape(shape).copy(); o += n
+        return torch.as_tensor(v, dtype=torch.float32)
+    net.load_state_dict({
+        "f1.weight": take(hidden * inputs, (hidden, inputs)),
+        "f1.bias": take(hidden, (hidden,)),
+        "f2.weight": take(hidden, (1, hidden)),
+        "f2.bias": take(1, (1,)),
+    })
+
+
 def log(msg, path):
     line = f"[{time.strftime('%H:%M:%S')}] {msg}"
     print(line, flush=True)
@@ -160,6 +205,14 @@ def main():
                          "gate. One gate is only ~8.6 games per deck "
                          "(SE ~17 points), so weights built from a single "
                          "gate track noise, not the matchup.")
+    ap.add_argument("--init-from", default="",
+                    help="Save-prefix of an existing checkpoint to warm "
+                         "start from, instead of random init.")
+    ap.add_argument("--revert-on-regress", type=int, default=1,
+                    help="Restore the best-gated weights when a gate comes "
+                         "back more than 2 SE below best. No training metric "
+                         "predicted the 39.2%% -> 27.0%% regression, so "
+                         "strength has to be measured and acted on.")
     ap.add_argument("--truncation", choices=("loss", "drop"), default="loss",
                     help="How a game that hits the decision cap is scored. "
                          "'loss' matches the gate (both seats lose, so "
@@ -188,6 +241,13 @@ def main():
     popt = torch.optim.Adam(policy.parameters(), lr=args.lr)
     vopt = torch.optim.Adam(value.parameters(), lr=args.lr)
 
+    if args.init_from:
+        src = args.init_from if os.path.isabs(args.init_from) else \
+            os.path.join(HERE, args.init_from)
+        import_policy(policy, f"{src}_policy.azp")
+        import_value(value, f"{src}_value.spzw")
+        print(f"warm start from {args.init_from}", flush=True)
+
     pol_path = os.path.join(HERE, f"{args.save_prefix}_policy.azp")
     val_path = os.path.join(HERE, f"{args.save_prefix}_value.spzw")
     export_policy(policy, pol_path, state_dim, action_dim)
@@ -196,6 +256,7 @@ def main():
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
         f"root_noise={args.root_noise} buffer={args.buffer_rounds} "
+        f"init={args.init_from or 'random'} "
         f"deck_weight={args.deck_weight} trunc={args.truncation} "
         f"batch={args.batch} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
@@ -203,6 +264,20 @@ def main():
     gopps = [d for d in decks if d != args.learner_deck]
 
     buf = []
+    # BEST-NET RETENTION (AlphaGo Zero's "best player").
+    #
+    # Between rounds 240 and 294 every training metric IMPROVED -- pol_ce
+    # 0.851 -> 0.679, tgt_ent 0.659 -> 0.547, vmse 0.063 -> 0.037, games
+    # finishing 83% -> 98% -- while the gate FELL 39.2% -> 27.0%. The loop
+    # was getting better at predicting its own search and worse at playing
+    # the actual opponent: self-play overfitting, and nothing in the
+    # training log saw it coming.
+    #
+    # So strength cannot be inferred from the logs; it has to be measured,
+    # and a net that measures worse must not keep generating the data the
+    # next net learns from. We keep the best-gated weights, and revert to
+    # them when a gate comes back clearly below best.
+    best = {"rate": None, "policy": None, "value": None, "round": None}
     # Per-deck sampling weight for self-play pairings, refreshed from each
     # gate's matchup breakdown. Uniform until the first gate.
     #
@@ -471,6 +546,40 @@ def main():
                 f"(capped-as-draw {100*rate_d:.1f}%) "
                 f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
                 f"[{time.time()-t1:.0f}s]", args.log)
+            # Promote, revert, or carry on. The band is 2 SE wide so an
+            # ordinary noisy gate does not throw away a good net -- only a
+            # drop too large to be sampling noise triggers a revert.
+            prev = best["rate"]
+            if prev is None or rate > prev:
+                best.update(rate=rate, round=rnd,
+                            policy={k: v.detach().clone()
+                                    for k, v in policy.state_dict().items()},
+                            value={k: v.detach().clone()
+                                   for k, v in value.state_dict().items()})
+                export_policy(policy, pol_path.replace(".azp", "_best.azp"),
+                              state_dim, action_dim)
+                export_value(value, val_path.replace(".spzw", "_best.spzw"))
+                log(f"    PROMOTED: new best {100*rate:.1f}%"
+                    + (f" (was {100*prev:.1f}%)" if prev is not None else
+                       " (first gate)"), args.log)
+            elif args.revert_on_regress and rate < best["rate"] - 2 * se:
+                policy.load_state_dict(best["policy"])
+                value.load_state_dict(best["value"])
+                # Adam's moments describe a trajectory that led somewhere
+                # worse; carrying them into the restored weights would walk
+                # straight back.
+                popt = torch.optim.Adam(policy.parameters(), lr=args.lr)
+                vopt = torch.optim.Adam(value.parameters(), lr=args.lr)
+                buf.clear()          # buffered games came from the bad net
+                export_policy(policy, pol_path, state_dim, action_dim)
+                export_value(value, val_path)
+                log(f"    REVERTED to round {best['round']} "
+                    f"({100*best['rate']:.1f}%): this gate {100*rate:.1f}% "
+                    f"is more than 2 SE below best", args.log)
+            else:
+                log(f"    kept (best {100*best['rate']:.1f}% "
+                    f"@ round {best['round']})", args.log)
+
             agg = {}
             for opp, sc in zip(gopp, per):
                 if sc >= 0:
