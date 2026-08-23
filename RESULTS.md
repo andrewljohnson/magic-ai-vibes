@@ -205,6 +205,35 @@ bot. The trained actor is ~47 points ahead of it.
 been corrected. Worth remembering as a lesson about uncited numbers in
 comments: it nearly reordered the roadmap.
 
+### The pure self-play build beats the built-in bot: 37.5%
+
+2026-08-23, run `az_long`, both nets from random init, no handcrafted
+bootstrapping anywhere in the loop (the pure-build rule in AGENTS.md).
+
+| round | gate | capped | note |
+|---|---|---|---|
+| 59 | 9.3% (34.8% as draws) | 153 / 300 | half the games never resolved |
+| 119 | **37.5% ± 2.8** | **0 / 300** | 112W 1D 187L |
+
+**37.5% is above the built-in bot's 31.6%**, and because ZERO games were
+capped the two scoring conventions agree exactly -- there is no
+capped-as-loss / capped-as-draw ambiguity to argue about for the first
+time here.
+
+The capping collapsed on its own between those two gates. That is
+`--truncation loss` working as intended but with a long delay: the policy
+had to learn to CLOSE GAMES OUT before the gate stopped truncating, and
+that took ~60 rounds. The earlier A/B that found "no win-rate effect" was
+reading gates taken before the effect had arrived.
+
+Per-matchup at round 119: The Deck 86.4, Counterburn 59.1, Robots 57.1,
+Lions DIB 47.7, BWR Aggro / Erhnamgeddon / Troll Disk 33.3, Goblins /
+Jeskai 31.8, White Weenie 28.6, Artifacts / Lion Dib Bolt 23.8, Mono
+Black 18.2, GR Aggro 14.3.
+
+→ Still behind the AAC line's 47.5–51%, but that took ~100k games and this
+is ~6k. The remaining weak matchups are aggro, same as ROADMAP A.
+
 ### Truncation scoring: fixes stalling, does NOT move win rate
 
 Two arms, identical but for how a game hitting the decision cap is
@@ -320,6 +349,7 @@ The strength curve has never plateaued.
 | stage | evaluation |
 |---|---|
 | the built-in bot we set out to beat | 31.6% |
+| **pure AZ self-play, ~6k games, 0 capped** | **37.5% ±2.8** |
 | 256-net + belief features (old champion) | 45.0% (200 games, ±3.5) |
 | native loop, 100k games | 47.5% mean / 49.9% best (32 evals) |
 | **same actor, 800-game evaluation** | **51.1% ±1.8** |
