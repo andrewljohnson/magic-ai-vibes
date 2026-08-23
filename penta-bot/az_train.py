@@ -155,6 +155,11 @@ def main():
                          "clean split -- slow decks beaten, aggro decks "
                          "scoring zero -- so uniform pairing spends as many "
                          "games on solved matchups as on lost ones.")
+    ap.add_argument("--matchup-decay", type=float, default=0.6,
+                    help="Decay applied to pooled matchup evidence at each "
+                         "gate. One gate is only ~8.6 games per deck "
+                         "(SE ~17 points), so weights built from a single "
+                         "gate track noise, not the matchup.")
     ap.add_argument("--root-noise", type=float, default=0.25,
                     help="Dirichlet fraction mixed into the ROOT prior "
                          "during generation (AlphaZero uses 0.25). Without "
@@ -203,6 +208,13 @@ def main():
     # near 11%. Uniform pairing spends the same number of games on decks
     # already solved as on the ones losing every game.
     deck_w = {d: 1.0 for d in decks}
+    # Pooled per-matchup evidence, decayed each gate. A single gate gives
+    # only ~8.6 games per deck (120 / 14), an SE near 17 POINTS -- across
+    # consecutive gates Counterburn read 0.0% then 55.6%, and Artifacts
+    # 37.5% then 0.0%. Weights built from one gate's cells are mostly
+    # noise. Decaying sums keep several gates of evidence per deck while
+    # still tracking real change.
+    mstat = {d: [0.0, 0.0] for d in decks}   # [score sum, games]
 
     def sample_deck(rng):
         tot = sum(deck_w[d] for d in decks)
@@ -404,9 +416,16 @@ def main():
                     f"{o.replace(' ', '_')}={100*v[0]/v[1]:.1f}"
                     for o, v in agg.items()), args.log)
                 if args.deck_weight > 0:
+                    for d in mstat:
+                        mstat[d][0] *= args.matchup_decay
+                        mstat[d][1] *= args.matchup_decay
                     for o, v in agg.items():
-                        deck_w[o] = 1.0 + args.deck_weight * (
-                            1.0 - v[0] / v[1])
+                        mstat[o][0] += v[0]
+                        mstat[o][1] += v[1]
+                    for o, (sw, sn) in mstat.items():
+                        if sn >= 1:
+                            deck_w[o] = 1.0 + args.deck_weight * (
+                                1.0 - sw / sn)
                     top = sorted(deck_w.items(), key=lambda kv: -kv[1])[:4]
                     log("  WEIGHTS " + " ".join(
                         f"{k.replace(' ', '_')}={w:.2f}" for k, w in top),
