@@ -679,3 +679,71 @@ class NativeIsmctsPolicy:
         except Exception:
             self.fallback._our_deck = self.our_deck
             return self.fallback.choose(obs)
+
+
+class AacPolicy:
+    """Play the trained AAC actor on the hosted server.
+
+    The actor scores AFTERSTATES: for each legal action it wants the
+    redacted observation that would result. The hosted seat has no engine
+    state to fork, so it uses HostedPolicy.predict_afterstate -- a
+    lightweight predicted observation touching only the fields the feature
+    schema reads.
+
+    CAVEAT, and it is the one to watch: the actor was TRAINED on true
+    engine afterstates (fork, apply, observe). Here it sees predicted ones.
+    Where the prediction is incomplete the afterstate is indistinguishable
+    from doing nothing, and the tie ordering decides instead. So hosted
+    strength is a lower bound on the local evaluation number, not the same
+    number -- confirm it by measuring, never assume they match.
+
+    Deck classification matches training: our own deck is known, the
+    opponent's is inferred from revealed cards (the server does not
+    disclose it).
+    """
+
+    def __init__(self, actor_path, hidden=256, our_deck="Sligh",
+                 decklists_path="builtin-decklists.json"):
+        import numpy as _np
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = (actor_path if os.path.isabs(actor_path)
+                else os.path.join(here, actor_path))
+        d = _np.load(path)
+        self.w1 = _np.asarray(d["f1.weight"], dtype=_np.float64)
+        self.b1 = _np.asarray(d["f1.bias"], dtype=_np.float64)
+        self.w2 = _np.asarray(d["f2.weight"], dtype=_np.float64).reshape(-1)
+        self.b2 = float(_np.asarray(d["f2.bias"]).reshape(-1)[0])
+        self.extractor = Extractor.for_inputs(self.w1.shape[1])
+        self.our_deck = our_deck
+        self.decks = load_decklists(decklists_path)
+        self.fallback = HostedPolicy(our_deck=our_deck) \
+            if os.path.exists(os.path.join(here, "penta_net.npz")) else None
+
+    def _score(self, feats):
+        import numpy as _np
+        h = _np.tanh(_np.asarray(feats, dtype=_np.float64) @ self.w1.T
+                     + self.b1)
+        return h @ self.w2 + self.b2
+
+    def choose(self, obs, raw_json=None):
+        import numpy as _np
+        actions = obs.get("legalActions") or ()
+        if not actions:
+            return 0
+        if len(actions) == 1:
+            return actions[0]["index"]
+        try:
+            if getattr(self.extractor, "belief", False):
+                belief_deck_context(self.extractor, self.decks, obs,
+                                    self.our_deck)
+            rows = []
+            for a in actions:
+                after = HostedPolicy.predict_afterstate(self, obs, a)
+                rows.append(self.extractor.features(after))
+            scores = self._score(_np.stack(rows))
+            return actions[int(_np.argmax(scores))]["index"]
+        except Exception:
+            # never forfeit on a scoring bug: fall back to the tie ordering
+            return min(actions,
+                       key=lambda a: (_TIE_ORDER.get(a.get("type"), 7),
+                                      a["index"]))["index"]

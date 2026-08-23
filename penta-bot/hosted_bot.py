@@ -173,6 +173,11 @@ def main():
     parser.add_argument("--value-net", default="penta_net.npz",
                         help="value net (.npz); the determinized-era "
                              "deliverable when promoted")
+    parser.add_argument("--actor", default=None,
+                        help="AAC actor .npz to play with (the trained bot). "
+                             "Without it, the legacy determinized nets are "
+                             "used.")
+    parser.add_argument("--actor-hidden", type=int, default=256)
     parser.add_argument("--move-budget", type=float, default=20.0)
     parser.add_argument("--heartbeat", type=float, default=10.0)
     args = parser.parse_args()
@@ -202,8 +207,15 @@ def main():
               f"{engine.engine_version()}/p{engine.protocol_version()}, "
               f"K={args.k_worlds}", flush=True)
     else:
-        policy = HostedPolicy(weight=args.weight,
-                              value_path=args.value_net)
+        if args.actor:
+            from hosted_policy import AacPolicy
+            policy = AacPolicy(args.actor, hidden=args.actor_hidden,
+                               our_deck=args.deck)
+            print(f"policy: AAC actor {args.actor} (deck {args.deck})",
+                  flush=True)
+        else:
+            policy = HostedPolicy(weight=args.weight,
+                                  value_path=args.value_net)
     state = load_or_register(args.server, args.name, args.deck)
     done = []
     beats = 0
