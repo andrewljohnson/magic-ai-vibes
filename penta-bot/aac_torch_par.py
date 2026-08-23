@@ -310,7 +310,7 @@ def native_or_python_gate(args, spz, actor, extractor, penta, decks, games):
             spz, actor, args.hidden, args.belief, args.learner_deck, games,
             900000, threads=args.native_threads,
             max_actions=args.native_max_actions,
-            open_decklist=not args.classify_decklist, full=True)
+            open_decklist=args.open_decklist, full=True)
         return rate, matchups
     return gate_belief(actor, extractor, penta, decks, args.learner_deck,
                        games, 900000), None
@@ -369,19 +369,22 @@ def main():
                          "actions (0 = expand everything). Above the cap a "
                          "decision is played greedily from a prefix and "
                          "emits no training row")
-    # OPEN DECKLISTS ARE THE ARCHITECTURE (decided 2026-08-22). The belief
-    # block gets the opponent's REAL decklist; only their HIDDEN HAND stays
-    # hidden. Classifying the deck Classifying the deck from
-    # revealed cards was the old AAC default and it is measurably lossy:
-    # 76.6% accurate overall, but 0% on turn 1, 53% turn 2, 64% turn 3 --
-    # a quarter of decisions ran the unseen-pool maths against the wrong 60
-    # cards, worst exactly where planning matters. It also made our numbers
-    # incomparable to the 57.7% C++ reference, which came from the
-    # determinized lineage where decklists were always open.
-    ap.add_argument("--classify-decklist", action="store_true",
-                    help="opt back OUT to the old behaviour: infer the "
-                         "opponent's deck from its revealed cards instead "
-                         "of being given it (76.6%% accurate; 0%% on turn 1)")
+    # REDACTED IS THE DEFAULT, because it is the format almost every game
+    # is played under. Upstream merged an opt-in disclosure flag
+    # (discloseDeck), but it only activates when BOTH sides ask for it, so
+    # a bot facing the field mostly does not get it.
+    #
+    # Redacted means the opponent's archetype is classified from revealed
+    # cards: 76.6% accurate overall, 0% on turn one, ~90% by turn eight.
+    # --open-decklist trains for the disclosed format instead. The two
+    # differ by ~2.5 points in either direction, so an actor trained for
+    # one is measurably wrong for the other -- a disclosed bot is a SECOND
+    # bot, not a config flip at deploy time.
+    ap.add_argument("--open-decklist", action="store_true",
+                    help="train for the DISCLOSED format (upstream's "
+                         "discloseDeck opt-in), giving the belief block the "
+                         "opponent's real decklist. Default is redacted, "
+                         "which is what most games are played under")
     ap.add_argument("--python-gate", action="store_true",
                     help="with --native, still gate through the Python loop "
                          "(slower; the native gate is the default there)")
@@ -431,7 +434,7 @@ def main():
 
     runner = (f"NATIVE(threads={args.native_threads or 'all'},"
               f"max_actions={args.native_max_actions},"
-              f"decklist={'classified' if args.classify_decklist else 'OPEN'})"
+              f"decklist={'OPEN' if args.open_decklist else 'redacted'})"
               if args.native else f"pool(workers={args.workers})")
     log(f"PAR-AAC start: games={args.games} runner={runner} "
         f"round_ep={args.round_episodes} hidden={args.hidden} "
@@ -476,7 +479,7 @@ def main():
                 spz, actor, args.hidden, args.belief, specs,
                 args.temperature, threads=args.native_threads,
                 max_actions=args.native_max_actions,
-                open_decklist=not args.classify_decklist)
+                open_decklist=args.open_decklist)
             capped += nstats["capped"]
             for recs, res, final in episodes:
                 played += 1

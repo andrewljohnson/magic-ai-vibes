@@ -8,6 +8,69 @@ gain has to be structural.** The missing structure is a value function.
 
 ---
 
+## THE NEXT FEW THINGS (ordered, 2026-08-22)
+
+### A. Fix the aggro matchups — biggest measured lever
+
+The 51% average hides the real problem:
+
+    The Deck   96.7      Jeskai Aggro  43.3
+    Goblins    76.7      Mono Black    40.0
+    Robots     60.0      Lions DIB     38.3
+    Artifacts  60.0      GR Aggro      33.3
+    Troll Disk 60.0      White Weenie  30.0
+    Counterburn 55.0     BWR Aggro     30.0
+
+We crush control and get run over by fast decks. Training samples
+opponents UNIFORMLY, so two thirds of our games teach matchups we already
+win. Weight the sampler toward the losing ones (or sample inversely to
+current win rate, recomputed each evaluation).
+
+Arithmetic: five matchups sit near 30-38%. Moving those to 45% is roughly
+**+5 points overall** — more than everything else on this list combined,
+and it is a sampling change, not new machinery.
+
+Risk to watch: over-weighting could trade away the control matchups. The
+matchup grid makes that visible immediately, which is why it exists.
+
+### B. Deploy search — it is nearly free where it actually runs
+
+Search measured 53.1% vs 50.7% for 1-ply (400-game confirmation pending).
+Its ~1000x cost is disqualifying for TRAINING, but the hosted room clock
+is 60 seconds per move and search uses a few. So the cost that made it
+useless in the loop is irrelevant at deploy time.
+
+Needs: the significance run to confirm, then point AacPolicy at the
+ISMCTS path instead of raw argmax. Roughly +2 points on the live bot for
+no training cost at all.
+
+### C. Close the AlphaZero loop — train ON the search
+
+The principled fix for the thing that is currently blocking pure
+self-play. Search produces a better policy than the raw actor (that is
+what B measures); training the actor toward search's choices is the
+POLICY IMPROVEMENT OPERATOR self-play needs. Without it, self-play drifts
+— measured: the actor fell 52.5 -> 45.0 over 7.7k pure self-play games.
+
+This is the expensive one and the one with the highest ceiling. Do it
+after B, since B produces exactly the search-vs-actor gap this needs.
+
+### D. Feed search a better value head (in flight)
+
+`vfreeze` trains the value head with `--actor-lr 0`, so a strong FROZEN
+actor generates the games and only the value head learns. It is already
+at ~50% of outcome variance explained, up from the 36% head the search
+tests used. Re-run the search comparison with it.
+
+### E. Reconsider the deck
+
+Every number here is "Sligh vs the field". Sligh may simply be a poor
+choice against this metagame — the aggro losses in A could be the deck
+rather than the policy. Cheap to test: train the same recipe with
+`--learner-deck` set to something else and compare ceilings. Also the
+honest way to find out whether we are hitting a policy limit or a deck
+limit.
+
 ## 1. Train a value function — DONE (head built), needs wiring into search
 
 ```
