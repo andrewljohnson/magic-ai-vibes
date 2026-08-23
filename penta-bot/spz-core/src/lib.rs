@@ -7,6 +7,7 @@
 #[global_allocator]
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 pub mod aac;
+pub mod action_feat;
 pub mod az;
 pub mod decks;
 pub mod det_runner;
