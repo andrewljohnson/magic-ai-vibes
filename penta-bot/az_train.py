@@ -135,7 +135,11 @@ def main():
     ap.add_argument("--threads", type=int, default=12)
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
-    ap.add_argument("--epochs", type=int, default=4)
+    ap.add_argument("--epochs", type=int, default=1)
+    ap.add_argument("--batch", type=int, default=256,
+                    help="decisions per gradient step")
+    ap.add_argument("--buffer-rounds", type=int, default=8,
+                    help="rounds of self-play kept in the replay buffer")
     ap.add_argument("--max-actions", type=int, default=64)
     ap.add_argument("--gate-every", type=int, default=10)
     ap.add_argument("--gate-games", type=int, default=200)
@@ -172,10 +176,13 @@ def main():
 
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
-        f"root_noise={args.root_noise} "
+        f"root_noise={args.root_noise} buffer={args.buffer_rounds} "
+        f"batch={args.batch} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
 
     gopps = [d for d in decks if d != args.learner_deck]
+
+    buf = []
 
     seed = 1
     for rnd in range(args.rounds):
@@ -214,31 +221,87 @@ def main():
                     z[i] = 1.0 if r == seat[i] else 0.0
                 i += 1
 
-        st = torch.as_tensor(state[:, :feat])       # own view only
-        at = torch.as_tensor(np.ascontiguousarray(acts))
-        ct = torch.as_tensor(m)
-        zt = torch.as_tensor(z)
-        segs = torch.repeat_interleave(torch.arange(n), ct)
-        # policy target: normalised visit counts
-        vt = torch.as_tensor(visits)
-        vsum = torch.zeros(n).scatter_add(0, segs, vt)
-        pi = vt / vsum[segs].clamp(min=1e-9)
+        # REPLAY BUFFER. Previously each round trained `--epochs` passes on
+        # only that round's ~4.7k decisions and then discarded them. That is
+        # high-variance and forgets: the gate climbed 2% -> 19% by round 19
+        # and then sat flat (19.2% at 960 games, 18.3% at 1920 -- a quarter
+        # of one standard error apart) with entropy still healthy at 0.78,
+        # so it was not the collapse failure. AlphaZero trains on a sliding
+        # window of recent self-play, which is what this restores.
+        buf.append({
+            "st": state[:, :feat].copy(),   # own view only
+            "at": np.ascontiguousarray(acts),
+            "m": m, "vis": visits, "z": z, "n": n,
+        })
+        while len(buf) > args.buffer_rounds:
+            buf.pop(0)
 
         for _ in range(args.epochs):
+            # Round order shuffled each epoch so a round never sits at a
+            # fixed point in the gradient sequence.
+            for bi in np.random.permutation(len(buf)):
+                b = buf[bi]
+                bn = b["n"]
+                # Action rows are variable-length per decision, so a
+                # minibatch is a set of DECISIONS and the row slice each
+                # one owns.
+                off = np.zeros(bn + 1, dtype=np.int64)
+                np.cumsum(b["m"], out=off[1:])
+                order = np.random.permutation(bn)
+                for s0 in range(0, bn, args.batch):
+                    idx = order[s0:s0 + args.batch]
+                    if len(idx) == 0:
+                        continue
+                    rows = np.concatenate(
+                        [np.arange(off[i], off[i + 1]) for i in idx])
+                    bm = b["m"][idx]
+                    k = len(idx)
+                    st = torch.as_tensor(b["st"][idx])
+                    at = torch.as_tensor(b["at"][rows])
+                    ct = torch.as_tensor(bm)
+                    zt = torch.as_tensor(b["z"][idx])
+                    segs = torch.repeat_interleave(torch.arange(k), ct)
+                    vt = torch.as_tensor(b["vis"][rows])
+                    vsum = torch.zeros(k).scatter_add(0, segs, vt)
+                    pi = vt / vsum[segs].clamp(min=1e-9)
+
+                    logits = policy(st, at, ct)
+                    mx = torch.full((k,), -1e30).scatter_reduce(
+                        0, segs, logits, reduce="amax",
+                        include_self=True).detach()
+                    e = (logits - mx[segs]).exp()
+                    ssum = torch.zeros(k).scatter_add(0, segs, e)
+                    logp = (logits - mx[segs]) - torch.log(ssum[segs] + 1e-12)
+                    ploss = -(pi * logp).sum() / k
+                    popt.zero_grad(); ploss.backward()
+                    nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
+                    popt.step()
+
+                    vloss = nn.functional.binary_cross_entropy_with_logits(
+                        value(st), zt)
+                    vopt.zero_grad(); vloss.backward()
+                    nn.utils.clip_grad_norm_(value.parameters(), 1.0)
+                    vopt.step()
+
+        # Metrics on THIS round's data, so the numbers still describe the
+        # policy the games were played with.
+        b = buf[-1]
+        st = torch.as_tensor(b["st"])
+        at = torch.as_tensor(b["at"])
+        ct = torch.as_tensor(b["m"])
+        zt = torch.as_tensor(b["z"])
+        segs = torch.repeat_interleave(torch.arange(n), ct)
+        vt = torch.as_tensor(b["vis"])
+        vsum = torch.zeros(n).scatter_add(0, segs, vt)
+        pi = vt / vsum[segs].clamp(min=1e-9)
+        with torch.no_grad():
             logits = policy(st, at, ct)
             mx = torch.full((n,), -1e30).scatter_reduce(
-                0, segs, logits, reduce="amax", include_self=True).detach()
+                0, segs, logits, reduce="amax", include_self=True)
             e = (logits - mx[segs]).exp()
-            s = torch.zeros(n).scatter_add(0, segs, e)
-            logp = (logits - mx[segs]) - torch.log(s[segs] + 1e-12)
-            ploss = -(pi * logp).sum() / n          # cross-entropy to visits
-            popt.zero_grad(); ploss.backward()
-            nn.utils.clip_grad_norm_(policy.parameters(), 1.0); popt.step()
-
-            vloss = nn.functional.binary_cross_entropy_with_logits(
-                value(st), zt)
-            vopt.zero_grad(); vloss.backward()
-            nn.utils.clip_grad_norm_(value.parameters(), 1.0); vopt.step()
+            ssum = torch.zeros(n).scatter_add(0, segs, e)
+            logp = (logits - mx[segs]) - torch.log(ssum[segs] + 1e-12)
+            ploss = -(pi * logp).sum() / n
 
         export_policy(policy, pol_path, state_dim, action_dim)
         export_value(value, val_path)
@@ -276,19 +339,35 @@ def main():
         # Everything else (losses, entropies) can look healthy while the
         # bot gets no better.
         if args.gate_every and (rnd + 1) % args.gate_every == 0:
-            gspecs = [(args.learner_deck if g % 2 == 0 else gopps[g % len(gopps)],
-                       gopps[g % len(gopps)] if g % 2 == 0 else args.learner_deck,
-                       g % 2 == 0, 900_000 + g)
-                      for g in range(args.gate_games)]
             t1 = time.time()
-            w, d, f, cap = spz.az_gate(
-                catalog, val_path, pol_path, args.iters, 1.5,
-                "builtin-decklists.json", gspecs, args.threads, 600, True)
-            rate = (w + 0.5 * d) / max(f, 1)
-            se = (rate * (1 - rate) / max(f, 1)) ** 0.5
+            # Gate one opponent deck at a time. A single pooled call gives
+            # only an aggregate, and the aggregate hides the thing worth
+            # knowing -- which matchups the bot is actually losing. Costs
+            # nothing extra: the same games, grouped.
+            per = max(2, args.gate_games // len(gopps) // 2 * 2)
+            tot_w = tot_d = tot_f = tot_cap = 0
+            rates = []
+            for oi, opp in enumerate(gopps):
+                gspecs = [
+                    (args.learner_deck if g % 2 == 0 else opp,
+                     opp if g % 2 == 0 else args.learner_deck,
+                     g % 2 == 0, 900_000 + oi * 1000 + g)
+                    for g in range(per)]
+                w, d, f, cap = spz.az_gate(
+                    catalog, val_path, pol_path, args.iters, 1.5,
+                    "builtin-decklists.json", gspecs, args.threads, 600, True)
+                tot_w += w; tot_d += d; tot_f += f; tot_cap += cap
+                if f:
+                    rates.append((opp, 100.0 * (w + 0.5 * d) / f))
+            rate = (tot_w + 0.5 * tot_d) / max(tot_f, 1)
+            se = (rate * (1 - rate) / max(tot_f, 1)) ** 0.5
             log(f"  GATE round {rnd}: {100*rate:.1f}% +/- {100*se:.1f} "
-                f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
-                f"[{time.time()-t1:.0f}s]", args.log)
+                f"({tot_w}W {tot_d}D {tot_f-tot_w-tot_d}L / {tot_f}, "
+                f"{tot_cap} capped) [{time.time()-t1:.0f}s]", args.log)
+            if rates:
+                log("  MATCHUPS " + " ".join(
+                    f"{o.replace(' ', '_')}={r:.1f}" for o, r in rates),
+                    args.log)
 
 
 if __name__ == "__main__":

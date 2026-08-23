@@ -129,6 +129,18 @@ def parse_log(path):
                             h, mi, sec = (int(x) for x in ts.groups())
                             stamps.append(h * 3600 + mi * 60 + sec)
                         continue
+                    m = MATCH_RE.search(line)
+                    if m:
+                        matchups = []
+                        for pair in m.group(1).split():
+                            if "=" in pair:
+                                k, v = pair.rsplit("=", 1)
+                                try:
+                                    matchups.append(
+                                        (k.replace("_", " "), float(v)))
+                                except ValueError:
+                                    pass
+                        continue
                     m = AZ_GATE_RE.search(line)
                     if m:
                         gates.append({
