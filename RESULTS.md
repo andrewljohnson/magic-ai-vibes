@@ -205,6 +205,39 @@ bot. The trained actor is ~47 points ahead of it.
 been corrected. Worth remembering as a lesson about uncited numbers in
 comments: it nearly reordered the roadmap.
 
+### How strong is the AZ policy improvement operator? ~6 points
+
+MEASURED 2026-08-23 on the az_main checkpoint (~8k self-play games).
+
+The loop only ratchets if search plays BETTER than the policy that
+generated it. Gated against the built-in bot, 84 games:
+
+| search budget | gate | cost |
+|---|---|---|
+| 1 sim (the raw policy) | 20.2% ± 4.4 | 2s |
+| 32 sims | **26.2% ± 4.8** | 185s |
+
+So search is worth about **6 points** over its own prior, and the policy
+has NOT yet absorbed that -- which is the gap the loop exists to close.
+
+But the operator is weak in a specific, measurable way. Comparing the
+search's visit distribution to the prior over 1792 decisions:
+
+| sims | search argmax == policy argmax | KL(visits ‖ policy) |
+|---|---|---|
+| 32 | 92.0% | 0.0426 |
+| 128 | 92.4% | **0.0241** |
+
+Search agrees with the prior on 92% of decisions, and MORE simulations
+make it agree MORE, not less. Raising the simulation budget is therefore
+not the lever it looks like -- 4x the cost moved the target closer to
+where the policy already was. (Mean decision offers only ~5 actions, so
+32 sims is already ~6 visits per action.)
+
+→ Do not raise `--iters` expecting a stronger operator; that was tested.
+The gap to close is distillation (the policy reaching its own search's
+26%) and the leaf evaluator's ability to separate siblings.
+
 ### The dominance prune costs 6.4x in search and buys nothing
 
 MEASURED 2026-08-23, 40 games, trainer paused so the machine was idle:
