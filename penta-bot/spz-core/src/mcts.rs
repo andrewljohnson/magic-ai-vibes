@@ -228,6 +228,18 @@ pub struct MctsConfig {
     /// Dirichlet concentration. AlphaZero scales it to the branching
     /// factor (~10 / typical legal moves); decisions here offer ~7.
     pub root_noise_alpha: f64,
+    /// Above this many legal actions, do NOT search the decision -- score
+    /// the candidates once with the policy head and play the argmax. 0
+    /// disables the cap.
+    ///
+    /// Self-play has always had this (`max_actions`); the gate did not, and
+    /// that asymmetry made the gate 12x slower PER GAME than self-play
+    /// despite searching only one seat. Median decision offers 17
+    /// candidates, but some offer up to 538, and every one of those was
+    /// getting a full 32-iteration search whose every iteration loops and
+    /// encodes all 538. RESULTS.md records the same blowup on the AAC path:
+    /// 47.8s capped against not finishing in 19 minutes uncapped.
+    pub max_actions: usize,
 }
 
 impl Default for MctsConfig {
@@ -237,6 +249,7 @@ impl Default for MctsConfig {
             max_depth: 400,
             root_noise_frac: 0.0,
             root_noise_alpha: 1.0,
+            max_actions: 0,
             c_puct: 1.5,
             inert: false,
             use_dominance: true,

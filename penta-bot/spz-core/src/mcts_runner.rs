@@ -103,7 +103,32 @@ pub fn play_ismcts_game(
             policy, decks, deck_slots: &deck_slots,
             my_deck, opp_deck, our_seat, cfg: cfg.clone(),
         };
-        let (best, _visits) = search.search(&game, &mut prng);
+        // Wide decisions are scored once by the policy head instead of
+        // searched. Without this the gate spent nearly all its time on the
+        // rare 500-candidate decision: 12x slower PER GAME than self-play,
+        // which has always had this cap.
+        let acts = penta::protocol::protocol_actions(&obs);
+        let wide = cfg.max_actions > 0 && acts.len() > cfg.max_actions;
+        let best = if wide {
+            match policy.fast_head.as_ref() {
+                Some(fh) => {
+                    let state = features(&obs, game.core_game().in_pregame(),
+                                         tables, &deck_slots);
+                    let pre = fh.state_pre(&state);
+                    let enc = crate::action_feat::encode_all(&acts, &obs,
+                                                             tables);
+                    let sc = fh.scores(&pre, &enc, acts.len());
+                    let mut b = 0usize;
+                    for (j, v) in sc.iter().enumerate() {
+                        if *v > sc[b] { b = j; }
+                    }
+                    b
+                }
+                None => 0,
+            }
+        } else {
+            search.search(&game, &mut prng).0
+        };
         if game.act(best).is_err() { break; }
         n += 1;
         if record {

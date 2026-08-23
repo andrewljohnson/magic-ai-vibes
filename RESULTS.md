@@ -205,6 +205,32 @@ bot. The trained actor is ~47 points ahead of it.
 been corrected. Worth remembering as a lesson about uncited numbers in
 comments: it nearly reordered the roadmap.
 
+### The dominance prune costs 6.4x in search and buys nothing
+
+MEASURED 2026-08-23, 40 games, trainer paused so the machine was idle:
+
+| gate configuration | s/game | win rate |
+|---|---|---|
+| dominance OFF | **1.17** | 17.5% |
+| dominance ON | 7.55 | 17.5% |
+
+Identical strength, 6.4x the cost. `dominance_keep` clones the game and
+applies once PER ACTION, and `available()` calls it at EVERY node of
+EVERY descent -- so it pays the same afterstate expansion this codebase
+removed everywhere else (~13 ms per action row). It is a certified prune,
+so it cannot weaken play; it simply is not worth what it costs inside a
+tree search.
+
+→ Self-play always ran with it off. The gate had it ON because I turned it
+on assuming a "certified prune" was cheap, which took a 120-game gate from
+~140s to ~1161s. Do not enable it in a search loop. `AZ_GATE_DOM=1`
+re-enables it for measurement only.
+
+→ The general lesson is the one this project keeps relearning: measure the
+real workload with nothing else running. An earlier attempt at this
+comparison ran the gate CONCURRENTLY with a 12-thread trainer and was
+pure noise.
+
 ### Four throughput hypotheses are dead
 
 One process saturates near 8 threads (~8.5 g/s); **four processes at 8

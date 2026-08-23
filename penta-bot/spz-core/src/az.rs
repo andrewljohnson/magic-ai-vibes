@@ -249,6 +249,8 @@ mod prof_tests {
             root_noise_frac: std::env::var("AZ_NOISE").ok()
                 .and_then(|v| v.parse().ok()).unwrap_or(0.0),
             root_noise_alpha: 1.0,
+            max_actions: 0,
+        max_actions: 0,
         };
         crate::mcts::prof::reset();
         let t0 = std::time::Instant::now();

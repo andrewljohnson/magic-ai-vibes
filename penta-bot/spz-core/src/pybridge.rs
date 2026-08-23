@@ -343,6 +343,7 @@ fn ismcts_choose_at(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        max_actions: 0,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -401,6 +402,7 @@ fn ismcts_choose(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        max_actions: 0,
     };
     let search = crate::mcts::Ismcts {
         policy: &policy, decks: &decks, deck_slots: &deck_slots,
@@ -451,6 +453,7 @@ fn ismcts_gate(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        max_actions: 0,
     };
     let (w, d, f, c, _per) = run_gate(py, policy, decks, book, cfg,
                                       specs, workers, classify)?;
@@ -492,13 +495,20 @@ fn az_gate(
         // Self-play generation deliberately leaves it OFF: there the visit
         // vector is a training target, and a target over a pruned action
         // set is not the distribution the policy is asked to reproduce.
-        iters, c_puct, inert: false, use_dominance: true,
+        iters, c_puct, inert: false,
+        // dominance_keep clones the game and applies once PER ACTION, at
+        // every node of every descent -- the same afterstate expansion
+        // RESULTS.md clocks at ~13ms per action row. Self-play runs with
+        // it off. AZ_GATE_DOM=1 re-enables it for measurement.
+        use_dominance: std::env::var("AZ_GATE_DOM").as_deref() == Ok("1"),
         leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
         opponent: crate::mcts::OpponentModel::Handcrafted,
         max_decisions,
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        // Same cap self-play uses. See MctsConfig::max_actions.
+        max_actions: 64,
     };
     run_gate(py, policy, decks, book, cfg, specs, workers, classify)
 }
@@ -607,6 +617,7 @@ fn ismcts_stream_rows(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        max_actions: 0,
     };
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
@@ -1039,6 +1050,7 @@ fn az_stream_episodes(
         // actually produced, so it leaves this at zero.
         root_noise_frac: root_noise,
         root_noise_alpha: 1.0,
+        max_actions: 0,
     };
     let n_threads = thread_count(threads, specs.len());
     let policy = std::sync::Arc::new(policy);
