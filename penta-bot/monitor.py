@@ -68,7 +68,7 @@ AZ_ROUND_RE = re.compile(
     r"round (\d+): (\d+) games \d+s \(([0-9.]+) g/s\).*?"
     r"fin=(\d+)%.*?pol_ent=([0-9.]+).*?tgt_ent=([0-9.]+).*?"
     r"vmse=([0-9.]+)/([0-9.]+)")
-AZ_GATE_RE = re.compile(r"GATE round \d+: ([0-9.]+)%")
+AZ_GATE_RE = re.compile(r"GATE round \d+: ([0-9.]+)%")  # first % only
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
 

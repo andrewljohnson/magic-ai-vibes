@@ -143,7 +143,7 @@ def main():
     ap.add_argument("--buffer-rounds", type=int, default=8,
                     help="rounds of self-play kept in the replay buffer")
     ap.add_argument("--max-actions", type=int, default=64)
-    ap.add_argument("--gate-every", type=int, default=10)
+    ap.add_argument("--gate-every", type=int, default=40)
     ap.add_argument("--gate-games", type=int, default=200)
     ap.add_argument("--log", default="az.log")
     ap.add_argument("--save-prefix", default="az")
@@ -439,7 +439,16 @@ def main():
                 "builtin-decklists.json", gspecs, args.threads, 600, True)
             rate = (w + 0.5 * d) / max(f, 1)
             se = (rate * (1 - rate) / max(f, 1)) ** 0.5
+            # BOTH conventions, because they are not comparable. This gate
+            # inherits play_ismcts_game's rule that a capped game is a LOSS,
+            # while the AAC gate every historical number here was scored on
+            # (the 31.6% built-in baseline, the ~51% actor) counts it a
+            # DRAW. With 16 of 120 games capped that is an 6.7-point
+            # difference, so quoting one number against the other's history
+            # would be wrong. See RESULTS.md.
+            rate_d = (w + 0.5 * d + 0.5 * cap) / max(f, 1)
             log(f"  GATE round {rnd}: {100*rate:.1f}% +/- {100*se:.1f} "
+                f"(capped-as-draw {100*rate_d:.1f}%) "
                 f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
                 f"[{time.time()-t1:.0f}s]", args.log)
             agg = {}
