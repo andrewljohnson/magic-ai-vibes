@@ -268,7 +268,11 @@ def parse_log(path):
         "idle_min": int(idle // 60),
         "cadence_min": round(cadence / 60, 1) if cadence else None,
         "gates": gates,
-        "games": gates[-1]["games"],
+        # Games ACTUALLY played, not games at the last chartable point. An
+        # AZ run only emits a gate every --gate-every rounds, so reading
+        # the count off gates[-1] under-reported it by up to that many
+        # rounds -- 960 shown against 1,824 played.
+        "games": max(gates[-1]["games"], az_games),
         "n": len(pcts),
         "last": pcts[-1] if pcts else None,
         "best": max(pcts) if pcts else None,
