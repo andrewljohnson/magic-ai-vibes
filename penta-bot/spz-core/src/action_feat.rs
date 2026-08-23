@@ -23,7 +23,7 @@
 //! This is also just what an AlphaZero policy head is: state in,
 //! distribution over legal actions out.
 
-use penta::{Action, PlayerObservation};
+use penta::{Action, PlayerObservation, PlayerId, Target};
 
 use crate::tables::{Tables, N_COST_BUCKETS};
 
@@ -67,10 +67,70 @@ fn subject_def(a: &Action, obs: &PlayerObservation) -> Option<u16> {
     }
 }
 
-/// Width of the encoding: kinds + one card-definition slot + cost bucket
-/// + a few scalars.
+/// TARGET block. Without this, "Fireball at their face" and "Fireball at
+/// their blocker" encode identically -- the same action kind, the same
+/// card, the same cost -- and a policy head cannot tell the two apart.
+/// In Magic the target is often the whole decision, so it gets real
+/// features rather than a flag:
+///
+///   0  targets a player at all
+///   1  that player is the OPPONENT (1) or us (-1)
+///   2  targets a permanent
+///   3  that permanent is theirs (1) or ours (-1)
+///   4  target's printed power / 8
+///   5  target's toughness / 8
+///   6  target is a creature
+///   7  target is tapped
+///   8  number of targets / 4
+///   9  X value / 8 (Fireball for 1 is not Fireball for 6)
+///  10  targets a spell on the stack (counterspells)
+///  11  divided-damage amount on the first target / 8
+const N_TARGET: usize = 12;
+
+/// Width of the encoding: kinds + card-definition slot + cost bucket
+/// + subject scalars + the target block.
 pub fn width(t: &Tables) -> usize {
-    N_KINDS + t.defs + N_COST_BUCKETS + 4
+    N_KINDS + t.defs + N_COST_BUCKETS + 4 + N_TARGET
+}
+
+/// Fill the target block from a list of target selections.
+fn encode_targets(sel: &[penta::TargetSelection], x: u16,
+                  obs: &PlayerObservation, t: &Tables, out: &mut [f32]) {
+    let me = obs.viewer;
+    let mut n = 0usize;
+    for s in sel {
+        for (k, tgt) in s.targets().iter().enumerate() {
+            n += 1;
+            match tgt {
+                Target::Player(p) => {
+                    out[0] = 1.0;
+                    out[1] = if *p == me { -1.0 } else { 1.0 };
+                }
+                Target::Permanent(id) => {
+                    out[2] = 1.0;
+                    if let Some(perm) = obs.battlefield.iter()
+                        .find(|p| p.id.0 == id.0)
+                    {
+                        out[3] = if perm.controller == me { -1.0 } else { 1.0 };
+                        out[4] = f32::from(perm.power.unwrap_or(0)) / 8.0;
+                        out[5] = f32::from(perm.toughness.unwrap_or(0)) / 8.0;
+                        out[6] = if perm.power.is_some() { 1.0 } else { 0.0 };
+                        out[7] = if perm.tapped { 1.0 } else { 0.0 };
+                    }
+                }
+                Target::Spell(_) => out[10] = 1.0,
+                Target::Card(_) => {}
+            }
+            if k == 0 {
+                if let Some(a) = s.amounts().first() {
+                    out[11] = f32::from(*a) / 8.0;
+                }
+            }
+        }
+    }
+    out[8] = n as f32 / 4.0;
+    out[9] = f32::from(x) / 8.0;
+    let _ = t;
 }
 
 /// Encode one action into `out` (length `width(t)`), zeroing first.
@@ -102,6 +162,32 @@ pub fn encode(a: &Action, obs: &PlayerObservation, t: &Tables,
         Action::DeclareBlocker { .. } => -1.0,
         _ => 0.0,
     };
+
+    let tb = scalar + 4;
+    match a {
+        Action::CastSpell { choices, .. } => {
+            encode_targets(choices.targets(), choices.x(), obs, t,
+                           &mut out[tb..tb + N_TARGET]);
+        }
+        Action::ActivateAbility { targets, .. } => {
+            encode_targets(targets, 0, obs, t, &mut out[tb..tb + N_TARGET]);
+        }
+        Action::DeclareBlocker { attacker, .. } => {
+            // Which attacker we block is the decision; describe it the same
+            // way a spell target is described.
+            if let Some(p) = obs.battlefield.iter()
+                .find(|p| p.id.0 == attacker.0)
+            {
+                out[tb + 2] = 1.0;
+                out[tb + 3] = 1.0;                       // theirs, by definition
+                out[tb + 4] = f32::from(p.power.unwrap_or(0)) / 8.0;
+                out[tb + 5] = f32::from(p.toughness.unwrap_or(0)) / 8.0;
+                out[tb + 6] = 1.0;
+            }
+        }
+        _ => {}
+    }
+    let _ = PlayerId::One;
 }
 
 /// Encode every action into one row-major `m * width` block.
@@ -235,6 +321,68 @@ mod tests {
         assert!(sunk > 0);
         assert!(enc_ns * 10.0 < sim_ns,
                 "encoding must be far cheaper than simulating");
+    }
+
+    /// The point of the target block: the SAME spell aimed at different
+    /// things must encode differently. Without it, "Fireball at their
+    /// face" and "Fireball at their blocker" are the same vector -- same
+    /// kind, same card, same cost -- and no policy head can choose between
+    /// them, which in Magic is often the entire decision.
+    #[test]
+    fn same_spell_different_targets_encode_differently() {
+        let t = tables();
+        let w = width(&t);
+        // Search real games for a decision offering one card with several
+        // distinct targets.
+        // Walk with a land>cast>attack preference: always playing action 0
+        // passes priority forever and never casts anything, so the case we
+        // are testing for never arises.
+        let step = |acts: &[penta::Action]| -> usize {
+            let rank = |a: &penta::Action| match a {
+                penta::Action::PlayLand { .. } => 0,
+                penta::Action::CastSpell { .. } => 1,
+                penta::Action::DeclareAttacker { .. } => 2,
+                penta::Action::PassPriority => 9,
+                _ => 5,
+            };
+            (0..acts.len()).min_by_key(|&i| (rank(&acts[i]), i)).unwrap_or(0)
+        };
+        let mut found = None;
+        'outer: for seed in 0..60u64 {
+            let mut g = BotGame::new("Sligh", "Goblins", Opponent::Handcrafted,
+                                     PlayerId::Two, seed).expect("game");
+            for _ in 0..600 {
+                let Some(seat) = g.decision_seat() else { break };
+                let obs = g.core_game().observe(seat);
+                let acts = protocol_actions(&obs);
+                // group CastSpell actions by the card being cast
+                let mut by_card: std::collections::HashMap<u32, Vec<usize>> =
+                    std::collections::HashMap::new();
+                for (i, a) in acts.iter().enumerate() {
+                    if let penta::Action::CastSpell { card, .. } = a {
+                        by_card.entry(card.0).or_default().push(i);
+                    }
+                }
+                if let Some((_, idxs)) = by_card.iter().find(|(_, v)| v.len() > 1) {
+                    found = Some((encode_all(&acts, &obs, &t), idxs.clone()));
+                    break 'outer;
+                }
+                if g.act(step(&acts)).is_err() { break; }
+            }
+        }
+        let Some((enc, idxs)) = found else {
+            println!("  (no multi-target cast found in 40 games; skipping)");
+            return;
+        };
+        let a = &enc[idxs[0] * w..(idxs[0] + 1) * w];
+        let mut differing = 0;
+        for &j in &idxs[1..] {
+            if a != &enc[j * w..(j + 1) * w] { differing += 1; }
+        }
+        println!("  same card, {} target choices, {} encode differently",
+                 idxs.len(), differing);
+        assert!(differing > 0,
+                "the same spell at different targets must not collapse");
     }
 
     #[test]
