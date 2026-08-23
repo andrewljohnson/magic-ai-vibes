@@ -452,7 +452,9 @@ fn ismcts_gate(
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
     };
-    run_gate(py, policy, decks, book, cfg, specs, workers, classify)
+    let (w, d, f, c, _per) = run_gate(py, policy, decks, book, cfg,
+                                      specs, workers, classify)?;
+    Ok((w, d, f, c))
 }
 
 /// Gate an ALPHAZERO checkpoint: the value net scores leaves, the
@@ -468,7 +470,7 @@ fn az_gate(
     iters: usize, c_puct: f64, decklists_path: String,
     specs: Vec<(String, String, bool, u64)>, workers: usize,
     max_decisions: usize, classify: bool,
-) -> PyResult<(usize, usize, usize, usize)> {
+) -> PyResult<(usize, usize, usize, usize, Vec<f64>)> {
     let policy = build_policy(&catalog_json, &value_path, &value_path,
                               0.0, 0, 1, 400, 999, 999)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -507,7 +509,8 @@ fn run_gate(
     decks: crate::decks::Decks, book: crate::decks::DeckBook,
     cfg: crate::mcts::MctsConfig,
     specs: Vec<(String, String, bool, u64)>, workers: usize, classify: bool,
-) -> PyResult<(usize, usize, usize, usize)> {
+) -> PyResult<(usize, usize, usize, usize, Vec<f64>)> {
+    let n_specs = specs.len();
     let threads = if workers == 0 {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8)
     } else { workers }.min(specs.len().max(1));
@@ -520,7 +523,14 @@ fn run_gate(
     // produced a score (natural OR capped-as-loss), so wins+draws+losses ==
     // finished and the win% is bounded; `capped` reports how many of those
     // losses were stragglers cut at the decision cap.
-    let tallies: Vec<(usize, usize, usize, usize)> = py.detach(|| {
+    // PER-SPEC scores alongside the tally, so the caller can group by
+    // matchup from ONE pooled run. Gating each opponent deck in its own
+    // call instead makes each call's wall time its slowest single game,
+    // paid once per deck: measured 15 minutes for 14 grouped calls against
+    // 182s for one pooled call over the same number of games.
+    // -1.0 marks a game that produced no score.
+    let tallies: Vec<(usize, usize, usize, usize, Vec<(usize, f64)>)> =
+    py.detach(|| {
         let mut handles = Vec::new();
         for t in 0..threads {
             let policy = policy.clone();
@@ -530,6 +540,7 @@ fn run_gate(
             let cfg = cfg.clone();
             handles.push(std::thread::spawn(move || {
                 let (mut w, mut d, mut f, mut cap) = (0usize, 0usize, 0usize, 0usize);
+                let mut mine: Vec<(usize, f64)> = Vec::new();
                 let mut i = t;
                 let mut x = Vec::new();
                 let mut y = Vec::new();
@@ -543,19 +554,24 @@ fn run_gate(
                         f += 1;
                         if s == 1.0 { w += 1; } else if s == 0.5 { d += 1; }
                         if out.capped { cap += 1; }
+                        mine.push((i, s));
+                    } else {
+                        mine.push((i, -1.0));
                     }
                     i += threads;
                 }
-                (w, d, f, cap)
+                (w, d, f, cap, mine)
             }));
         }
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
     let (mut wins, mut draws, mut finished, mut capped) = (0, 0, 0, 0);
-    for (w, d, f, c) in tallies {
+    let mut per = vec![-1.0f64; n_specs];
+    for (w, d, f, c, mine) in tallies {
         wins += w; draws += d; finished += f; capped += c;
+        for (i, sc) in mine { per[i] = sc; }
     }
-    Ok((wins, draws, finished, capped))
+    Ok((wins, draws, finished, capped, per))
 }
 
 /// Native SO-ISMCTS training rows: play `specs` full games vs the

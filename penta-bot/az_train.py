@@ -340,34 +340,36 @@ def main():
         # bot gets no better.
         if args.gate_every and (rnd + 1) % args.gate_every == 0:
             t1 = time.time()
-            # Gate one opponent deck at a time. A single pooled call gives
-            # only an aggregate, and the aggregate hides the thing worth
-            # knowing -- which matchups the bot is actually losing. Costs
-            # nothing extra: the same games, grouped.
-            per = max(2, args.gate_games // len(gopps) // 2 * 2)
-            tot_w = tot_d = tot_f = tot_cap = 0
-            rates = []
-            for oi, opp in enumerate(gopps):
-                gspecs = [
-                    (args.learner_deck if g % 2 == 0 else opp,
-                     opp if g % 2 == 0 else args.learner_deck,
-                     g % 2 == 0, 900_000 + oi * 1000 + g)
-                    for g in range(per)]
-                w, d, f, cap = spz.az_gate(
-                    catalog, val_path, pol_path, args.iters, 1.5,
-                    "builtin-decklists.json", gspecs, args.threads, 600, True)
-                tot_w += w; tot_d += d; tot_f += f; tot_cap += cap
-                if f:
-                    rates.append((opp, 100.0 * (w + 0.5 * d) / f))
-            rate = (tot_w + 0.5 * tot_d) / max(tot_f, 1)
-            se = (rate * (1 - rate) / max(tot_f, 1)) ** 0.5
+            # ONE pooled call. Gating each opponent deck separately makes
+            # every call's wall time its slowest single game, paid once per
+            # deck -- measured 15 minutes for 14 grouped calls against 182s
+            # for one pooled call over the same games. az_gate returns a
+            # per-spec score so the matchups can be grouped here instead.
+            gspecs, gopp = [], []
+            for g in range(args.gate_games):
+                opp = gopps[g % len(gopps)]
+                mine_p1 = g % 2 == 0
+                gspecs.append((args.learner_deck if mine_p1 else opp,
+                               opp if mine_p1 else args.learner_deck,
+                               mine_p1, 900_000 + g))
+                gopp.append(opp)
+            w, d, f, cap, per = spz.az_gate(
+                catalog, val_path, pol_path, args.iters, 1.5,
+                "builtin-decklists.json", gspecs, args.threads, 600, True)
+            rate = (w + 0.5 * d) / max(f, 1)
+            se = (rate * (1 - rate) / max(f, 1)) ** 0.5
             log(f"  GATE round {rnd}: {100*rate:.1f}% +/- {100*se:.1f} "
-                f"({tot_w}W {tot_d}D {tot_f-tot_w-tot_d}L / {tot_f}, "
-                f"{tot_cap} capped) [{time.time()-t1:.0f}s]", args.log)
-            if rates:
+                f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
+                f"[{time.time()-t1:.0f}s]", args.log)
+            agg = {}
+            for opp, sc in zip(gopp, per):
+                if sc >= 0:
+                    a = agg.setdefault(opp, [0.0, 0])
+                    a[0] += sc; a[1] += 1
+            if agg:
                 log("  MATCHUPS " + " ".join(
-                    f"{o.replace(' ', '_')}={r:.1f}" for o, r in rates),
-                    args.log)
+                    f"{o.replace(' ', '_')}={100*v[0]/v[1]:.1f}"
+                    for o, v in agg.items()), args.log)
 
 
 if __name__ == "__main__":
