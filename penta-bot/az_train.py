@@ -160,6 +160,11 @@ def main():
                          "gate. One gate is only ~8.6 games per deck "
                          "(SE ~17 points), so weights built from a single "
                          "gate track noise, not the matchup.")
+    ap.add_argument("--truncation", choices=("loss", "drop"), default="loss",
+                    help="How a game that hits the decision cap is scored. "
+                         "'loss' matches the gate (both seats lose, so "
+                         "stalling is punished); 'drop' removes the records "
+                         "and leaves stalling unpunished.")
     ap.add_argument("--root-noise", type=float, default=0.25,
                     help="Dirichlet fraction mixed into the ROOT prior "
                          "during generation (AlphaZero uses 0.25). Without "
@@ -191,7 +196,7 @@ def main():
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
         f"iters={args.iters} hidden={args.hidden} "
         f"root_noise={args.root_noise} buffer={args.buffer_rounds} "
-        f"deck_weight={args.deck_weight} "
+        f"deck_weight={args.deck_weight} trunc={args.truncation} "
         f"batch={args.batch} "
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
 
@@ -277,8 +282,23 @@ def main():
             r = int(ep_res[e])
             for _ in range(int(k)):
                 if r < 0:
-                    z[i] = 0.5
-                    keep[i] = False
+                    # Truncated. Score it the way the EVALUATOR does.
+                    #
+                    # First attempt scored it 0.5, which paid a losing
+                    # policy more for stalling past the cap than for
+                    # losing. Second attempt dropped these records
+                    # entirely, which removed the reward but created a
+                    # NO-PENALTY zone: a stalled game produces no gradient
+                    # at all, so nothing corrects it. Capped games in the
+                    # gate went 2 -> 43 out of 120 under that rule.
+                    #
+                    # The real defect in both is that training and
+                    # evaluation disagreed. play_ismcts_game scores a
+                    # capped game as a LOSS, so training must too --
+                    # otherwise the loop optimises something the gate does
+                    # not measure. Both seats lose: neither closed it out.
+                    z[i] = 0.0 if args.truncation == "loss" else 0.5
+                    keep[i] = args.truncation == "loss"
                 elif r == 2:
                     z[i] = 0.5
                 else:
