@@ -45,10 +45,11 @@ Classification is imperfect, and worst early: measured 76.6% overall, but
 turn eight.
 
 `--open-decklist` hands training the opponent's true decklist instead.
-That is a **research setting only** — it makes results comparable to
-older determinized-search numbers, which were measured that way. It must
-not be used to train a bot intended for the server, which will not supply
-that information.
+Upstream now supports this on the server as an **opt-in** format
+(`discloseDeck`, disclosed only when both sides agree), so it is a real
+format rather than a lab setting — but the default is still full
+redaction, and disclosure needs the opponent to opt in too. Train the
+redacted bot first; a disclosed variant is a second bot.
 
 The engine enforces the boundary: bots choose an index from a
 hidden-information-safe legal-action list, so a bot cannot read state it

@@ -15,24 +15,30 @@ below showed a 50.7% best off a 46.9% mean.
 
 ## Constraints — violating these invalidates the work
 
-### The server does not tell you the opponent's deck
+### Deck disclosure is OPT-IN, and both sides must agree
 
-Upstream's `docs/bots.md`: registration declares your *own* deck, the
-heartbeat's `deck` field is your *own*, the observation has no archetype
-field, and bots must infer the opponent "solely from observable game
-actions."
+UPDATED 2026-08-22: upstream merged our open-decklist PR. `docs/bots.md`
+now documents `discloseDeck: true` on registration or heartbeat, with
+`opponentDeck` appearing in the observation **only when both sides opt
+in**. Default is still full redaction.
 
-So `--open-decklist` is a **research setting**. Training with it means
-training on a signal the deployed bot never receives. Measured cost of
-that mismatch: **~2.5 points** when an actor trained one way is evaluated
-the other way (classified 51.12% vs open 48.62%, 800 games each).
+So there are now two legitimate formats, and a bot must be trained for the
+one it will play:
 
-Deck classification from revealed cards is what deployment actually gets:
-**76.6% accurate overall, 0% on turn one** (nothing revealed yet), 53%
-turn two, ~90% by turn eight.
+* **Disclosed** (both opted in): use `--open-decklist`. The belief block
+  gets the opponent's true 60 cards.
+* **Redacted** (default, and whenever the opponent has not opted in):
+  train with classification. Accuracy from revealed cards is **76.6%
+  overall, 0% on turn one**, 53% turn two, ~90% by turn eight.
 
-→ A bot intended for the server must be trained with classification.
-ROADMAP #6 proposes fixing this upstream.
+The mismatch between them is measurable — **~2.5 points** when an actor
+trained one way is evaluated the other (classified 51.12% vs open 48.62%,
+800 games each) — so this is not a flag to flip casually at deploy time.
+A disclosed-format bot needs a disclosed-format training run.
+
+→ Since disclosure requires the OPPONENT to opt in too, and most will not,
+the redacted bot is still the one that plays most games. Train that one
+first; treat a disclosed variant as a second bot, not a replacement.
 
 ### The critic must never deploy
 

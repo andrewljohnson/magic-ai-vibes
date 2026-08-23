@@ -81,35 +81,19 @@ Four hypotheses tested and rejected. Next step is to **profile with
 because the concurrent-runs workaround already recovers the throughput —
 this only buys tidiness.
 
-## 6. Upstream PR: expose the opponent's deck as a flag — IN FLIGHT
+## 6. Upstream open-decklist flag — MERGED
 
-Worth proposing to [penta](https://github.com/lacker/penta). Today the bot
-protocol discloses no deck metadata — registration and the heartbeat both
-report *your own* deck, and the observation has no archetype field — so a
-bot must classify the opponent from revealed cards (76.6% accurate, 0% on
-turn one).
+Upstream took the PR. `docs/bots.md` now documents `discloseDeck` on
+registration/heartbeat and `opponentDeck` in the observation, gated on
+mutual opt-in.
 
-That makes open decklists a research setting we cannot deploy: an actor
-trained with the true decklist would be trained on information the server
-never provides, and the mismatch is measurable (~2.5 points when the input
-distribution is swapped at test time).
-
-A per-room or per-registration flag — "both sides' archetypes are
-disclosed" — would make it a real format rather than a lab condition.
-There is precedent in paper Magic: open decklists are standard at
-competitive tables, and the pool here is fifteen known archetypes anyway,
-so it leaks far less than it sounds. It would also make our numbers
-directly comparable to the older determinized-search results, which were
-all measured with decklists known.
-
-Shape of the proposal: an optional field on the bot registry entry and the
-hosted room, surfaced in the observation as the opponent's archetype name
-when both sides opted in. Default off, so nothing changes for existing bots.
-
-Status: a patch and PR text are being prepared against a scratch clone of
-upstream. It cannot be pushed from here — the only GitHub credential on
-this box is a deploy key scoped to *this* repo, which is deliberate.
-A human pushes it.
+What this unlocks, and what it does not: `--open-decklist` is now a real
+format rather than a lab condition, so a disclosed-format bot is
+deployable. But disclosure needs the OPPONENT to opt in as well, and most
+will not, so the redacted bot still plays the majority of games. Treat a
+disclosed variant as a SECOND bot to train later, not as a replacement —
+the two differ by ~2.5 points in either direction, so one actor cannot
+serve both formats well.
 
 ## 7. Deploy
 
