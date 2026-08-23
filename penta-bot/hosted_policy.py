@@ -703,7 +703,7 @@ class AacPolicy:
     """
 
     def __init__(self, actor_path, hidden=256, our_deck="Sligh",
-                 decklists_path="builtin-decklists.json"):
+                 decklists_path="builtin-decklists.json", engine=None):
         import numpy as _np
         here = os.path.dirname(os.path.abspath(__file__))
         path = (actor_path if os.path.isabs(actor_path)
@@ -718,12 +718,58 @@ class AacPolicy:
         self.decks = load_decklists(decklists_path)
         self.fallback = HostedPolicy(our_deck=our_deck) \
             if os.path.exists(os.path.join(here, "penta_net.npz")) else None
+        # A real engine lets us RECONSTRUCT the game from the observation and
+        # fork it, producing the same true afterstates the actor trained on.
+        # Without it we fall back to predict_afterstate, which measured 3.8%
+        # against the actor's real 51% -- the approximation erases the model.
+        self.engine = engine
+        self.reconstructed = 0
+        self.predicted = 0
 
     def _score(self, feats):
         import numpy as _np
         h = _np.tanh(_np.asarray(feats, dtype=_np.float64) @ self.w1.T
                      + self.b1)
         return h @ self.w2 + self.b2
+
+    def _true_afterstates(self, obs, raw_json, actions):
+        """Rebuild the real game from the observation, then fork per action.
+
+        This is what makes the hosted bot the same bot as the local one:
+        the actor is trained on observe(seat) AFTER applying its move to a
+        real engine state, and that is exactly what this produces.
+        Returns None if reconstruction is unavailable or fails, so the
+        caller can fall back rather than forfeit.
+        """
+        import json as _json
+        import random as _random
+        if self.engine is None or "checkpoint" not in obs:
+            return None
+        raw = raw_json if raw_json is not None else _json.dumps(obs)
+        opp = self.classify_opponent(obs) or self.our_deck
+        hidden = sample_hidden(obs, _random.Random(0xC0FFEE), self.decks,
+                               self.our_deck, opp)
+        if hidden is None:
+            return None
+        try:
+            world = self.engine.Game.from_observation(
+                raw, _json.dumps(hidden), 12345)
+        except Exception:
+            return None
+        seat = obs.get("seat")
+        rows = []
+        for a in actions:
+            try:
+                copy = world.clone()
+                copy.act(a["index"])
+                rows.append(self.extractor.features(
+                    _json.loads(copy.observe(seat))))
+            except Exception:
+                return None
+        return rows
+
+    def classify_opponent(self, obs):
+        return classify_opponent(self.decks, obs)
 
     def choose(self, obs, raw_json=None):
         import numpy as _np
@@ -736,10 +782,14 @@ class AacPolicy:
             if getattr(self.extractor, "belief", False):
                 belief_deck_context(self.extractor, self.decks, obs,
                                     self.our_deck)
-            rows = []
-            for a in actions:
-                after = HostedPolicy.predict_afterstate(self, obs, a)
-                rows.append(self.extractor.features(after))
+            rows = self._true_afterstates(obs, raw_json, actions)
+            if rows is not None:
+                self.reconstructed += 1
+            else:
+                self.predicted += 1
+                rows = [self.extractor.features(
+                    HostedPolicy.predict_afterstate(self, obs, a))
+                    for a in actions]
             scores = self._score(_np.stack(rows))
             return actions[int(_np.argmax(scores))]["index"]
         except Exception:
