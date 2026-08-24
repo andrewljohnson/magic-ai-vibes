@@ -375,9 +375,24 @@ not the lever it looks like -- 4x the cost moved the target closer to
 where the policy already was. (Mean decision offers only ~5 actions, so
 32 sims is already ~6 visits per action.)
 
-→ Do not raise `--iters` expecting a stronger operator; that was tested.
-The gap to close is distillation (the policy reaching its own search's
-26%) and the leaf evaluator's ability to separate siblings.
+→ **SUPERSEDED 2026-08-23.** Everything above was measured with the
+SATURATED value head, where extra simulations could only re-confirm the
+prior -- of course more of them did not help. With the sigmoid fixed,
+search scales with budget again, 120 games each:
+
+| sims | score |
+|---|---|
+| 1 | 35.8% ± 4.4 |
+| 32 | 41.7% ± 4.5 |
+| 128 | **46.7% ± 4.6** |
+
+Each 4x in budget buys about 5 points, monotonically. So DO raise the
+search budget -- training targets at 32 sims are much weaker than they
+could be, and a deployed bot should search as hard as its clock allows.
+
+The lesson worth keeping is the one about the measurement, not the number:
+a conclusion measured through a broken component describes the breakage,
+not the question.
 
 ### The dominance prune costs 6.4x in search and buys nothing
 

@@ -178,7 +178,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--rounds", type=int, default=200)
     ap.add_argument("--games", type=int, default=48, help="games per round")
-    ap.add_argument("--iters", type=int, default=32, help="search iterations")
+    ap.add_argument("--iters", type=int, default=32,
+                    help="search iterations during SELF-PLAY (target quality)")
+    ap.add_argument("--gate-iters", type=int, default=0,
+                    help="search iterations at the GATE; 0 = same as "
+                         "--iters. Held at 32 while training deeper keeps "
+                         "gate numbers comparable with every earlier run, "
+                         "and keeps the gate cheap.")
     ap.add_argument("--threads", type=int, default=12)
     ap.add_argument("--hidden", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -260,7 +266,8 @@ def main():
     export_value(value, val_path)
 
     log(f"AZ cold start: rounds={args.rounds} games/round={args.games} "
-        f"iters={args.iters} hidden={args.hidden} "
+        f"iters={args.iters} gate_iters={args.gate_iters or args.iters} "
+        f"hidden={args.hidden} "
         f"root_noise={args.root_noise} buffer={args.buffer_rounds} "
         f"init={args.init_from or 'random'} "
         f"deck_weight={args.deck_weight} trunc={args.truncation} "
@@ -574,7 +581,8 @@ def main():
                                mine_p1, 900_000 + g))
                 gopp.append(opp)
             w, d, f, cap, per = spz.az_gate(
-                catalog, val_path, pol_path, args.iters, 1.5,
+                catalog, val_path, pol_path,
+                args.gate_iters or args.iters, 1.5,
                 "builtin-decklists.json", gspecs, args.threads, 600, True)
             rate = (w + 0.5 * d) / max(f, 1)
             se = (rate * (1 - rate) / max(f, 1)) ** 0.5
