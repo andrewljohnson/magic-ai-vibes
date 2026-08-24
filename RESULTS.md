@@ -317,7 +317,8 @@ and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
 of decisions blind -- roughly five times the true saturation. The
 conclusion survived; the numbers did not.
 
-### Fixing the value head revived search: +0.7 points -> +13.3
+### Fixing the value head revived search: +0.7 points -> +13.3, and the
+### gate went 44.0% -> 49.2%
 
 Same net, same 120 games, only the search budget varies. Measured after
 `--value-smoothing 0.05`:
@@ -338,6 +339,12 @@ balance was never the constraint. The saturated sigmoid was.
 
 → **The deployed bot must use search.** ROADMAP B estimated ~+2 points
 from deploying search; on a working value head it is +13.
+
+**The training gate followed immediately.** Best before the fix was 44.0%;
+the first gate after it was **49.2% ± 2.9** (147W 1D 152L / 300) at round
+39 -- at parity within noise, from a pure from-scratch self-play build with
+no handcrafted bootstrapping. One squashing function was worth ~9 points
+of playing strength.
 
 ### How strong is the AZ policy improvement operator? ~6 points
 
@@ -428,7 +435,8 @@ The strength curve has never plateaued.
 | stage | win rate vs the built-in bot |
 |---|---|
 | **PARITY with the built-in bot (the actual bar)** | **50.0%** |
-| pure AZ self-play, ~17k games, 0 capped | 37–43% (losing) |
+| **pure AZ self-play, after the value-head fix** | **49.2% ±2.9** |
+| pure AZ self-play, before that fix | 37–43% |
 | 256-net + belief features (old champion) | 45.0% (200 games, ±3.5) |
 | native loop, 100k games | 47.5% mean / 49.9% best (32 evals) |
 | **same actor, 800-game evaluation** | **51.1% ±1.8** |
