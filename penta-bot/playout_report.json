@@ -1,29 +1,45 @@
 {
  "net": "deploy_v1",
  "iters": 32,
- "games": 14,
+ "games": 30,
  "deck": "Sligh",
  "record": {
-  "win": 6,
-  "loss": 8,
+  "win": 15,
+  "loss": 15,
   "other": 0
  },
- "decisions": 2900,
+ "decisions": 7020,
  "flags": {
-  "passed_main_holding_sorcery": 26,
-  "skipped_land_drop": 5,
-  "declined_all_attacks": 4,
-  "x_spell_cast_for_zero": 1,
+  "land_played_after_combat": 54,
+  "passed_main_holding_sorcery": 64,
+  "skipped_land_drop": 18,
+  "declined_all_attacks": 7,
+  "x_spell_cast_for_zero": 2,
   "damage_pointed_at_self": 1
  },
  "per_game_rate": {
-  "passed_main_holding_sorcery": 1.86,
-  "skipped_land_drop": 0.36,
-  "declined_all_attacks": 0.29,
+  "land_played_after_combat": 1.8,
+  "passed_main_holding_sorcery": 2.13,
+  "skipped_land_drop": 0.6,
+  "declined_all_attacks": 0.23,
   "x_spell_cast_for_zero": 0.07,
-  "damage_pointed_at_self": 0.07
+  "damage_pointed_at_self": 0.03
  },
  "examples": {
+  "land_played_after_combat": [
+   "game 0 T1 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 0 T11 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 0 T13 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 1 T10 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 1 T22 PostcombatMain: PlayLand Strip Mine in postcombat main, though it was legal precombat",
+   "game 2 T5 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 2 T7 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 3 T4 PostcombatMain: PlayLand Mishra's Factory in postcombat main, though it was legal precombat",
+   "game 3 T6 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 3 T10 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 4 T5 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat",
+   "game 4 T7 PostcombatMain: PlayLand Mountain in postcombat main, though it was legal precombat"
+  ],
   "passed_main_holding_sorcery": [
    "game 0 T7 PrecombatMain: passed main holding Cast Black Vise (1 untapped lands)",
    "game 0 T11 PrecombatMain: passed main holding Cast Black Vise (1 untapped lands)",
@@ -43,16 +59,27 @@
    "game 2 T3: could play a land, did not",
    "game 9 T6: could play a land, did not",
    "game 9 T8: could play a land, did not",
-   "game 10 T9: could play a land, did not"
+   "game 10 T9: could play a land, did not",
+   "game 15 T30: could play a land, did not",
+   "game 16 T13: could play a land, did not",
+   "game 16 T15: could play a land, did not",
+   "game 18 T12: could play a land, did not",
+   "game 19 T14: could play a land, did not",
+   "game 22 T7: could play a land, did not",
+   "game 22 T9: could play a land, did not"
   ],
   "declined_all_attacks": [
    "game 0 T7: had attackers available, attacked with none",
    "game 0 T9: had attackers available, attacked with none",
    "game 4 T13: had attackers available, attacked with none",
-   "game 4 T16: had attackers available, attacked with none"
+   "game 4 T16: had attackers available, attacked with none",
+   "game 14 T7: had attackers available, attacked with none",
+   "game 14 T9: had attackers available, attacked with none",
+   "game 28 T9: had attackers available, attacked with none"
   ],
   "x_spell_cast_for_zero": [
-   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) -- X=0 deals nothing, card wasted"
+   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) -- X=0 deals nothing, card wasted",
+   "game 29 T18 PrecombatMain: Cast Fireball -> player p1 -- X=0 deals nothing, card wasted"
   ],
   "damage_pointed_at_self": [
    "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) [own face]"

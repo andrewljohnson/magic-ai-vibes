@@ -317,6 +317,42 @@ and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
 of decisions blind -- roughly five times the true saturation. The
 conclusion survived; the numbers did not.
 
+### What the bot actually does wrong (watch it play, not just gate it)
+
+`playout_log.py` replays real games move by move and flags decisions that
+look wrong. 30 games with the deployed net, 7020 decisions, 15W 15L:
+
+| severity | flag | rate |
+|---|---|---|
+| bug | X spell cast for X=0 | 0.07/game |
+| bug | damage aimed at our own side | 0.03/game |
+| suspect | passed main holding a sorcery-speed card | 2.13/game |
+| **suspect** | **land played after combat, though legal precombat** | **1.80/game** |
+| suspect | land drop skipped entirely | 0.60/game |
+| judgement | declined every attack | 0.23/game |
+
+The two outright bugs are rare but unambiguous. `Cast Fireball -> player
+p2 (US)` with X=0: life 17 -> 17, no damage, card gone. The same game plays
+`Fireball X=3 -> player p1` correctly six turns later, so this is a
+decision failure and not a missing card implementation.
+
+**The systematic one is land sequencing.** Nearly twice a game the bot
+plays its land in PostcombatMain when the same drop was legal precombat,
+so that mana cannot be spent on its own main phase or in combat. Add the
+0.60/game skipped drops and land sequencing is the single most common
+thing it gets wrong.
+
+→ There is a likely mechanism, and it connects to the value head. Playing
+a land precombat versus postcombat produces almost the same afterstate --
+the land is on the battlefield either way, only the step differs. A value
+head that cannot separate siblings (see the sigmoid entry above, still
+38.6% of decisions "blind" after the fix) has no way to prefer one, and
+search then has nothing to work with. Sequencing errors are exactly what a
+flat leaf evaluator should produce.
+
+→ Watching games is cheap and finds things no aggregate can. A 54% win
+rate and "sits on a free Mox for six turns" are both true of this net.
+
 ### The gate is EXACTLY deterministic — and that killed my own fix
 
 Re-gating a frozen checkpoint reproduced its number to the game:
