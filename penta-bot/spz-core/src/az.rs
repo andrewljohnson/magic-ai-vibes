@@ -266,6 +266,12 @@ mod prof_tests {
                  total as f64 / 1e9, ep.decisions, ep.records.len());
         println!("per searched decision: {:.0} ms",
                  total as f64 / 1e6 / ep.records.len().max(1) as f64);
+        let (plies, iters_ran) = crate::mcts::prof::walk();
+        let forced = crate::mcts::prof::forced_count();
+        println!("  plies {} over {} iterations -> {:.1} plies/iteration",
+                 plies, iters_ran, plies as f64 / iters_ran.max(1) as f64);
+        println!("  of those plies, {} ({:.0}%) had exactly ONE legal action",
+                 forced, 100.0 * forced as f64 / plies.max(1) as f64);
         let (calls, rows) = crate::mcts::prof::counts();
         println!("  prior batches: {}, action-rows: {}, rows/batch: {:.1}",
                  calls, rows, rows as f64 / calls.max(1) as f64);

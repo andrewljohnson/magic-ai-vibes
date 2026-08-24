@@ -58,6 +58,21 @@ pub mod prof {
     pub const NAMES: [&str; N] =
         ["determinize", "available", "action_prior", "opp_greedy", "leaf_eval",
          "observe", "legal_actions", "apply"];
+    // How many PLIES a search walks in total, and how many iterations it
+    // ran. Cost per decision is iterations x plies-per-iteration, and a
+    // per-decision timing cannot tell those apart.
+    thread_local! {
+        static PLIES: Cell<u64> = const { Cell::new(0) };
+        static ITERS: Cell<u64> = const { Cell::new(0) };
+    }
+    pub fn ply() { PLIES.with(|c| c.set(c.get() + 1)); }
+    thread_local! { static FORCED: Cell<u64> = const { Cell::new(0) }; }
+    pub fn forced() { FORCED.with(|c| c.set(c.get() + 1)); }
+    pub fn forced_count() -> u64 { FORCED.with(Cell::get) }
+    pub fn iter_() { ITERS.with(|c| c.set(c.get() + 1)); }
+    pub fn walk() -> (u64, u64) {
+        (PLIES.with(Cell::get), ITERS.with(Cell::get))
+    }
     thread_local! {
         static ACC: [Cell<u64>; N] = Default::default();
     }
@@ -395,6 +410,7 @@ impl<'a> Ismcts<'a> {
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
         let mut depth = 0usize;
+        #[cfg(feature = "prof")] prof::iter_();
         let leaf: f64;
         loop {
             // Bound EVERY ply, not just our branching nodes. Three arms
@@ -407,6 +423,7 @@ impl<'a> Ismcts<'a> {
             // hang before decision 25 at iters=8, while iters=4 finished
             // 600 decisions in 0.4s.
             depth += 1;
+            #[cfg(feature = "prof")] prof::ply();
             if depth > self.cfg.max_depth {
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
@@ -431,6 +448,7 @@ impl<'a> Ismcts<'a> {
             // to observe rather than making it enumerate again.
             let (raw, quick) = timed!(6, world.legal_and_protocol_actions(seat));
             if quick.len() == 1 {
+                #[cfg(feature = "prof")] prof::forced();
                 let _ = timed!(7, world.apply(seat, quick[0].clone()));
                 continue;
             }
