@@ -543,13 +543,16 @@ function draw(){
   // Default to runs that are actually training. Finished and stopped runs
   // accumulate fast (one per experiment arm) and drown the live ones --
   // 19 runs on an 8-hue chart repeats colours and buries what matters.
-  const all=DATA.runs.filter(r=>r.gates.length);   // the TABLE shows every run
+  // Runs with no gate yet still belong in the table and the live panel;
+  // only the CHART needs gate points to plot.
+  const all=DATA.runs.filter(r=>r.gates.length||r.live);
   // The CHART shows only what is training. Finished and stopped runs pile
   // up one per experiment arm, and 19 series on an 8-hue palette repeats
   // colours and buries the runs that matter. Falls back to the most recent
   // runs when nothing is live, so the chart is never blank.
-  const chartable=(()=>{const live=all.filter(r=>!r.done&&!r.stale);
-    return live.length?live:all;})();
+  const chartable=(()=>{const plottable=all.filter(r=>r.gates.length);
+    const live=plottable.filter(r=>!r.done&&!r.stale);
+    return live.length?live:plottable;})();
   const runs=chartable.slice().sort((a,b)=>b.games-a.games).slice(0,CAP);
   const charted=new Set(runs.map(r=>r.name));
   const svg=document.getElementById("chart");
@@ -676,7 +679,10 @@ function draw(){
       <td class="l cfg">${r.done?"done — "+r.done
         :r.stale?`stopped — idle ${r.idle_min}m`+(r.cadence_min?` (gates ~${r.cadence_min}m)`:"")
         :(r.config||"").replace(/^games=\S+ /,"").slice(0,58)}</td></tr>`;}).join("");
-  now(runs);
+  // The FULL list, not the charted subset. `runs` above is filtered to
+  // runs that have gated, and a run that has not gated yet is exactly the
+  // one this panel exists to show.
+  now(DATA.runs);
   panels(runs);
   grid(runs);
   document.getElementById("foot").textContent =
