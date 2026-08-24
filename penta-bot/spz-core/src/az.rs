@@ -247,7 +247,8 @@ mod prof_tests {
                 crate::mcts::OpponentModel::Handcrafted
             } else { crate::mcts::OpponentModel::Greedy },
             max_decisions: MAX_DECISIONS,
-            max_depth: 400,
+            max_depth: std::env::var("AZ_DEPTH").ok()
+                .and_then(|v| v.parse().ok()).unwrap_or(400),
             root_noise_frac: std::env::var("AZ_NOISE").ok()
                 .and_then(|v| v.parse().ok()).unwrap_or(0.0),
             root_noise_alpha: 1.0,

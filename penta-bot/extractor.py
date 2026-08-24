@@ -133,7 +133,16 @@ def pinned_catalog():
     newer engines), else falls back to importing the pinned module.
     Hosted bots featurize protocol-18 observations against this exact
     layout without importing any engine at all."""
-    snapshot = os.path.join(LOCAL_DIR, "pinned-catalog.json")
+    # PENTA_CATALOG selects the snapshot. The protocol-29 upgrade grew the
+    # catalog from 244 cards to 8862 and its LEGAL set from 128 to 981;
+    # feature slots come from the sorted legal set, so
+    # pinned-catalog-p29.json pins legality back to the original 128 and
+    # reproduces the identical layout (action_dim 184 either way). That is
+    # what lets the trained nets survive the engine upgrade.
+    snapshot = os.environ.get("PENTA_CATALOG") or os.path.join(
+        LOCAL_DIR, "pinned-catalog.json")
+    if not os.path.isabs(snapshot):
+        snapshot = os.path.join(LOCAL_DIR, snapshot)
     if os.path.exists(snapshot):
         with open(snapshot) as f:
             return json.load(f)
