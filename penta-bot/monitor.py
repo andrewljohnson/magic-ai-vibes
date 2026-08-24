@@ -311,6 +311,66 @@ def parse_log(path):
     }
 
 
+def playout_report():
+    """What playout_log.py found watching the bot actually play.
+
+    A gate reports one number per 300 games. It cannot tell you the bot is
+    pointing Fireball at its own face or sitting on a free Mox for six
+    turns -- those are obvious in one game and invisible in an aggregate.
+    """
+    path = os.path.join(HERE, "playout_report.json")
+    try:
+        with open(path) as f:
+            rep = json.load(f)
+    except (OSError, ValueError):
+        return {"available": False}
+    rep["available"] = True
+    rep["mtime"] = os.path.getmtime(path)
+    rep["meta"] = {k: list(v) for k, v in FLAG_META.items()}
+    rep["transcripts"] = sorted(
+        os.path.basename(p) for p in
+        glob.glob(os.path.join(HERE, "playouts", "game-*.txt")))
+    return rep
+
+
+# How bad is each flag, and what does it mean? Severity drives the colour:
+# "bug" is never correct play, "suspect" is usually wrong, "judgement" is
+# often defensible and reported only so the RATE can be watched.
+FLAG_META = {
+    "x_spell_cast_for_zero": (
+        "bug", "X spell cast for X=0",
+        "An X spell cast with X=0 deals nothing and the card is spent. "
+        "There is no board state where this is correct."),
+    "damage_pointed_at_self": (
+        "bug", "Damage aimed at our own side",
+        "A damage spell or ability targeting our own face or our own "
+        "permanent. Occasionally correct in real Magic (killing our own "
+        "creature in response to something worse), so read the example "
+        "before believing it -- but with X=0 at our own face it is simply "
+        "a thrown-away card."),
+    "passed_main_holding_sorcery": (
+        "suspect", "Passed main phase holding a sorcery-speed card",
+        "Instants are excluded: holding one up is ordinary play. This "
+        "counts only cards there is no reason to hold past your own main "
+        "phase, once per turn. Repeatedly declining a FREE artifact (Mox "
+        "Ruby) is the clearest case."),
+    "land_played_after_combat": (
+        "suspect", "Land played after combat when it was legal before",
+        "Mana from a postcombat land cannot be spent precombat or during "
+        "combat. When the same drop was offered precombat, deferring it "
+        "only removes options."),
+    "skipped_land_drop": (
+        "suspect", "Land drop skipped entirely",
+        "Had a land in hand and the drop available, and ended the turn "
+        "without playing one. Sometimes correct (holding a land against "
+        "discard, or to represent a trick) but rarely."),
+    "declined_all_attacks": (
+        "judgement", "Declined every attack",
+        "Attackers were available and none were declared. Often correct "
+        "against a bigger board -- watch the rate, not the instance."),
+}
+
+
 def collect():
     runs = []
     alive = live_prefixes()
@@ -419,6 +479,12 @@ never a single gate.</p>
   <div class="grid" id="panels"></div>
   <p class="foot">Same colours as above. Each panel has its own y scale —
   never a shared one, they measure different things.</p>
+</div>
+<div class="card"><h2>How it actually plays
+  <a href="/playouts" style="font-size:13px;font-weight:400">open &rarr;</a></h2>
+  <p class="foot" style="margin:0">Move-by-move review of real games, with
+  the misplays it found — a win rate cannot tell you the bot aimed Fireball
+  at its own face.</p>
 </div>
 <div class="card"><h2>Win rate by opponent deck</h2>
   <p class="foot" style="margin:0 0 10px">Our bot pilots <b>Sligh</b> in
@@ -692,11 +758,173 @@ matchMedia("(prefers-color-scheme:dark)").addEventListener("change",draw);
 """
 
 
+PLAYOUT_PAGE = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>penta bot — how it actually plays</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f7f7f5; --surface-1:#fcfcfb; --border:#e2e1dc;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#87867f;
+  --grid:#ebeae5; --rule:#c9c8c1;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4;
+  --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  color-scheme:dark;
+  --bg:#111110; --surface-1:#1a1a19; --border:#333330;
+  --text-primary:#fff; --text-secondary:#c3c2b7; --text-muted:#8f8e85;
+  --grid:#26262433; --rule:#44443f;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181;
+  --s6:#008300; --s7:#9085e9; --s8:#e66767;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text-primary);
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  padding:24px}
+.wrap{max-width:1100px;margin:0 auto}
+h1{font-size:18px;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--text-secondary);font-size:13px;margin:0 0 20px}
+.tiles{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.tile{background:var(--surface-1);border:1px solid var(--border);
+  border-radius:10px;padding:12px 16px;min-width:150px}
+.tile .k{color:var(--text-muted);font-size:11px;text-transform:uppercase;
+  letter-spacing:.06em}
+.tile .v{font-size:26px;font-variant-numeric:tabular-nums;
+  letter-spacing:-.02em;margin-top:2px}
+.tile .n{color:var(--text-secondary);font-size:12px}
+.card{background:var(--surface-1);border:1px solid var(--border);
+  border-radius:10px;padding:16px;margin-bottom:20px}
+.card h2{font-size:13px;margin:0 0 12px;color:var(--text-secondary);
+  font-weight:600;letter-spacing:.02em}
+.chartbox{overflow-x:auto}
+svg{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px;
+  color:var(--text-secondary);font-size:12px}
+.chip{width:10px;height:10px;border-radius:3px;flex:none}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:right;padding:7px 10px;border-bottom:1px solid var(--border);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+th{color:var(--text-muted);font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.05em}
+td.l,th.l{text-align:left}
+tr:last-child td{border-bottom:none}
+.name{display:inline-flex;align-items:center;gap:7px}
+.cfg{color:var(--text-muted);font-size:11px}
+.dead{color:var(--text-muted)}
+.tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--surface-1);border:1px solid var(--rule);border-radius:8px;
+  padding:8px 10px;font-size:12px;box-shadow:0 4px 14px #0002;z-index:9}
+.tip b{font-weight:600}
+.tip .row{display:flex;align-items:center;gap:6px;justify-content:space-between}
+.foot{color:var(--text-muted);font-size:12px;margin-top:4px}
+.tog{display:inline-flex;align-items:center;gap:7px;margin:0 0 16px;
+  color:var(--text-secondary);font-size:12px;cursor:pointer;user-select:none}
+.tog input{cursor:pointer}
+.empty{color:var(--text-muted);font-size:13px;padding:6px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:16px}
+.panel h3{font-size:12px;margin:0 0 1px;color:var(--text-primary);
+  font-weight:600}
+.panel .why{font-size:11px;color:var(--text-muted);margin:0 0 6px;
+  min-height:28px}
+.mu{border-collapse:collapse;font-size:12px}
+.mu td,.mu th{padding:5px 8px;white-space:nowrap}
+.mu th{color:var(--text-muted);font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.04em;text-align:left}
+.mu td.v{text-align:right;font-variant-numeric:tabular-nums;
+  border-radius:4px;color:var(--text-primary)}
+</style>
+<style>
+.sev{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;
+  font-weight:600;letter-spacing:.02em}
+.sev-bug{background:#e3494822;color:var(--s8)}
+.sev-suspect{background:#eda10022;color:var(--s4)}
+.sev-judgement{background:#87867f22;color:var(--text-muted)}
+.ex{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;
+  color:var(--text-secondary);margin:2px 0 2px 0;white-space:pre-wrap}
+.finding{border-top:1px solid var(--border);padding:12px 0}
+.finding:first-child{border-top:0}
+.rate{font-variant-numeric:tabular-nums;font-weight:600}
+</style>
+</head><body>
+<div class="wrap">
+<h1>How the bot actually plays <a href="/" style="font-size:13px;font-weight:400">&larr; training monitor</a></h1>
+<p class="foot" id="sub"></p>
+
+<div class="card"><h2>Behaviour flags</h2>
+  <p class="foot" style="margin:0 0 10px">
+  A gate reports one number per 300 games. It cannot tell you the bot is
+  pointing Fireball at its own face or sitting on a free Mox for six turns.
+  These come from <code>playout_log.py</code>, which replays games move by
+  move and marks decisions that look wrong.
+  <b>Rates matter more than instances</b> — several of these are defensible
+  Magic once, and a defect every game.</p>
+  <div id="flags"></div>
+</div>
+
+<div class="card"><h2>Transcripts</h2>
+  <p class="foot" style="margin:0 0 10px">Full move-by-move logs, in
+  <code>penta-bot/playouts/</code>. Each line is one of OUR decisions: turn,
+  step, both life totals, how many options were offered, and what was
+  chosen.</p>
+  <div id="files" class="foot"></div>
+</div>
+</div>
+<script>
+const SEV_ORDER={bug:0,suspect:1,judgement:2};
+async function load(){
+  const r=await fetch("/playout-data",{cache:"no-store"});
+  const d=await r.json();
+  const sub=document.getElementById("sub");
+  if(!d.available){
+    sub.textContent="No playout report yet — run playout_log.py.";
+    return;
+  }
+  const rec=d.record||{};
+  sub.innerHTML=`net <b>${d.net}</b> · ${d.iters} search sims · `+
+    `${d.games} games (${rec.win||0}W ${rec.loss||0}L${rec.other?` ${rec.other} other`:""}) · `+
+    `${(d.decisions||0).toLocaleString()} decisions · `+
+    `generated ${new Date(d.mtime*1000).toLocaleString()}`;
+  const meta=d.meta||{};
+  const rows=Object.entries(d.flags||{}).map(([k,v])=>{
+    const m=meta[k]||["judgement",k,""];
+    return {k,v,rate:(d.per_game_rate||{})[k]||0,sev:m[0],title:m[1],why:m[2],
+            ex:(d.examples||{})[k]||[]};
+  }).sort((a,b)=>(SEV_ORDER[a.sev]-SEV_ORDER[b.sev])||(b.rate-a.rate));
+  document.getElementById("flags").innerHTML = rows.length ? rows.map(f=>`
+    <div class="finding">
+      <div><span class="sev sev-${f.sev}">${f.sev}</span>
+        <b>${f.title}</b>
+        &nbsp;<span class="rate">${f.rate.toFixed(2)}/game</span>
+        <span class="foot">(${f.v} in ${d.games} games)</span></div>
+      <p class="foot" style="margin:4px 0 6px">${f.why}</p>
+      ${f.ex.map(e=>`<div class="ex">${e.replace(/</g,"&lt;")}</div>`).join("")}
+    </div>`).join("")
+    : `<p class="empty">Nothing flagged.</p>`;
+  document.getElementById("files").innerHTML =
+    (d.transcripts||[]).map(t=>`playouts/${t}`).join("<br>") ||
+    "none written";
+}
+load(); setInterval(load, 30000);
+</script>
+</body></html>
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith("/data"):
             body = json.dumps(collect()).encode()
             ctype = "application/json"
+        elif self.path.startswith("/playout-data"):
+            body = json.dumps(playout_report()).encode()
+            ctype = "application/json"
+        elif self.path.startswith("/playouts"):
+            body = PLAYOUT_PAGE.encode()
+            ctype = "text/html; charset=utf-8"
         elif self.path in ("/", "/index.html"):
             body = PAGE.encode()
             ctype = "text/html; charset=utf-8"

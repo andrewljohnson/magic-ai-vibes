@@ -1,0 +1,56 @@
+=== game 6: Sligh (us, p1) vs GR Aggro ===
+  T1 Upkeep [our turn] life [20, 20] | 2 options -> TakeMulligan
+  T1 Upkeep [our turn] life [20, 20] | 2 options -> TakeMulligan
+  T1 Upkeep [our turn] life [20, 20] | 2 options -> KeepHand
+  T1 Upkeep [our turn] life [20, 20] | 21 options -> BottomCards
+  T1 PrecombatMain [our turn] life [20, 20] | 3 options -> PassPriority
+  T1 PostcombatMain [our turn] life [20, 20] | 3 options -> PlayLand Mountain
+  T1 PostcombatMain [our turn] life [20, 20] | 4 options -> PassPriority
+  T1 End [our turn] life [20, 20] | 4 options -> PassPriority
+  T2 Upkeep [their turn] life [20, 20] | 4 options -> Cast Lightning Bolt -> player p2
+  T3 Upkeep [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 Draw [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 PrecombatMain [our turn] life [20, 17] | 3 options -> PassPriority
+  T3 BeginningOfCombat [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 DeclareAttackers [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 DeclareBlockers [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 CombatDamage [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 EndOfCombat [our turn] life [20, 17] | 2 options -> PassPriority
+  T3 PostcombatMain [our turn] life [20, 17] | 3 options -> PlayLand Mountain
+  T3 PostcombatMain [our turn] life [20, 17] | 5 options -> Cast Ankh of Mishra
+  T5 Upkeep [our turn] life [18, 15] | 3 options -> PassPriority
+  T5 Draw [our turn] life [18, 15] | 3 options -> PassPriority
+  T5 PrecombatMain [our turn] life [18, 15] | 26 options -> Cast Ironclaw Orcs
+  T6 DeclareBlockers [their turn] life [18, 15] | 2 options -> Block Llanowar Elves with Ironclaw Orcs
+  T7 Upkeep [our turn] life [16, 15] | 3 options -> PassPriority
+  T7 Draw [our turn] life [16, 15] | 3 options -> PassPriority
+  T7 PrecombatMain [our turn] life [16, 15] | 33 options -> Cast Fireball X=1 -> player p2
+  T7 PrecombatMain [our turn] life [16, 14] | 2 options -> PassPriority
+  T7 DeclareAttackers [our turn] life [16, 14] | 2 options -> Attack with Ironclaw Orcs -> p2
+  T7 PostcombatMain [our turn] life [16, 14] | 2 options -> PlayLand Mountain
+  T7 PostcombatMain [our turn] life [16, 14] | 2 options -> PassPriority
+  T7 PostcombatMain [our turn] life [14, 14] | 2 options -> PassPriority
+  T7 End [our turn] life [14, 14] | 2 options -> PassPriority
+  T8 Upkeep [their turn] life [14, 14] | 2 options -> PassPriority
+  T8 Draw [their turn] life [14, 14] | 2 options -> PassPriority
+  T8 PrecombatMain [their turn] life [14, 14] | 2 options -> PassPriority
+  T8 PrecombatMain [their turn] life [11, 14] | 2 options -> PassPriority
+  T8 PrecombatMain [their turn] life [11, 12] | 2 options -> PassPriority
+  T8 BeginningOfCombat [their turn] life [11, 12] | 2 options -> PassPriority
+  T8 BeginningOfCombat [their turn] life [11, 12] | 2 options -> PassPriority
+  T8 DeclareAttackers [their turn] life [11, 12] | 2 options -> PassPriority
+  T8 DeclareBlockers [their turn] life [11, 12] | 2 options -> PassPriority
+  T8 CombatDamage [their turn] life [3, 12] | 2 options -> PassPriority
+  T8 EndOfCombat [their turn] life [3, 12] | 2 options -> PassPriority
+  T8 PostcombatMain [their turn] life [3, 11] | 2 options -> PassPriority
+  T8 End [their turn] life [3, 11] | 2 options -> PassPriority
+  T9 Upkeep [our turn] life [3, 11] | 4 options -> PassPriority
+  T9 Draw [our turn] life [3, 11] | 4 options -> PassPriority
+  T9 PrecombatMain [our turn] life [3, 11] | 6 options -> PlayLand Mountain
+  T9 PrecombatMain [our turn] life [3, 11] | 5 options -> PassPriority
+  T9 PrecombatMain [our turn] life [1, 11] | 6 options -> Tap Mountain for mana
+  T9 PrecombatMain [our turn] life [1, 11] | 5 options -> Tap Mountain for mana
+  T9 PrecombatMain [our turn] life [1, 11] | 4 options -> Tap Mountain for mana
+  T9 PrecombatMain [our turn] life [1, 11] | 3 options -> Tap Mountain for mana
+  T9 PrecombatMain [our turn] life [1, 11] | 2 options -> PassPriority
+=== result: LOSS after 125 decisions ===

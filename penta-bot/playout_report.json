@@ -1,0 +1,61 @@
+{
+ "net": "deploy_v1",
+ "iters": 32,
+ "games": 14,
+ "deck": "Sligh",
+ "record": {
+  "win": 6,
+  "loss": 8,
+  "other": 0
+ },
+ "decisions": 2900,
+ "flags": {
+  "passed_main_holding_sorcery": 26,
+  "skipped_land_drop": 5,
+  "declined_all_attacks": 4,
+  "x_spell_cast_for_zero": 1,
+  "damage_pointed_at_self": 1
+ },
+ "per_game_rate": {
+  "passed_main_holding_sorcery": 1.86,
+  "skipped_land_drop": 0.36,
+  "declined_all_attacks": 0.29,
+  "x_spell_cast_for_zero": 0.07,
+  "damage_pointed_at_self": 0.07
+ },
+ "examples": {
+  "passed_main_holding_sorcery": [
+   "game 0 T7 PrecombatMain: passed main holding Cast Black Vise (1 untapped lands)",
+   "game 0 T11 PrecombatMain: passed main holding Cast Black Vise (1 untapped lands)",
+   "game 0 T13 PrecombatMain: passed main holding Cast Black Vise (1 untapped lands)",
+   "game 1 T12 PrecombatMain: passed main holding Cast Mox Ruby (1 untapped lands)",
+   "game 1 T14 PrecombatMain: passed main holding Cast Mox Ruby (0 untapped lands)",
+   "game 1 T16 PrecombatMain: passed main holding Cast Mox Ruby (0 untapped lands)",
+   "game 1 T18 PrecombatMain: passed main holding Cast Chaos Orb; Cast Mox Ruby (2 untapped lands)",
+   "game 2 T5 PostcombatMain: passed main holding Cast Fireball; Cast Fireball -> player p1 (US); Cast Fireball -> player p2 (1 untapped lands)",
+   "game 2 T7 PrecombatMain: passed main holding Cast Fireball; Cast Fireball -> player p1 (US); Cast Fireball -> player p2 (1 untapped lands)",
+   "game 2 T9 PrecombatMain: passed main holding Cast Fireball; Cast Fireball -> player p1 (US); Cast Fireball -> player p2 (1 untapped lands)",
+   "game 4 T7 PostcombatMain: passed main holding Cast Goblins of the Flarg (1 untapped lands)",
+   "game 5 T10 PostcombatMain: passed main holding Cast Goblin Balloon Brigade; Cast Goblin Balloon Brigade (1 untapped lands)"
+  ],
+  "skipped_land_drop": [
+   "game 0 T7: could play a land, did not",
+   "game 2 T3: could play a land, did not",
+   "game 9 T6: could play a land, did not",
+   "game 9 T8: could play a land, did not",
+   "game 10 T9: could play a land, did not"
+  ],
+  "declined_all_attacks": [
+   "game 0 T7: had attackers available, attacked with none",
+   "game 0 T9: had attackers available, attacked with none",
+   "game 4 T13: had attackers available, attacked with none",
+   "game 4 T16: had attackers available, attacked with none"
+  ],
+  "x_spell_cast_for_zero": [
+   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) -- X=0 deals nothing, card wasted"
+  ],
+  "damage_pointed_at_self": [
+   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) [own face]"
+  ]
+ }
+}

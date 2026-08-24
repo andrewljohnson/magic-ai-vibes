@@ -1,0 +1,156 @@
+=== game 7: Sligh (us, p2) vs White Weenie ===
+  T1 Upkeep [their turn] life [20, 20] | 2 options -> KeepHand
+  T2 PrecombatMain [our turn] life [20, 20] | 5 options -> PlayLand Mishra's Factory
+  T2 PrecombatMain [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 BeginningOfCombat [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 DeclareAttackers [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 DeclareBlockers [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 CombatDamage [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 EndOfCombat [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 PostcombatMain [our turn] life [20, 20] | 3 options -> PassPriority
+  T2 End [our turn] life [20, 20] | 3 options -> PassPriority
+  T3 Upkeep [their turn] life [20, 20] | 3 options -> PassPriority
+  T3 Draw [their turn] life [20, 20] | 3 options -> Tap Mishra's Factory for mana
+  T3 Draw [their turn] life [20, 20] | 2 options -> Activate Mishra's Factory
+  T4 PrecombatMain [our turn] life [20, 20] | 4 options -> PlayLand Mishra's Factory
+  T4 PrecombatMain [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 BeginningOfCombat [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 DeclareAttackers [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 DeclareBlockers [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 CombatDamage [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 EndOfCombat [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 PostcombatMain [our turn] life [20, 20] | 3 options -> PassPriority
+  T4 End [our turn] life [20, 20] | 3 options -> PassPriority
+  T5 Upkeep [their turn] life [20, 20] | 3 options -> PassPriority
+  T5 Draw [their turn] life [20, 20] | 3 options -> Tap Mishra's Factory for mana
+  T5 Draw [their turn] life [20, 20] | 2 options -> Activate Mishra's Factory
+  T6 PrecombatMain [our turn] life [20, 18] | 4 options -> PlayLand Mountain
+  T6 PrecombatMain [our turn] life [20, 18] | 8 options -> Cast Chain Lightning -> Savannah Lions
+  T8 Upkeep [our turn] life [20, 18] | 2 options -> PassPriority
+  T8 Draw [our turn] life [20, 18] | 2 options -> PassPriority
+  T8 PrecombatMain [our turn] life [20, 18] | 8 options -> Cast Goblins of the Flarg
+  T8 PrecombatMain [our turn] life [20, 18] | 4 options -> PlayLand Mountain
+  T8 PrecombatMain [our turn] life [20, 18] | 4 options -> Cast Goblins of the Flarg
+  T9 DeclareBlockers [their turn] life [20, 18] | 3 options -> FinishDeclaringBlockers
+  T10 Upkeep [our turn] life [20, 15] | 3 options -> PassPriority
+  T10 Draw [our turn] life [20, 15] | 3 options -> PassPriority
+  T10 PrecombatMain [our turn] life [20, 15] | 7 options -> Cast Goblin Balloon Brigade
+  T10 PrecombatMain [our turn] life [20, 15] | 2 options -> PassPriority
+  T10 PrecombatMain [our turn] life [20, 15] | 6 options -> PlayLand Strip Mine
+  T10 PrecombatMain [our turn] life [20, 15] | 13 options -> PassPriority
+  T10 BeginningOfCombat [our turn] life [20, 15] | 12 options -> PassPriority
+  T10 DeclareAttackers [our turn] life [20, 15] | 3 options -> Attack with Goblins of the Flarg -> p1
+  T10 DeclareAttackers [our turn] life [20, 15] | 2 options -> Attack with Goblins of the Flarg -> p1
+  T10 DeclareAttackers [our turn] life [20, 15] | 12 options -> PassPriority
+  T10 DeclareBlockers [our turn] life [20, 15] | 12 options -> PassPriority
+  T10 CombatDamage [our turn] life [18, 15] | 12 options -> PassPriority
+  T10 EndOfCombat [our turn] life [18, 15] | 12 options -> PassPriority
+  T10 PostcombatMain [our turn] life [18, 15] | 13 options -> PassPriority
+  T10 End [our turn] life [18, 15] | 12 options -> PassPriority
+  T11 Upkeep [their turn] life [18, 15] | 12 options -> Tap Mountain for mana
+  T11 Upkeep [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 Upkeep [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 Upkeep [their turn] life [18, 15] | 11 options -> Activate Goblin Balloon Brigade
+  T11 Upkeep [their turn] life [18, 15] | 10 options -> PassPriority
+  T11 Upkeep [their turn] life [18, 15] | 10 options -> PassPriority
+  T11 Draw [their turn] life [18, 15] | 10 options -> PassPriority
+  T11 PrecombatMain [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 PrecombatMain [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 BeginningOfCombat [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 BeginningOfCombat [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 DeclareAttackers [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 DeclareBlockers [their turn] life [18, 15] | 2 options -> FinishDeclaringBlockers
+  T11 DeclareBlockers [their turn] life [18, 15] | 11 options -> PassPriority
+  T11 CombatDamage [their turn] life [18, 11] | 11 options -> PassPriority
+  T11 CombatDamage [their turn] life [18, 11] | 11 options -> PassPriority
+  T11 EndOfCombat [their turn] life [18, 11] | 11 options -> PassPriority
+  T11 PostcombatMain [their turn] life [18, 11] | 11 options -> PassPriority
+  T11 End [their turn] life [18, 11] | 11 options -> PassPriority
+  T12 Upkeep [our turn] life [18, 11] | 14 options -> PassPriority
+  T12 Draw [our turn] life [18, 11] | 14 options -> PassPriority
+  T12 PrecombatMain [our turn] life [18, 11] | 22 options -> Cast Chain Lightning -> player p1
+  T12 PrecombatMain [our turn] life [18, 11] | 13 options -> PassPriority
+  T12 PrecombatMain [our turn] life [15, 11] | 15 options -> PlayLand Strip Mine
+  T12 PrecombatMain [our turn] life [15, 11] | 26 options -> PassPriority
+  T12 BeginningOfCombat [our turn] life [15, 11] | 25 options -> PassPriority
+  T12 DeclareAttackers [our turn] life [15, 11] | 4 options -> Attack with Goblin Balloon Brigade -> p1
+  T12 DeclareAttackers [our turn] life [15, 11] | 3 options -> Attack with Goblins of the Flarg -> p1
+  T12 DeclareAttackers [our turn] life [15, 11] | 2 options -> Attack with Goblins of the Flarg -> p1
+  T12 DeclareAttackers [our turn] life [15, 11] | 25 options -> PassPriority
+  T12 DeclareBlockers [our turn] life [15, 11] | 25 options -> PassPriority
+  T12 CombatDamage [our turn] life [12, 11] | 25 options -> PassPriority
+  T12 EndOfCombat [our turn] life [12, 11] | 25 options -> PassPriority
+  T12 PostcombatMain [our turn] life [12, 11] | 26 options -> PassPriority
+  T12 End [our turn] life [12, 11] | 25 options -> PassPriority
+  T13 Upkeep [their turn] life [12, 11] | 25 options -> PassPriority
+  T13 Upkeep [their turn] life [12, 11] | 25 options -> PassPriority
+  T13 Upkeep [their turn] life [12, 11] | 25 options -> PassPriority
+  T13 Upkeep [their turn] life [12, 11] | 25 options -> PassPriority
+  T13 Draw [their turn] life [12, 11] | 25 options -> PassPriority
+  T13 PrecombatMain [their turn] life [12, 11] | 27 options -> PassPriority
+  T13 BeginningOfCombat [their turn] life [12, 11] | 27 options -> PassPriority
+  T13 BeginningOfCombat [their turn] life [12, 11] | 27 options -> PassPriority
+  T13 DeclareAttackers [their turn] life [12, 11] | 27 options -> PassPriority
+  T13 DeclareBlockers [their turn] life [12, 11] | 27 options -> PassPriority
+  T13 CombatDamage [their turn] life [12, 7] | 27 options -> PassPriority
+  T13 CombatDamage [their turn] life [12, 7] | 27 options -> PassPriority
+  T13 EndOfCombat [their turn] life [12, 7] | 27 options -> PassPriority
+  T13 PostcombatMain [their turn] life [12, 7] | 27 options -> PassPriority
+  T13 End [their turn] life [12, 7] | 27 options -> PassPriority
+  T14 Upkeep [our turn] life [12, 7] | 28 options -> PassPriority
+  T14 Draw [our turn] life [12, 7] | 28 options -> PassPriority
+  T14 PrecombatMain [our turn] life [12, 7] | 31 options -> Cast Dragon Whelp
+  T14 PrecombatMain [our turn] life [12, 7] | 3 options -> PlayLand Mishra's Factory
+  T14 PrecombatMain [our turn] life [12, 7] | 4 options -> PassPriority
+  T14 BeginningOfCombat [our turn] life [12, 7] | 3 options -> PassPriority
+  T14 DeclareAttackers [our turn] life [12, 7] | 4 options -> Attack with Goblin Balloon Brigade -> p1
+  T14 DeclareAttackers [our turn] life [12, 7] | 3 options -> Attack with Goblins of the Flarg -> p1
+  T14 DeclareAttackers [our turn] life [12, 7] | 2 options -> Attack with Goblins of the Flarg -> p1
+  T14 DeclareAttackers [our turn] life [12, 7] | 3 options -> PassPriority
+  T14 DeclareBlockers [our turn] life [12, 7] | 3 options -> PassPriority
+  T14 CombatDamage [our turn] life [9, 7] | 3 options -> PassPriority
+  T14 EndOfCombat [our turn] life [9, 7] | 3 options -> PassPriority
+  T14 PostcombatMain [our turn] life [9, 7] | 4 options -> PassPriority
+  T14 End [our turn] life [9, 7] | 3 options -> PassPriority
+  T15 Upkeep [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 Upkeep [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 Upkeep [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 Upkeep [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 Draw [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 PrecombatMain [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 BeginningOfCombat [their turn] life [9, 7] | 3 options -> PassPriority
+  T15 BeginningOfCombat [their turn] life [9, 7] | 4 options -> PassPriority
+  T15 DeclareAttackers [their turn] life [9, 7] | 4 options -> PassPriority
+  T15 DeclareBlockers [their turn] life [9, 7] | 3 options -> Block Mishra's Factory with Dragon Whelp
+  T15 DeclareBlockers [their turn] life [9, 7] | 4 options -> PassPriority
+  T15 CombatDamage [their turn] life [9, 3] | 4 options -> PassPriority
+  T15 CombatDamage [their turn] life [9, 3] | 3 options -> PassPriority
+  T15 EndOfCombat [their turn] life [9, 3] | 3 options -> PassPriority
+  T15 PostcombatMain [their turn] life [9, 3] | 3 options -> PassPriority
+  T15 End [their turn] life [9, 3] | 3 options -> PassPriority
+  T16 Upkeep [our turn] life [9, 3] | 31 options -> PassPriority
+  T16 Draw [our turn] life [9, 3] | 31 options -> PassPriority
+  T16 PrecombatMain [our turn] life [9, 3] | 33 options -> Cast Blood Moon
+  T16 PrecombatMain [our turn] life [9, 3] | 6 options -> PassPriority
+  T16 PrecombatMain [our turn] life [9, 3] | 6 options -> PassPriority
+  T16 BeginningOfCombat [our turn] life [9, 3] | 5 options -> PassPriority
+  T16 DeclareAttackers [our turn] life [9, 3] | 5 options -> Attack with Dragon Whelp -> p1
+  T16 DeclareAttackers [our turn] life [9, 3] | 4 options -> Attack with Goblin Balloon Brigade -> p1
+  T16 DeclareAttackers [our turn] life [9, 3] | 3 options -> Attack with Goblins of the Flarg -> p1
+  T16 DeclareAttackers [our turn] life [9, 3] | 2 options -> Attack with Goblins of the Flarg -> p1
+  T16 DeclareAttackers [our turn] life [9, 3] | 5 options -> PassPriority
+  T16 DeclareBlockers [our turn] life [9, 3] | 5 options -> PassPriority
+  T16 CombatDamage [our turn] life [4, 3] | 5 options -> PassPriority
+  T16 EndOfCombat [our turn] life [4, 3] | 5 options -> PassPriority
+  T16 PostcombatMain [our turn] life [4, 3] | 6 options -> PassPriority
+  T16 End [our turn] life [4, 3] | 5 options -> PassPriority
+  T17 Upkeep [their turn] life [4, 3] | 5 options -> Tap Mishra's Factory for mana
+  T17 Upkeep [their turn] life [4, 3] | 4 options -> PassPriority
+  T17 Upkeep [their turn] life [4, 3] | 4 options -> PassPriority
+  T17 Upkeep [their turn] life [4, 3] | 4 options -> Tap Mountain for mana
+  T17 Upkeep [their turn] life [4, 3] | 3 options -> Activate Goblin Balloon Brigade
+  T17 Upkeep [their turn] life [4, 3] | 3 options -> PassPriority
+  T17 Upkeep [their turn] life [4, 3] | 3 options -> PassPriority
+  T17 Upkeep [their turn] life [4, 3] | 4 options -> PassPriority
+  T17 Draw [their turn] life [4, 3] | 4 options -> Activate Goblin Balloon Brigade
+=== result: LOSS after 264 decisions ===
