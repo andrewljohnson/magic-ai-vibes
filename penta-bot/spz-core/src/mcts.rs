@@ -54,9 +54,10 @@ use crate::prng::SplitMix64;
 #[cfg(feature = "prof")]
 pub mod prof {
     use std::cell::Cell;
-    pub const N: usize = 5;
+    pub const N: usize = 8;
     pub const NAMES: [&str; N] =
-        ["determinize", "available", "action_prior", "opp_greedy", "leaf_eval"];
+        ["determinize", "available", "action_prior", "opp_greedy", "leaf_eval",
+         "observe", "legal_actions", "apply"];
     thread_local! {
         static ACC: [Cell<u64>; N] = Default::default();
     }
@@ -418,7 +419,7 @@ impl<'a> Ismcts<'a> {
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
             };
-            let obs = world.observe(seat);
+            let obs = timed!(5, world.observe(seat));
             if seat != self.our_seat {
                 // Opponent as a fixed environment (never branched).
                 let opp_action = timed!(3, match self.cfg.opponent {
@@ -429,7 +430,7 @@ impl<'a> Ismcts<'a> {
                         opp.choose_action(&obs)
                     }
                     OpponentModel::Greedy => {
-                        let actions = protocol_actions(&obs);
+                        let actions = timed!(6, protocol_actions(&obs));
                         let i = if let Some(fh) =
                             self.policy.fast_head.as_ref()
                         {
@@ -459,7 +460,7 @@ impl<'a> Ismcts<'a> {
                     }
                 });
                 let ok = opp_action
-                    .map(|a| world.apply(seat, a).is_ok())
+                    .map(|a| timed!(7, world.apply(seat, a)).is_ok())
                     .unwrap_or(false);
                 if !ok {
                     leaf = timed!(4, self.leaf_eval(world));
@@ -468,7 +469,7 @@ impl<'a> Ismcts<'a> {
                 continue;
             }
             // OUR seat.
-            let actions = protocol_actions(&obs);
+            let actions = timed!(6, protocol_actions(&obs));
             if actions.len() == 1 {
                 let _ = world.apply(seat, actions[0].clone());
                 continue;
@@ -496,7 +497,11 @@ impl<'a> Ismcts<'a> {
                     .collect();
                 if !need.is_empty() {
                     let priors = timed!(2, {
-                        let obs = world.observe(seat);
+                        // Reuse the observation the descent already took
+                        // for this ply. Building one is the single most
+                        // expensive engine call in the loop -- 41% of an
+                        // episode on protocol 29 -- and this node's
+                        // observation is the same one.
                         let state = features(&obs, world.in_pregame(),
                                              &self.policy.tables,
                                              self.deck_slots);
@@ -521,7 +526,7 @@ impl<'a> Ismcts<'a> {
                 let (sel_i, sel_key, first_visit) =
                     self.select(&tree.arena[node_idx], &actions, &avail);
                 visited.push((node_idx, sel_key.clone()));
-                let _ = world.apply(seat, actions[sel_i].clone());
+                let _ = timed!(7, world.apply(seat, actions[sel_i].clone()));
                 path.push(sel_key);
                 if first_visit {
                     leaf = timed!(4, self.leaf_eval(world));
@@ -552,7 +557,7 @@ impl<'a> Ismcts<'a> {
             let (sel_i, sel_key, first_visit) =
                 self.select(&tree.arena[node_idx], &actions, &avail);
             visited.push((node_idx, sel_key.clone()));
-            let _ = world.apply(seat, actions[sel_i].clone());
+            let _ = timed!(7, world.apply(seat, actions[sel_i].clone()));
             path.push(sel_key);
             if first_visit {
                 // Expansion: leaf-eval the afterstate and stop descending.
@@ -836,7 +841,7 @@ mod tests {
         while game.result().is_none() && n < 800 {
             let seat = game.decision_seat().unwrap();
             let obs = game.core_game().observe(seat);
-            let actions = protocol_actions(&obs);
+            let actions = timed!(6, protocol_actions(&obs));
             if seat == PlayerId::One && pred(&obs, &actions) {
                 return Some(game);
             }
@@ -1156,7 +1161,7 @@ mod tests {
             while game.result().is_none() && n < 800 {
                 let seat = game.decision_seat().unwrap();
                 let obs = game.core_game().observe(seat);
-                let actions = protocol_actions(&obs);
+                let actions = timed!(6, protocol_actions(&obs));
                 // Only a DECISIVE, top-of-combat position: no attacker yet
                 // declared, some DeclareAttacker wins after combat resolves,
                 // and declaring NONE (FinishDeclaringAttackers) does NOT win.
@@ -1220,7 +1225,7 @@ mod tests {
             }
             let seat = g.decision_player()?;
             let obs = g.observe(seat);
-            let actions = protocol_actions(&obs);
+            let actions = timed!(6, protocol_actions(&obs));
             // Keep swinging: another attacker if offered, else finish attackers,
             // else Pass, else the first legal action.
             let idx = if seat == PlayerId::One {

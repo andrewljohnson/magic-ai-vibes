@@ -184,7 +184,9 @@ mod prof_tests {
     /// `cargo test --release --features prof az_profile -- --nocapture`
     #[test]
     fn az_profile() {
-        const CATALOG: &str = "../pinned-catalog.json";
+        let catalog_path = std::env::var("AZ_CATALOG")
+            .unwrap_or_else(|_| "../pinned-catalog.json".to_string());
+        let CATALOG: &str = &catalog_path;
         const DECKLISTS: &str = "../builtin-decklists.json";
         let value = std::env::var("AZ_VALUE").expect("AZ_VALUE");
         let head = std::env::var("AZ_HEAD").expect("AZ_HEAD");
@@ -250,7 +252,6 @@ mod prof_tests {
                 .and_then(|v| v.parse().ok()).unwrap_or(0.0),
             root_noise_alpha: 1.0,
             max_actions: 0,
-        max_actions: 0,
         };
         crate::mcts::prof::reset();
         let t0 = std::time::Instant::now();
