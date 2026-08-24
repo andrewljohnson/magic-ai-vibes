@@ -404,8 +404,19 @@ impl<'a> Ismcts<'a> {
     /// One determinized playout down the shared tree. `opp` is the handcrafted
     /// opponent policy instance reused for every opponent ply in this descent
     /// (only touched when `cfg.opponent == Handcrafted`).
+    /// One determinized playout down the shared tree.
+    ///
+    /// `states` caches the game at each tree node FOR THE CURRENT
+    /// determinization. Every iteration otherwise replays the whole path
+    /// from the root, and the path is mostly plies with no choice in them:
+    /// profiled at 17.1 plies per iteration, 63% of them forced. With a
+    /// world shared across `redeterminize_m` iterations, the prefix is
+    /// identical every time, so it can be walked once and cloned after.
+    /// The cache is only valid within one determinization and the caller
+    /// clears it when it resamples.
     fn iterate(&self, tree: &mut Tree, world: &mut Game,
-               opp: &mut HandcraftedPolicy) {
+               opp: &mut HandcraftedPolicy,
+               states: &mut HashMap<Vec<ActionKey>, Game>) {
         let mut path: Vec<ActionKey> = Vec::new();
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
@@ -449,9 +460,11 @@ impl<'a> Ismcts<'a> {
             let (raw, quick) = timed!(6, world.legal_and_protocol_actions(seat));
             if quick.len() == 1 {
                 #[cfg(feature = "prof")] prof::forced();
-                let _ = timed!(7, world.apply(seat, quick[0].clone()));
+                let _ = timed!(7, world.apply_enumerated(
+                    seat, &raw, quick[0].clone()));
                 continue;
             }
+            let raw_for_apply = raw.clone();
             let obs = timed!(5, world.observe_with_legal(seat, raw));
             if seat != self.our_seat {
                 // Opponent as a fixed environment (never branched).
@@ -493,7 +506,7 @@ impl<'a> Ismcts<'a> {
                     }
                 });
                 let ok = opp_action
-                    .map(|a| timed!(7, world.apply(seat, a)).is_ok())
+                    .map(|a| timed!(7, world.apply_enumerated(seat, &raw_for_apply, a)).is_ok())
                     .unwrap_or(false);
                 if !ok {
                     leaf = timed!(4, self.leaf_eval(world));
@@ -510,6 +523,11 @@ impl<'a> Ismcts<'a> {
             }
 
             let node_idx = tree.get_or_create(&path);
+            // We are standing at a tree node: remember the state so later
+            // iterations can jump here instead of replaying to it.
+            if !states.contains_key(&path) {
+                states.insert(path.clone(), world.clone());
+            }
             // Ensure priors + bump availability for every legal action here.
             //
             // Priors are computed in ONE batched pass over the actions that
@@ -555,11 +573,17 @@ impl<'a> Ismcts<'a> {
                 let (sel_i, sel_key, first_visit) =
                     self.select(&tree.arena[node_idx], &actions, &avail);
                 visited.push((node_idx, sel_key.clone()));
-                let _ = timed!(7, world.apply(seat, actions[sel_i].clone()));
+                let _ = timed!(7, world.apply_enumerated(
+                seat, &raw_for_apply, actions[sel_i].clone()));
                 path.push(sel_key);
                 if first_visit {
                     leaf = timed!(4, self.leaf_eval(world));
                     break;
+                }
+                // Already walked this far on an earlier iteration: take the
+                // remembered state rather than replaying the plies to it.
+                if let Some(seen) = states.get(&path) {
+                    world.clone_from(seen);
                 }
                 continue;
             }
@@ -586,12 +610,16 @@ impl<'a> Ismcts<'a> {
             let (sel_i, sel_key, first_visit) =
                 self.select(&tree.arena[node_idx], &actions, &avail);
             visited.push((node_idx, sel_key.clone()));
-            let _ = timed!(7, world.apply(seat, actions[sel_i].clone()));
+            let _ = timed!(7, world.apply_enumerated(
+                seat, &raw_for_apply, actions[sel_i].clone()));
             path.push(sel_key);
             if first_visit {
                 // Expansion: leaf-eval the afterstate and stop descending.
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
+            }
+            if let Some(seen) = states.get(&path) {
+                world.clone_from(seen);
             }
         }
         // Backprop up OUR path (single-observer: one leaf value, no negation).
@@ -766,10 +794,14 @@ impl<'a> Ismcts<'a> {
         let m = self.cfg.redeterminize_m;
         if m <= 1 {
             // Exact per-iteration determinization (matches ismcts_choose).
+            // m == 1 resamples every iteration, so a cache could never be
+            // reused; pass an empty one and let it stay empty.
+            let mut states = HashMap::new();
             for _ in 0..self.cfg.iters {
                 if let Some(mut world) =
                     timed!(0, self.determinize(raw, root_obs, prng)) {
-                    self.iterate(&mut tree, &mut world, &mut opp);
+                    states.clear();
+                    self.iterate(&mut tree, &mut world, &mut opp, &mut states);
                 }
             }
         } else {
@@ -777,13 +809,16 @@ impl<'a> Ismcts<'a> {
             // resample the template every M-th iter, clone it per descent
             // (iterate mutates its world forward).
             let mut template: Option<Game> = None;
+            // Cache of node states for the CURRENT determinization only.
+            let mut states: HashMap<Vec<ActionKey>, Game> = HashMap::new();
             for it in 0..self.cfg.iters {
                 if it % m == 0 {
                     template = timed!(0, self.determinize(raw, root_obs, prng));
+                    states.clear();
                 }
                 if let Some(t) = &template {
                     let mut world = t.clone();
-                    self.iterate(&mut tree, &mut world, &mut opp);
+                    self.iterate(&mut tree, &mut world, &mut opp, &mut states);
                 }
             }
         }

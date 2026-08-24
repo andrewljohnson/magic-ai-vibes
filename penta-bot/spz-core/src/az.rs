@@ -241,7 +241,9 @@ mod prof_tests {
         let book = crate::decks::DeckBook::load(DECKLISTS).unwrap();
         let cfg = MctsConfig {
             iters, c_puct: 1.5, inert: false,
-            leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+            leaf_playout: false, leaf_blend: false,
+            redeterminize_m: std::env::var("AZ_M").ok()
+                .and_then(|v| v.parse().ok()).unwrap_or(1),
             use_dominance: std::env::var("AZ_DOM").as_deref() != Ok("0"),
             opponent: if opp == "handcrafted" {
                 crate::mcts::OpponentModel::Handcrafted
