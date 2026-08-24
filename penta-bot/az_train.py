@@ -213,6 +213,12 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--value-smoothing", type=float, default=0.05,
+                    help="Label smoothing for the value target. Hard 0/1 "
+                         "drove |logit| to 27 (max 50), saturating the "
+                         "sigmoid on 92.6%% of decisions and destroying the "
+                         "value head's ability to rank sibling moves -- "
+                         "which is what search needs from it.")
     ap.add_argument("--truncation", choices=("loss", "drop"), default="loss",
                     help="How a game that hits the decision cap is scored. "
                          "'loss' matches the gate (both seats lose, so "
@@ -467,8 +473,29 @@ def main():
                     nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
                     popt.step()
 
+                    # LABEL SMOOTHING on the value target.
+                    #
+                    # BCE against hard 0/1 drives logits to +/-inf wherever
+                    # the data is separable, and it did: measured median
+                    # |logit| 26.83, max 50.41, with 92.6% of decisions
+                    # above |8|. sigmoid is flat to ~1e-11 there, so the
+                    # value head's REAL discrimination between sibling moves
+                    # -- a median 1.65 logits, plenty to rank them -- was
+                    # annihilated by the squash before search ever saw it.
+                    # Every sibling scored identically, Q was constant, and
+                    # PUCT fell back to the prior. That is why 32 sims (40.0%)
+                    # played no better than 1 sim (39.3%), and why search
+                    # agreed with the prior on 92% of decisions -- the same
+                    # 92.6% that were saturated.
+                    #
+                    # Smoothing to [e, 1-e] caps the optimal logit at
+                    # ln((1-e)/e) = 2.94 for e=0.05, which keeps the sigmoid
+                    # in its sensitive range. It is also honest: a bot
+                    # winning ~40% of its games should not be predicting
+                    # outcomes at |logit| 27.
+                    e = args.value_smoothing
                     vloss = nn.functional.binary_cross_entropy_with_logits(
-                        value(st), zt)
+                        value(st), zt * (1 - 2 * e) + e)
                     vopt.zero_grad(); vloss.backward()
                     nn.utils.clip_grad_norm_(value.parameters(), 1.0)
                     vopt.step()
@@ -512,7 +539,9 @@ def main():
             tgt_ent = float((torch.zeros(n).scatter_add(
                 0, segs, -(pi * torch.log(pi + 1e-12)))
                 / torch.log(ct.float().clamp(min=2))).mean())
-            vmse = float(((torch.sigmoid(value(st)) - zt) ** 2).mean())
+            vlogit = value(st)
+            vmag = float(vlogit.abs().median())
+            vmse = float(((torch.sigmoid(vlogit) - zt) ** 2).mean())
             base = float(((zt - zt.mean()) ** 2).mean())
         # Fraction of games that reached a real result. Unfinished games all
         # score z = 0.5, so a low finish rate means the value head is being
@@ -522,7 +551,8 @@ def main():
             f"({args.games/max(gen,1e-9):.2f} g/s) {n} decisions | "
             f"fin={100*fin:.0f}% pol_ce={float(ploss):.4f} "
             f"pol_ent={pol_ent:.3f} tgt_ent={tgt_ent:.3f} "
-            f"vmse={vmse:.4f}/{base:.4f} drop={dropped}", args.log)
+            f"vmse={vmse:.4f}/{base:.4f} vmag={vmag:.1f} "
+            f"drop={dropped}", args.log)
 
         # Strength check against the engine's built-in bot, with search --
         # the only number that says whether the loop is actually improving.

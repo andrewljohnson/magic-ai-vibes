@@ -280,6 +280,43 @@ stall fix, not for strength.
 that precision is comparing noise, which is what the crossover above
 actually shows. Use ≥300 games before believing an arm difference.
 
+### The sigmoid was eating the value head's move ranking
+
+2026-08-23. Search stopped helping: on the same net, 32 sims scored 40.0%
+and 1 sim scored 39.3%. A leaf evaluator that gives every sibling the same
+score makes Q constant, and PUCT then follows the prior -- search becomes a
+slower copy of the policy.
+
+Measured on the NATIVE afterstate features search actually evaluates
+(candidate afterstates from `aac_stream_episodes`, deck-slot belief context
+included), 285 decisions:
+
+| | sibling LOGIT spread | prob spread search sees | decisions blind (<0.01) |
+|---|---|---|---|
+| hard 0/1 targets | 0.899 | 0.0035 | 56.5% |
+| label smoothing 0.05 | 0.709 | **0.0215** | **38.6%** |
+
+The value head DOES separate sibling moves -- about 0.9 logits, plenty to
+rank them. But BCE against hard 0/1 drives logits outward wherever the data
+is separable (|logit| median 4.92, max 29.3, a quarter of decisions past
+|8|), and out there the sigmoid is flat, so the ranking is destroyed
+between the net and the search. Smoothing targets to [e, 1-e] caps the
+optimal logit at ln((1-e)/e) = 2.94 and multiplied the usable spread by 6.
+
+This is the SIXTH time on this project that the bug was an output SCALE
+rather than a learning failure. The others: actor logits saturating the
+sigmoid, the double-squashed value head, the value head regressing shaped
+return, peaked cold-start priors, mis-scaled PUCT exploration.
+
+→ `--value-smoothing` (default 0.05). The round log now prints `vmag`, the
+median |logit|, so this cannot hide again.
+
+→ **Measure on the real feature path.** A first pass at this used
+`Extractor.features()` with no deck context, so the belief block was empty
+and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
+of decisions blind -- roughly five times the true saturation. The
+conclusion survived; the numbers did not.
+
 ### How strong is the AZ policy improvement operator? ~6 points
 
 MEASURED 2026-08-23 on the az_main checkpoint (~8k self-play games).
