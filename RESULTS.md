@@ -317,6 +317,28 @@ and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
 of decisions blind -- roughly five times the true saturation. The
 conclusion survived; the numbers did not.
 
+### Fixing the value head revived search: +0.7 points -> +13.3
+
+Same net, same 120 games, only the search budget varies. Measured after
+`--value-smoothing 0.05`:
+
+| configuration | score |
+|---|---|
+| no search (1 sim) | 30.0% ± 4.2 |
+| **32 sims, c_puct 1.5** | **43.3% ± 4.5** |
+| 32 sims, c_puct 0.5 | 42.5% ± 4.5 |
+
+Search is worth **+13.3 points** over its own prior. Before the value-head
+fix it was worth +0.7 (39.3% vs 40.0%) -- i.e. nothing. That is the
+policy improvement operator coming back to life, and it is what the loop
+needs to keep climbing.
+
+c_puct 1.5 and 0.5 are identical within noise, so the exploration/Q
+balance was never the constraint. The saturated sigmoid was.
+
+→ **The deployed bot must use search.** ROADMAP B estimated ~+2 points
+from deploying search; on a working value head it is +13.
+
 ### How strong is the AZ policy improvement operator? ~6 points
 
 MEASURED 2026-08-23 on the az_main checkpoint (~8k self-play games).
