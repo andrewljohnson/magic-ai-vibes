@@ -161,6 +161,80 @@ def targets_self(obs, a):
     return None
 
 
+_CMC = None
+
+
+def cmc(defn):
+    """Total mana cost. Colour requirements are ignored -- this is used only
+    to ask 'would one more land have made this castable', and in a deck
+    that is essentially mono-red the approximation is close enough. It can
+    still be wrong for off-colour or X spells."""
+    global _CMC
+    if _CMC is None:
+        _CMC = {}
+        for c in pinned_catalog()["cards"]:
+            mc = c.get("manaCost") or {}
+            _CMC[c["definition"]] = sum(
+                v for k, v in mc.items()
+                if isinstance(v, int) and k != "xMultiplier")
+    return _CMC.get(defn)
+
+
+def unlocked_by_one_more_land(obs):
+    """Cards in hand that one extra land would make castable, and that we
+    cannot cast right now. This is the ONLY reason a precombat land drop
+    beats a postcombat one: without a use for the mana this turn, holding
+    the land is better or neutral, because it tells the opponent less."""
+    avail = our_untapped_lands(obs)
+    out = []
+    for c in (obs.get("hand") or ()):
+        d = c.get("definition")
+        k = CARDS.get(d, ("", "", ""))[2]
+        if k == "Land":
+            continue
+        cost = cmc(d)
+        if cost is not None and cost == avail + 1:
+            out.append(name_of(d))
+    return out
+
+
+def adds_mana(defn):
+    """A card that produces mana without costing any -- Moxen, Black Lotus,
+    Sol Ring. Keeping a hand with no land AND none of these is a hand that
+    cannot function."""
+    name, text, kind = CARDS.get(defn, ("", "", ""))
+    if kind == "Land":
+        return True
+    return "add " in text.lower() and (cmc(defn) or 0) == 0
+
+
+def pumps_creature(defn):
+    """Gives a creature +X/+X or an ability. Pointed at an OPPONENT'S
+    creature this is simply helping them."""
+    _, text, _ = CARDS.get(defn, ("", "", ""))
+    t = text.lower()
+    return "gets +" in t or "get +" in t
+
+
+def creature_stats(perm):
+    try:
+        return int(perm.get("power") or 0), int(perm.get("toughness") or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+
+
+def their_untapped_creatures(obs):
+    me = obs.get("seat")
+    out = []
+    for p in (obs.get("battlefield") or ()):
+        if p.get("controller") == me or p.get("tapped"):
+            continue
+        if p.get("power") is None:
+            continue
+        out.append(p)
+    return out
+
+
 def our_untapped_lands(obs):
     me = obs.get("seat")
     return sum(1 for p in (obs.get("battlefield") or ())
@@ -198,6 +272,8 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
         turn_attacked = {}
         passed_main_turns = set()
         turn_land_offered_pre = set()
+        turn_land_would_unlock = {}
+        turn_cast_precombat = {}
         while game.result() is None and n < 600:
             raw = game.observe()
             obs = json.loads(raw)
@@ -232,6 +308,71 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                         examples["x_spell_cast_for_zero"].append(
                             f"{where}: {render_action(obs, chosen)} "
                             f"-- X=0 deals nothing, card wasted")
+            # Buffing an opponent's creature.
+            if ctype in ("CastSpell", "ActivateAbility"):
+                bdef = (card_def(obs, chosen.get("card"))
+                        if ctype == "CastSpell"
+                        else obj_def(obs, chosen.get("source")))
+                me_seat = obs.get("seat")
+                if bdef is not None and pumps_creature(bdef):
+                    for t in (chosen.get("targets") or []):
+                        if not isinstance(t, dict):
+                            continue
+                        oid = t.get("objectId") or t.get("object") or t.get("id")
+                        if oid is not None and obj_owner(obs, oid) not in (None, me_seat):
+                            flags["buffed_opponent_creature"] += 1
+                            if len(examples["buffed_opponent_creature"]) < 12:
+                                examples["buffed_opponent_creature"].append(
+                                    f"{where}: {render_action(obs, chosen)} "
+                                    f"-- that creature is THEIRS")
+                            break
+
+            # Keeping an opening hand that cannot make mana at all.
+            if ctype == "KeepHand":
+                hand = obs.get("hand") or []
+                if hand and not any(adds_mana(c.get("definition")) for c in hand):
+                    flags["kept_hand_with_no_mana"] += 1
+                    if len(examples["kept_hand_with_no_mana"]) < 12:
+                        examples["kept_hand_with_no_mana"].append(
+                            f"{where}: kept " + ", ".join(
+                                c.get("name", "?") for c in hand)
+                            + " -- no land, no Mox, no Lotus")
+
+            # Declining a free attack: they have nothing that can block.
+            if (ctype in ("FinishDeclaringAttackers", "PassPriority")
+                    and any(a.get("type") == "DeclareAttacker" for a in acts)
+                    and not their_untapped_creatures(obs)):
+                flags["no_attack_into_undefended"] += 1
+                if len(examples["no_attack_into_undefended"]) < 12:
+                    atk = [render_action(obs, a) for a in acts
+                           if a.get("type") == "DeclareAttacker"][:3]
+                    examples["no_attack_into_undefended"].append(
+                        f"{where}: declined to attack with "
+                        f"{'; '.join(atk)} -- they have NO untapped creatures")
+
+            # Attacking into a blocker that kills us and survives.
+            if ctype == "DeclareAttacker":
+                atk = None
+                for p in (obs.get("battlefield") or ()):
+                    if p.get("objectId") == chosen.get("attacker"):
+                        atk = p
+                if atk is not None:
+                    ap, at = creature_stats(atk)
+                    lethal = [b for b in their_untapped_creatures(obs)
+                              if creature_stats(b)[0] >= at
+                              and creature_stats(b)[1] > ap
+                              # a flyer they cannot block is not a bad attack
+                              and (not atk.get("flying") or b.get("flying"))]
+                    if lethal and len(their_untapped_creatures(obs)) == len(lethal):
+                        flags["attacked_into_bigger_blocker"] += 1
+                        if len(examples["attacked_into_bigger_blocker"]) < 12:
+                            b = lethal[0]
+                            bp, bt = creature_stats(b)
+                            examples["attacked_into_bigger_blocker"].append(
+                                f"{where}: {render_action(obs, chosen)} "
+                                f"({ap}/{at}) into {b.get('name')} ({bp}/{bt}) "
+                                f"-- it dies, the blocker lives")
+
             if ctype in ("CastSpell", "ActivateAbility"):
                 defn = card_def(obs, chosen.get("card")) if ctype == "CastSpell" \
                     else obj_def(obs, chosen.get("source"))
@@ -246,20 +387,18 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                     turn_saw_land_action[turn] = True
                     if "PrecombatMain" in str(obs.get("step")):
                         turn_land_offered_pre.add(turn)
+                        unl = unlocked_by_one_more_land(obs)
+                        if unl:
+                            turn_land_would_unlock[turn] = unl
+                if ctype == "CastSpell" and "PrecombatMain" in str(obs.get("step")):
+                    turn_cast_precombat[turn] = True
                 if ctype == "PlayLand":
                     turn_played_land[turn] = True
                     # A land played AFTER combat produces mana this turn
                     # that can no longer be spent precombat or on combat
                     # tricks. When the same drop was available precombat,
                     # deferring it is a straight loss of options.
-                    if ("PostcombatMain" in str(obs.get("step"))
-                            and turn in turn_land_offered_pre):
-                        flags["land_played_after_combat"] += 1
-                        if len(examples["land_played_after_combat"]) < 12:
-                            examples["land_played_after_combat"].append(
-                                f"{where}: {render_action(obs, chosen)} in "
-                                f"postcombat main, though it was legal "
-                                f"precombat")
+
                 if any(a.get("type") == "DeclareAttacker" for a in acts):
                     turn_saw_attack[turn] = True
                     if ctype == "DeclareAttacker":
@@ -273,16 +412,16 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                 if (ctype == "PassPriority" and not (obs.get("stack") or [])
                         and "Main" in str(obs.get("step"))
                         and turn not in passed_main_turns):
-                    slow = [a for a in acts if a.get("type") == "CastSpell"
-                            and sorcery_speed(card_def(obs, a.get("card")))]
-                    if slow:
+                    free = [a for a in acts if a.get("type") == "CastSpell"
+                            and (cmc(card_def(obs, a.get("card"))) or 9) == 0]
+                    if free:
                         passed_main_turns.add(turn)
-                        flags["passed_main_holding_sorcery"] += 1
-                        if len(examples["passed_main_holding_sorcery"]) < 12:
-                            examples["passed_main_holding_sorcery"].append(
+                        flags["held_free_mana_artifact"] += 1
+                        if len(examples["held_free_mana_artifact"]) < 12:
+                            examples["held_free_mana_artifact"].append(
                                 f"{where}: passed main holding "
-                                f"{'; '.join(render_action(obs, a) for a in slow[:3])} "
-                                f"({our_untapped_lands(obs)} untapped lands)")
+                                f"{'; '.join(render_action(obs, a) for a in free[:3])}"
+                                f" -- costs nothing to play")
             game.act(idx)
             n += 1
 
@@ -292,12 +431,6 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                 if len(examples["skipped_land_drop"]) < 12:
                     examples["skipped_land_drop"].append(
                         f"game {g} T{t}: could play a land, did not")
-        for t, saw in turn_saw_attack.items():
-            if saw and not turn_attacked.get(t):
-                flags["declined_all_attacks"] += 1
-                if len(examples["declined_all_attacks"]) < 12:
-                    examples["declined_all_attacks"].append(
-                        f"game {g} T{t}: had attackers available, attacked with none")
 
         res = game.result()
         outcome = "WIN" if res == me else ("draw/unfinished"

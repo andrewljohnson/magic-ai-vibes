@@ -320,38 +320,42 @@ conclusion survived; the numbers did not.
 ### What the bot actually does wrong (watch it play, not just gate it)
 
 `playout_log.py` replays real games move by move and flags decisions that
-look wrong. 30 games with the deployed net, 7020 decisions, 15W 15L:
+are wrong on the rules, not on taste. 14 games with the deployed net:
 
 | severity | flag | rate |
 |---|---|---|
+| bug | attacked into a strictly better blocker | 0.86/game |
+| bug | declined to attack an undefended opponent | 0.14/game |
+| bug | kept an opening hand with no mana at all | 0.14/game |
 | bug | X spell cast for X=0 | 0.07/game |
-| bug | damage aimed at our own side | 0.03/game |
-| suspect | passed main holding a sorcery-speed card | 2.13/game |
-| **suspect** | **land played after combat, though legal precombat** | **1.80/game** |
-| suspect | land drop skipped entirely | 0.60/game |
-| judgement | declined every attack | 0.23/game |
+| bug | damage aimed at our own side | 0.07/game |
+| suspect | land drop skipped entirely | 0.36/game |
 
-The two outright bugs are rare but unambiguous. `Cast Fireball -> player
-p2 (US)` with X=0: life 17 -> 17, no damage, card gone. The same game plays
-`Fireball X=3 -> player p1` correctly six turns later, so this is a
-decision failure and not a missing card implementation.
+Verified in the transcripts:
 
-**The systematic one is land sequencing.** Nearly twice a game the bot
-plays its land in PostcombatMain when the same drop was legal precombat,
-so that mana cannot be spent on its own main phase or in combat. Add the
-0.60/game skipped drops and land sequencing is the single most common
-thing it gets wrong.
+* `Attack with Ironclaw Orcs (2/2) into Serra Angel (4/4)` -- the attacker
+  dies, the blocker lives, and this is the most common defect at ~once a
+  game.
+* `Cast Fireball -> player p2 (US)` with X=0: life 17 -> 17, no damage,
+  card gone. The same game casts `Fireball X=3 -> player p1` correctly six
+  turns later, so it is a decision failure, not a missing implementation.
+* Kept a seven-card hand of `Goblin Balloon Brigade, Ironclaw Orcs,
+  Goblins of the Flarg, Lightning Bolt, ...` with **no land, no Mox, no
+  Lotus**. An automatic mulligan.
 
-→ There is a likely mechanism, and it connects to the value head. Playing
-a land precombat versus postcombat produces almost the same afterstate --
-the land is on the battlefield either way, only the step differs. A value
-head that cannot separate siblings (see the sigmoid entry above, still
-38.6% of decisions "blind" after the fix) has no way to prefer one, and
-search then has nothing to work with. Sequencing errors are exactly what a
-flat leaf evaluator should produce.
+**A detector that was wrong, and why it is gone.** An earlier version
+flagged "land played after combat when it was legal precombat" at
+1.80/game and called it the systematic defect. That is bad Magic:
+holding the land until postcombat is better or NEUTRAL by default, because
+it tells the opponent less and costs nothing. It is only an error when the
+mana was wanted that turn. Rather than keep a check that cannot tell the
+difference, the flag was removed. **A detector that fires on correct play
+is worse than no detector** -- it would have sent the next person tuning
+land sequencing.
 
-→ Watching games is cheap and finds things no aggregate can. A 54% win
-rate and "sits on a free Mox for six turns" are both true of this net.
+→ The list above is deliberately restricted to plays that are wrong by the
+rules of the game. Judgement calls (declining an attack into a bigger
+board, holding a card for information) are not flagged at all.
 
 ### The gate is EXACTLY deterministic — and that killed my own fix
 

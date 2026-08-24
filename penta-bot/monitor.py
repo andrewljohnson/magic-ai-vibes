@@ -344,31 +344,35 @@ FLAG_META = {
     "damage_pointed_at_self": (
         "bug", "Damage aimed at our own side",
         "A damage spell or ability targeting our own face or our own "
-        "permanent. Occasionally correct in real Magic (killing our own "
-        "creature in response to something worse), so read the example "
-        "before believing it -- but with X=0 at our own face it is simply "
-        "a thrown-away card."),
-    "passed_main_holding_sorcery": (
-        "suspect", "Passed main phase holding a sorcery-speed card",
-        "Instants are excluded: holding one up is ordinary play. This "
-        "counts only cards there is no reason to hold past your own main "
-        "phase, once per turn. Repeatedly declining a FREE artifact (Mox "
-        "Ruby) is the clearest case."),
-    "land_played_after_combat": (
-        "suspect", "Land played after combat when it was legal before",
-        "Mana from a postcombat land cannot be spent precombat or during "
-        "combat. When the same drop was offered precombat, deferring it "
-        "only removes options."),
+        "permanent."),
+    "buffed_opponent_creature": (
+        "bug", "Pumped an opponent's creature",
+        "A +X/+X effect pointed at a creature they control. That is simply "
+        "helping them."),
+    "kept_hand_with_no_mana": (
+        "bug", "Kept an opening hand with no mana at all",
+        "No land, no Mox, no Black Lotus. The hand cannot cast anything; "
+        "this is an automatic mulligan."),
+    "no_attack_into_undefended": (
+        "bug", "Declined to attack an undefended opponent",
+        "Attackers were available and they had NO untapped creatures, so "
+        "the damage was free."),
+    "attacked_into_bigger_blocker": (
+        "bug", "Attacked into a strictly better blocker",
+        "Every untapped creature they have kills our attacker and survives "
+        "it, and ours has no evasion they cannot match. Occasionally right "
+        "if you hold a trick or read them as unwilling to block -- but as a "
+        "rate it should be near zero."),
     "skipped_land_drop": (
         "suspect", "Land drop skipped entirely",
         "Had a land in hand and the drop available, and ended the turn "
-        "without playing one. Sometimes correct (holding a land against "
-        "discard, or to represent a trick) but rarely."),
-    "declined_all_attacks": (
-        "judgement", "Declined every attack",
-        "Attackers were available and none were declared. Often correct "
-        "against a bigger board -- watch the rate, not the instance."),
+        "without playing one."),
+    "held_free_mana_artifact": (
+        "suspect", "Passed main holding a FREE mana artifact",
+        "A Mox or Lotus costs nothing to play and only adds mana. Holding "
+        "one through your own main phase gives up mana for no gain."),
 }
+
 
 
 def collect():
