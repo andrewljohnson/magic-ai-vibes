@@ -317,6 +317,37 @@ and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
 of decisions blind -- roughly five times the true saturation. The
 conclusion survived; the numbers did not.
 
+### The gate is EXACTLY deterministic — and that killed my own fix
+
+Re-gating a frozen checkpoint reproduced its number to the game:
+
+    original  GATE round 359: 54.3%  (163W 0D 137L / 300, 1 capped)
+    re-gate   BEST net @ 32 sims: 54.3%  (163W 0D 137L / 300, 1 capped)
+
+Fixed seeds (900_000 + g), fixed opponent, search with no root noise. Same
+weights in, same number out.
+
+**So "best was a lucky reading" is impossible**, and the best-rate
+RECALIBRATION built on that idea was wrong. It lowered the recorded best
+after two consecutive reverts -- but those reverts came from DESCENDANT
+nets, which are genuinely worse, not from re-measuring best. Lowering the
+bar let a weaker net be promoted over the best weights, the exact opposite
+of the ratchet's purpose. It had already dropped a verified 54.3% net's
+record to 47.2%.
+
+Removed. And because the comparison is paired and exact, `--revert-sd`
+defaults to **0**: any measured decline is real, so keep the best net and
+let each 20-round stretch be a fresh attempt from it.
+
+→ The earlier entry claiming 44.0% was "a lucky reading of a ~38-40% net"
+was wrong for the same reason. That net really was 44.0%; its descendants
+really were 38%. **Training from a good net reliably degrades it** -- that
+is the actual phenomenon, and it is why the ratchet matters.
+
+→ General lesson: a plausible statistical story (max-of-noise) survived
+three separate encounters with the data before one cheap control -- run
+the same input twice -- refuted it.
+
 ### The pure self-play line passed parity: 54.3%
 
 2026-08-24, run `az_deep` (64-sim self-play targets, 32-sim gate for
@@ -470,7 +501,7 @@ The strength curve has never plateaued.
 |---|---|
 | **PARITY with the built-in bot (the actual bar)** | **50.0%** |
 | **pure AZ self-play, best net, 32-sim gate** | **54.3%** |
-| same lineage at 128-sim deployment depth | **54.5% ±2.9** (on the 49.7% net) |
+| **same net at 128-sim deployment depth** | **61.0% ±2.8** (183W 0D 117L) |
 | pure AZ self-play, before the value-head fix | 37–43% |
 | 256-net + belief features (old champion) | 45.0% (200 games, ±3.5) |
 | native loop, 100k games | 47.5% mean / 49.9% best (32 evals) |

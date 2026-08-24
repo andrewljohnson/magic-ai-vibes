@@ -214,13 +214,15 @@ def main():
     ap.add_argument("--init-from", default="",
                     help="Save-prefix of an existing checkpoint to warm "
                          "start from, instead of random init.")
-    ap.add_argument("--revert-sd", type=float, default=1.0,
+    ap.add_argument("--revert-sd", type=float, default=0.0,
                     help="Revert when a gate is this many SE below best. "
                          "The gate is DETERMINISTIC -- fixed seeds, fixed "
                          "opponent, no root noise -- so comparing two nets "
-                         "over the same 300 games is paired and a drop is "
-                         "real. At 2 SE a run walked 48.7 -> 46.8 -> 43.3 "
-                         "with every step inside the band and no revert.")
+                         "over the same 300 games is paired and EXACT: "
+                         "re-gating frozen weights reproduced 54.3% to the "
+                         "game. So any decline is real and 0 is right -- "
+                         "keep the best net, and let each 20-round attempt "
+                         "be a fresh try from it.")
     ap.add_argument("--revert-on-regress", type=int, default=1,
                     help="Restore the best-gated weights when a gate comes "
                          "back more than 2 SE below best. No training metric "
@@ -298,19 +300,14 @@ def main():
     # next net learns from. We keep the best-gated weights, and revert to
     # them when a gate comes back clearly below best.
     best = {"rate": None, "policy": None, "value": None, "round": None}
-    # Consecutive reverts, and the gates that produced them.
+    # Gates that came back below best, for logging only.
     #
-    # "Best" is a MAX over noisy 300-game evaluations, so it is partly a
-    # max-of-noise statistic (RESULTS.md says this about best-of-N numbers
-    # generally). A best that is one lucky SE high can never be cleared
-    # again: every honest gate reads below it, reverts, and the run freezes.
-    # That happened -- 44.0% promoted at round 79, then 38.3% and 38.0% on
-    # nets descended from it, pooling to 38.2% +/- 2.0.
-    #
-    # So after two consecutive reverts we accept the evidence and
-    # RECALIBRATE the recorded best down to what those gates actually
-    # measured, keeping the same weights. The bar becomes fair again and
-    # the run can move.
+    # The gate is EXACTLY DETERMINISTIC: fixed seeds (900_000 + g), fixed
+    # opponent, search with no root noise. Re-gating frozen best weights
+    # reproduced 54.3% to the game -- 163W 0D 137L, 1 capped, identical to
+    # the original run. So comparing two nets over these 300 games is
+    # paired and exact, a decline is a real difference in play, and "best
+    # was a lucky reading" cannot happen.
     reverts = []
     # Per-deck sampling weight for self-play pairings, refreshed from each
     # gate's matchup breakdown. Uniform until the first gate.
@@ -639,17 +636,18 @@ def main():
                     f"({100*best['rate']:.1f}%): this gate {100*rate:.1f}% "
                     f"is more than {args.revert_sd:g} SE below best",
                     args.log)
-                if len(reverts) >= 2:
-                    # Two honest measurements below the record; the record
-                    # was the outlier, not these.
-                    recal = sum(reverts) / len(reverts)
-                    log(f"    RECALIBRATED best {100*best['rate']:.1f}% -> "
-                        f"{100*recal:.1f}% ({len(reverts)} consecutive gates "
-                        f"below it pool to that; the record was a high "
-                        f"reading, and an unclearable bar freezes the run)",
-                        args.log)
-                    best["rate"] = recal
-                    reverts = []
+                # NO RECALIBRATION. An earlier version lowered the
+                # recorded best after two consecutive reverts, on the
+                # theory that best was a lucky high reading. THE GATE IS
+                # EXACTLY DETERMINISTIC -- fixed seeds, fixed opponent, no
+                # root noise -- and re-gating the frozen best weights
+                # reproduced 54.3% to the game (163W 0D 137L, 1 capped),
+                # identical to the original. So a lucky reading is not
+                # possible; low gates come from DESCENDANT nets that are
+                # genuinely worse. Lowering the bar then let a weaker net
+                # be promoted over the best weights, which is the opposite
+                # of what this machinery is for.
+
             else:
                 log(f"    kept (best {100*best['rate']:.1f}% "
                     f"@ round {best['round']})", args.log)
