@@ -35,7 +35,7 @@ mod decks;
 mod json_common;
 mod observation_json;
 
-pub use action_json::{action_json, protocol_actions};
+pub use action_json::{protocol_actions_from, action_json, protocol_actions};
 pub use catalog_json::{catalog_json, catalog_json_for_format};
 pub use decks::{
     deck_by_name, deck_by_name_for_format, deck_names, deck_names_for_format, parse_format_slug,

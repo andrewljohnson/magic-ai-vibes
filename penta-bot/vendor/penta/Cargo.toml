@@ -1,5 +1,7 @@
 [workspace]
-members = [".", "wasm", "bindings/penta-ffi", "tools/source-file-sizes"]
+# Vendored for spz-core: the wasm and tooling members are not copied,
+# because nothing here builds them.
+members = ["."]
 # penta-py links against a Python toolchain, so it builds on its own rather
 # than dragging that requirement into every `cargo test`.
 exclude = ["bindings/penta-py"]

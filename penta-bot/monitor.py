@@ -110,6 +110,7 @@ def parse_log(path):
     name = os.path.basename(path)[:-4]
     gates, config, done = [], "", None
     az, az_games, az_last = False, 0, {}
+    az_hist = []
     stamps = []
     matchups = []
     try:
@@ -124,6 +125,9 @@ def parse_log(path):
                     m = AZ_ROUND_RE.search(line)
                     if m:
                         az_games += int(m.group(2))
+                        az_hist.append((az_games, float(m.group(3)),
+                                        int(m.group(4)), float(m.group(5)),
+                                        float(m.group(6))))
                         az_last = {
                             "gps": float(m.group(3)),
                             "fin": int(m.group(4)),
@@ -297,6 +301,12 @@ def parse_log(path):
         # the count off gates[-1] under-reported it by up to that many
         # rounds -- 960 shown against 1,824 played.
         "games": max(gates[-1]["games"] if gates else 0, az_games),
+        # Round-level progress, so a run that has not gated yet is still
+        # visible. The chart plots gates only, and with --gate-every 20
+        # that left a fresh run looking like an empty page next to a table
+        # of finished runs.
+        "live": az_last,
+        "hist": az_hist[-60:],
         "n": len(pcts),
         "last": pcts[-1] if pcts else None,
         "best": max(pcts) if pcts else None,
@@ -475,6 +485,12 @@ tr:last-child td{border-bottom:none}
 Gates are 400 games (standard error ±2.5 points), so compare <b>means</b>,
 never a single gate.</p>
 <div class="tiles" id="tiles"></div>
+<div class="card"><h2>Now training</h2>
+  <p class="foot" style="margin:0 0 10px">Round-by-round progress of the
+  live run. The chart below plots GATES, which only happen every
+  --gate-every rounds, so this is what a run looks like between them.</p>
+  <div id="now"></div>
+</div>
 <div class="card"><h2>Gate rate vs games played</h2>
   <div class="chartbox"><svg id="chart" width="1040" height="380"></svg></div>
   <div class="legend" id="legend"></div>
@@ -660,6 +676,7 @@ function draw(){
       <td class="l cfg">${r.done?"done — "+r.done
         :r.stale?`stopped — idle ${r.idle_min}m`+(r.cadence_min?` (gates ~${r.cadence_min}m)`:"")
         :(r.config||"").replace(/^games=\S+ /,"").slice(0,58)}</td></tr>`;}).join("");
+  now(runs);
   panels(runs);
   grid(runs);
   document.getElementById("foot").textContent =
@@ -726,6 +743,42 @@ function panels(runs){
 // this is magnitude, not identity, so a categorical palette would be wrong
 // and a rainbow worse. 50% is the meaningful midpoint, so the scale is
 // diverging around it: below is warm, above is cool.
+function now(runs){
+  const box=document.getElementById("now");
+  const live=runs.filter(r=>!r.stale && r.done===null && r.live &&
+                            Object.keys(r.live).length);
+  if(!live.length){box.innerHTML=`<p class="empty">No run is training right now.</p>`;return;}
+  box.innerHTML=live.map(r=>{
+    const l=r.live, h=r.hist||[];
+    const spark=(idx,lo,hi)=>{
+      if(h.length<2) return "";
+      const W=260,H=28;
+      const pts=h.map((p,i)=>{
+        const x=i*(W/(h.length-1));
+        const v=Math.max(lo,Math.min(hi,p[idx]));
+        return `${x.toFixed(1)},${(H-(v-lo)/(hi-lo)*H).toFixed(1)}`;
+      }).join(" ");
+      return `<svg width="${W}" height="${H}"><polyline points="${pts}"
+        fill="none" stroke="var(--s1)" stroke-width="2"/></svg>`;
+    };
+    const cell=(lab,val,extra="")=>`<div style="min-width:120px">
+      <div class="foot" style="margin:0">${lab}</div>
+      <div style="font-size:18px;font-variant-numeric:tabular-nums">${val}</div>
+      ${extra}</div>`;
+    return `<div><b>${r.name}</b> <span class="foot">${r.label||""}</span></div>
+     <div style="display:flex;gap:22px;flex-wrap:wrap;margin-top:8px">
+      ${cell("games", r.games.toLocaleString())}
+      ${cell("games/sec", (l.gps||0).toFixed(2), spark(1,0,2))}
+      ${cell("finished", (l.fin||0)+"%", spark(2,0,100))}
+      ${cell("policy entropy", (l.entropy||0).toFixed(3), spark(3,0,1.8))}
+      ${cell("search entropy", (l.tgt_ent||0).toFixed(3), spark(4,0,1))}
+      ${cell("value mse / base",
+             (l.vmse||0).toFixed(3)+" / "+(l.vbase||0).toFixed(3))}
+      ${cell("last gate", r.last!=null? r.last.toFixed(1)+"%" : "none yet")}
+     </div>`;
+  }).join("<hr style='border:0;border-top:1px solid var(--border);margin:14px 0'>");
+}
+
 function grid(runs){
   const rs=runs.filter(r=>r.matchups&&r.matchups.length);
   const box=document.getElementById("grid");

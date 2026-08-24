@@ -678,6 +678,83 @@ impl Game {
     }
 
     pub fn observe(&self, viewer: PlayerId) -> PlayerObservation {
+        self.observe_impl(viewer, true, true)
+    }
+
+    /// SPZ VENDOR PATCH (proposed upstream): the protocol action list for a
+    /// player WITHOUT building an observation.
+    ///
+    /// `protocol_actions` reads only the legal-action list and the pending
+    /// decision, both of which live on the game. Going through
+    /// `PlayerObservation` to reach them means allocating every zone and
+    /// every counter name first. A native search asks for options at every
+    /// ply, and most plies have exactly one, so it was building whole
+    /// observations to discover it had no choice to make.
+    /// SPZ VENDOR PATCH: the raw legal actions AND their protocol
+    /// expansion, computed once.
+    ///
+    /// Enumerating legal actions is the expensive half of `observe`; the
+    /// other half is building the zones. A search wants the action list at
+    /// every ply but the zones only when it has a real choice to score, and
+    /// asking for them separately made it enumerate twice. This hands back
+    /// both, so `observe_with_legal` can finish the job without repeating
+    /// the enumeration.
+    #[must_use]
+    pub fn legal_and_protocol_actions(
+        &self,
+        viewer: PlayerId,
+    ) -> (Vec<crate::Action>, Vec<crate::Action>) {
+        let legal = self.legal_actions(viewer);
+        let decision = self.pending_decisions.first().and_then(|decision| {
+            (decision.observation.visibility == DecisionVisibility::Public
+                || decision.observation.player == viewer)
+                .then_some(&decision.observation)
+        });
+        let expanded = crate::protocol::protocol_actions_from(&legal, decision);
+        (legal, expanded)
+    }
+
+    /// SPZ VENDOR PATCH: an observation that reuses an already-enumerated
+    /// legal-action list, and skips the reconstruction checkpoint.
+    #[must_use]
+    pub fn observe_with_legal(
+        &self,
+        viewer: PlayerId,
+        legal_actions: Vec<crate::Action>,
+    ) -> PlayerObservation {
+        let mut observation = self.observe_impl(viewer, false, false);
+        observation.legal_actions = legal_actions;
+        observation
+    }
+
+    #[must_use]
+    pub fn protocol_actions_for(&self, viewer: PlayerId) -> Vec<crate::Action> {
+        let decision = self.pending_decisions.first().and_then(|decision| {
+            (decision.observation.visibility == DecisionVisibility::Public
+                || decision.observation.player == viewer)
+                .then_some(&decision.observation)
+        });
+        crate::protocol::protocol_actions_from(&self.legal_actions(viewer), decision)
+    }
+
+    /// SPZ VENDOR PATCH (proposed upstream): the same observation WITHOUT
+    /// the reconstruction checkpoint.
+    ///
+    /// `checkpoint` is `serde_json::to_value(self.snapshot(viewer))` -- a
+    /// whole game snapshot allocated and serialised into a JSON value tree.
+    /// A hosted bot needs it to rebuild a world from an observation. A
+    /// NATIVE search does not: it already holds the `Game` and clones it
+    /// directly, and never reads the field. But search calls observe at
+    /// every ply of every iteration, so it was paying for a checkpoint
+    /// thousands of times per game and discarding all of them. Measured on
+    /// protocol 29, observe was 39.6% of search time.
+    #[must_use]
+    pub fn observe_no_checkpoint(&self, viewer: PlayerId) -> PlayerObservation {
+        self.observe_impl(viewer, false, true)
+    }
+
+    fn observe_impl(&self, viewer: PlayerId, checkpoint: bool,
+                    enumerate_actions: bool) -> PlayerObservation {
         let player = &self.players[viewer.index()];
         let opponent = &self.players[viewer.opponent().index()];
         PlayerObservation {
@@ -779,8 +856,17 @@ impl Game {
                     .then(|| decision.observation.clone())
             }),
             result: self.result,
-            legal_actions: self.legal_actions(viewer),
-            checkpoint: self.checkpoint_json(viewer),
+            legal_actions: if enumerate_actions {
+                self.legal_actions(viewer)
+            } else {
+                // Filled in by the caller, which already enumerated.
+                Vec::new()
+            },
+            checkpoint: if checkpoint {
+                self.checkpoint_json(viewer)
+            } else {
+                serde_json::Value::Null
+            },
         }
     }
 

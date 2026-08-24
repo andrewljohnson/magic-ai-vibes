@@ -59,7 +59,7 @@ impl Policy {
         let action = actions.get(action_index)?.clone();
         let mut copy = g.clone();
         copy.apply(seat, action).ok()?;
-        let after = copy.observe(seat);
+        let after = copy.observe_no_checkpoint(seat);
         Some((copy, after))
     }
 
@@ -109,7 +109,7 @@ impl Policy {
             match terminal_value(&copy, seat) {
                 Some(t) => fixed.push((i, t)),
                 None => {
-                    rows.extend(features(&copy.observe(seat),
+                    rows.extend(features(&copy.observe_no_checkpoint(seat),
                                          copy.in_pregame(), &self.tables,
                                          decks));
                     idx.push(i);
@@ -375,7 +375,7 @@ impl Policy {
                 if !settle_all_pass(&mut copy) {
                     continue;
                 }
-                let cand = DomState::of(&copy.observe(seat), seat,
+                let cand = DomState::of(&copy.observe_no_checkpoint(seat), seat,
                                         &self.tables);
                 if cand.dominated_by_pass(&base, upside) {
                     pruned.insert(i);
@@ -401,7 +401,7 @@ impl Policy {
                 if !settle_all_pass(&mut copy) {
                     continue;
                 }
-                let cand = DomState::of(&copy.observe(seat), seat,
+                let cand = DomState::of(&copy.observe_no_checkpoint(seat), seat,
                                         &self.tables);
                 if cand.land_dominates_pass(&base) {
                     for &pi in &passes { pruned.insert(pi); }

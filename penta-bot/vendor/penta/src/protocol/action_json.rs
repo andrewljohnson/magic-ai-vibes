@@ -188,12 +188,30 @@ pub fn action_json(action: &Action) -> Value {
 /// [`super::BotGame::choose_decision`].
 #[must_use]
 pub fn protocol_actions(observation: &PlayerObservation) -> Vec<Action> {
-    let mut actions = Vec::with_capacity(observation.legal_actions.len());
-    for action in &observation.legal_actions {
+    protocol_actions_from(&observation.legal_actions, observation.decision.as_ref())
+}
+
+/// SPZ VENDOR PATCH (proposed upstream): the same expansion, from the two
+/// pieces it actually reads.
+///
+/// `protocol_actions` needs only the legal-action list and the pending
+/// decision, but taking a `&PlayerObservation` forces callers to build a
+/// whole observation first -- every zone, every counter name as an owned
+/// String. A native search asks "what are my options here" at every ply of
+/// every iteration and, measured on protocol 29, 198 of 279 plies in an
+/// episode turned out to have exactly ONE option. Those plies were paying
+/// for a full observation to learn they had no choice.
+#[must_use]
+pub fn protocol_actions_from(
+    legal_actions: &[Action],
+    decision: Option<&crate::DecisionObservation>,
+) -> Vec<Action> {
+    let mut actions = Vec::with_capacity(legal_actions.len());
+    for action in legal_actions {
         if matches!(action, Action::Concede) {
             continue;
         }
-        match (action, observation.decision.as_ref()) {
+        match (action, decision) {
             (Action::ChooseDecision { decision, options }, Some(pending))
                 if options.is_empty() && *decision == pending.id =>
             {

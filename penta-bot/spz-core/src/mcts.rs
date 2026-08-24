@@ -315,7 +315,7 @@ impl<'a> Ismcts<'a> {
             return self.policy.rollout_to_end(world, self.our_seat,
                                               self.deck_slots);
         }
-        let obs = world.observe(self.our_seat);
+        let obs = world.observe_no_checkpoint(self.our_seat);
         let f = features(&obs, world.in_pregame(), &self.policy.tables,
                          self.deck_slots);
         if self.cfg.leaf_blend {
@@ -345,7 +345,7 @@ impl<'a> Ismcts<'a> {
                 out[k] = t;
                 continue;
             }
-            rows.extend(features(&copy.observe(seat), copy.in_pregame(),
+            rows.extend(features(&copy.observe_no_checkpoint(seat), copy.in_pregame(),
                                  &self.policy.tables, self.deck_slots));
             slots.push(k);
         }
@@ -369,7 +369,7 @@ impl<'a> Ismcts<'a> {
         if let Some(t) = terminal_value(&copy, seat) {
             return t;
         }
-        let f = features(&copy.observe(seat), copy.in_pregame(),
+        let f = features(&copy.observe_no_checkpoint(seat), copy.in_pregame(),
                          &self.policy.tables, self.deck_slots);
         self.policy.head.value(&f)
     }
@@ -419,7 +419,22 @@ impl<'a> Ismcts<'a> {
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
             };
-            let obs = timed!(5, world.observe(seat));
+            // Ask for the options BEFORE building an observation. Most
+            // plies have exactly one legal action, and an observation is
+            // expensive: every zone, every counter name as an owned String.
+            // Measured on protocol 29, 198 of 279 plies in an episode were
+            // forced, and each was paying for a full observation to learn
+            // it had no choice.
+            // Enumerate ONCE, then only build the zones when there is a
+            // real choice to score. A forced ply skips the observation
+            // entirely; a branching ply hands its already-enumerated list
+            // to observe rather than making it enumerate again.
+            let (raw, quick) = timed!(6, world.legal_and_protocol_actions(seat));
+            if quick.len() == 1 {
+                let _ = timed!(7, world.apply(seat, quick[0].clone()));
+                continue;
+            }
+            let obs = timed!(5, world.observe_with_legal(seat, raw));
             if seat != self.our_seat {
                 // Opponent as a fixed environment (never branched).
                 let opp_action = timed!(3, match self.cfg.opponent {
@@ -468,12 +483,8 @@ impl<'a> Ismcts<'a> {
                 }
                 continue;
             }
-            // OUR seat.
-            let actions = timed!(6, protocol_actions(&obs));
-            if actions.len() == 1 {
-                let _ = world.apply(seat, actions[0].clone());
-                continue;
-            }
+            // OUR seat. `quick` already holds exactly this list.
+            let actions = quick;
             let avail = timed!(1, self.available(world, &obs, &actions, seat));
             if avail.len() == 1 {
                 let _ = world.apply(seat, actions[avail[0]].clone());
@@ -662,7 +673,7 @@ impl<'a> Ismcts<'a> {
     pub fn search(&self, real: &BotGame, prng: &mut SplitMix64)
                   -> (usize, Vec<u32>) {
         let raw = real.observe_json(self.our_seat);
-        let root_obs = real.core_game().observe(self.our_seat);
+        let root_obs = real.core_game().observe_no_checkpoint(self.our_seat);
         self.run(&raw, &root_obs, real.core_game(), prng)
     }
 
@@ -685,7 +696,7 @@ impl<'a> Ismcts<'a> {
         let core = BotGame::from_observation_json(raw, &hidden0, seed0)
             .ok()?
             .into_core_game();
-        let root_obs = core.observe(self.our_seat);
+        let root_obs = core.observe_no_checkpoint(self.our_seat);
         Some(self.run(raw, &root_obs, &core, prng))
     }
 
