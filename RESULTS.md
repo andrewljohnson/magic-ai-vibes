@@ -317,6 +317,25 @@ and the inputs were out of distribution. It reported |logit| 26.8 and 92.6%
 of decisions blind -- roughly five times the true saturation. The
 conclusion survived; the numbers did not.
 
+### The pure self-play line passed parity: 54.3%
+
+2026-08-24, run `az_deep` (64-sim self-play targets, 32-sim gate for
+comparability), ~19.6k games, both nets from a warm start off the parity
+checkpoint. Gate history:
+
+| round | 19 | 59 | 99 | 179 | 299 | 359 |
+|---|---|---|---|---|---|---|
+| gate | 49.7 | 50.0 | 52.7 | 53.5 | 57.3 | **54.3 (best)** |
+
+Above parity (50%) and above the AAC line's 51.1%, from a build with no
+handcrafted bootstrapping anywhere in the loop.
+
+**The 57.3% reading was not real, and the machinery caught it.** Two
+consecutive gates below it pooled to 53.0%, best-rate recalibration fired,
+and the run then honestly promoted 54.3%. Without that, a lucky high gate
+would have frozen the ratchet permanently -- which it had already done once
+at 44.0%.
+
 ### Fixing the value head revived search: +0.7 points -> +13.3, and the
 ### gate went 44.0% -> 49.2%
 
@@ -450,8 +469,9 @@ The strength curve has never plateaued.
 | stage | win rate vs the built-in bot |
 |---|---|
 | **PARITY with the built-in bot (the actual bar)** | **50.0%** |
-| **pure AZ self-play, after the value-head fix** | **49.2% ±2.9** |
-| pure AZ self-play, before that fix | 37–43% |
+| **pure AZ self-play, best net, 32-sim gate** | **54.3%** |
+| same lineage at 128-sim deployment depth | **54.5% ±2.9** (on the 49.7% net) |
+| pure AZ self-play, before the value-head fix | 37–43% |
 | 256-net + belief features (old champion) | 45.0% (200 games, ±3.5) |
 | native loop, 100k games | 47.5% mean / 49.9% best (32 evals) |
 | **same actor, 800-game evaluation** | **51.1% ±1.8** |

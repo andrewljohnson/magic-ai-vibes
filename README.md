@@ -87,7 +87,7 @@ reference path.
 |---|---|
 | **parity with the built-in bot** | **50.0%** |
 | best trained actor, 800-game evaluation | **51.1%** |
-| pure AZ self-play from random, ~17k games | 37–43% |
+| **pure AZ self-play, best net** | **54.3%** |
 
 The bar is **50%** — the gate scores our win rate head-to-head against the
 built-in bot, so anything below 50% is losing to it. (A "31.6%" baseline
