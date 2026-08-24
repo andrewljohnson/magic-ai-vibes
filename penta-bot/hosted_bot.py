@@ -193,6 +193,21 @@ def main():
                              "Without it, the legacy determinized nets are "
                              "used.")
     parser.add_argument("--actor-hidden", type=int, default=256)
+    parser.add_argument("--az", default=None,
+                        help="AlphaZero save-prefix to play with, e.g. "
+                             "'az_deep' (reads <prefix>_value.spzw and "
+                             "<prefix>_policy.azp). Plays WITH SEARCH, "
+                             "which is worth ~11 points over the raw "
+                             "policy: 35.8%% at 1 sim, 41.7%% at 32, "
+                             "46.7%% at 128. Takes precedence over --actor.")
+    parser.add_argument("--az-iters", type=int, default=128,
+                        help="search simulations per move. More is "
+                             "stronger and costs clock; 128 measured "
+                             "+11 points over none.")
+    parser.add_argument("--az-best", action="store_true",
+                        help="use the <prefix>_{policy_best,value_best} "
+                             "checkpoint -- the best-GATED net rather than "
+                             "whatever the live run last exported.")
     parser.add_argument("--move-budget", type=float, default=20.0)
     parser.add_argument("--heartbeat", type=float, default=10.0)
     args = parser.parse_args()
@@ -218,7 +233,20 @@ def main():
         sys.modules["penta"] = engine
         spec.loader.exec_module(engine)
 
-    if args.actor:
+    if args.az:
+        from hosted_policy import AzSearchPolicy
+        # The best-gated checkpoint is the one to deploy: a live run's
+        # current export can be mid-regression, and gates measured drops of
+        # 5-11 points between promotions.
+        pol = f"{args.az}_policy_best.azp" if args.az_best else \
+            f"{args.az}_policy.azp"
+        val = f"{args.az}_value_best.spzw" if args.az_best else \
+            f"{args.az}_value.spzw"
+        policy = AzSearchPolicy(val, pol, our_deck=args.deck,
+                                iters=args.az_iters)
+        print(f"AlphaZero + SEARCH: {pol} / {val} deck={args.deck} "
+              f"iters={args.az_iters}", flush=True)
+    elif args.actor:
         from hosted_policy import AacPolicy
         policy = AacPolicy(args.actor, hidden=args.actor_hidden,
                            our_deck=args.deck, engine=engine)

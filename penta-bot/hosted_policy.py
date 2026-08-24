@@ -797,3 +797,78 @@ class AacPolicy:
             return min(actions,
                        key=lambda a: (_TIE_ORDER.get(a.get("type"), 7),
                                       a["index"]))["index"]
+
+
+class AzSearchPolicy:
+    """Play the AlphaZero nets on the hosted server, WITH search.
+
+    Why this exists: the AZ policy head is a factorised `.azp`, and every
+    existing hosted path either scores afterstates with an `Mlp` actor or
+    calls `ismcts_choose`, which builds both search roles from `Mlp` files.
+    So the deployed bot could not search with the net it was trained with
+    and played a raw 1-ply pick instead. Measured on one net, 120 games:
+
+        raw policy (1 sim)   35.8% +/- 4.4
+        32 sims              41.7% +/- 4.5
+        128 sims             46.7% +/- 4.6
+
+    About eleven points, bought with clock the room already allows.
+
+    Unlike AacPolicy this needs no afterstate prediction: search
+    reconstructs the real game from the observation and forks it natively,
+    so there is no predicted-vs-true mismatch to erode strength.
+
+    The opponent's decklist is CLASSIFIED from revealed cards, matching
+    training -- the server does not disclose it.
+    """
+
+    def __init__(self, value_path, policy_path, our_deck="Sligh",
+                 decklists_path="builtin-decklists.json", iters=128,
+                 c_puct=1.5, max_actions=64, catalog_json=None):
+        import aac_native as _AN
+        here = os.path.dirname(os.path.abspath(__file__))
+        self.spz = _AN.load_spz_core()
+        if not hasattr(self.spz, "az_choose"):
+            raise ImportError("spz_core lacks az_choose; rebuild it")
+        absolute = lambda p: p if os.path.isabs(p) else os.path.join(here, p)
+        self.value_path = absolute(value_path)
+        self.policy_path = absolute(policy_path)
+        self.decklists_path = absolute(decklists_path)
+        self.our_deck = our_deck
+        self.iters = iters
+        self.c_puct = c_puct
+        self.max_actions = max_actions
+        if catalog_json is None:
+            from extractor import pinned_catalog
+            catalog_json = json.dumps(pinned_catalog())
+        self.catalog_json = catalog_json
+        self.decks = load_decklists(self.decklists_path)
+        self.searched = 0
+        self.forced = 0
+        self.failed = 0
+
+    def classify_opponent(self, obs):
+        return classify_opponent(self.decks, obs)
+
+    def choose(self, obs, raw_json=None):
+        actions = obs.get("legalActions") or ()
+        if not actions:
+            return 0
+        if len(actions) == 1:
+            self.forced += 1
+            return actions[0]["index"]
+        raw = raw_json if raw_json is not None else json.dumps(obs)
+        opp = self.classify_opponent(obs) or self.our_deck
+        try:
+            i = self.spz.az_choose(
+                self.catalog_json, self.value_path, self.policy_path,
+                self.iters, self.c_puct, self.decklists_path, raw,
+                self.our_deck, opp, self.max_actions)
+            self.searched += 1
+        except Exception:
+            # Never forfeit a game over a search failure: fall back to the
+            # first legal action in the engine's own ordering.
+            self.failed += 1
+            return actions[0]["index"]
+        i = max(0, min(int(i), len(actions) - 1))
+        return actions[i]["index"]

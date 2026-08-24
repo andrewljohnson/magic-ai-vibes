@@ -417,6 +417,67 @@ fn ismcts_choose(
     Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
 }
 
+/// Choose ONE move by AlphaZero search, for the hosted bot.
+///
+/// `ismcts_choose` builds both search roles from `Mlp` files; the AZ
+/// policy head is a factorised `.azp`, so the deployed bot had no way to
+/// search with the net it was trained with and fell back to a raw 1-ply
+/// pick. Measured on the same net, 120 games: raw policy 35.8%, 32 sims
+/// 41.7%, 128 sims 46.7% -- so this is worth about eleven points of
+/// playing strength, paid for in clock the room already allows.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn az_choose(
+    catalog_json: String, value_path: String, policy_path: String,
+    iters: usize, c_puct: f64, decklists_path: String, raw_obs: String,
+    our_deck: String, opp_deck: String, max_actions: usize,
+) -> PyResult<usize> {
+    let policy = build_policy(&catalog_json, &value_path, &value_path,
+                              0.0, 0, 1, 400, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let fh = crate::action_feat::PolicyHead::load(&policy_path)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+            format!("policy head {policy_path}: {e}")))?;
+    let policy = crate::policy::Policy { fast_head: Some(fh), ..policy };
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let value: serde_json::Value = serde_json::from_str(&raw_obs)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    let seat = value.get("seat").and_then(|s| s.as_str())
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(
+            "observation missing seat"))?;
+    let our_seat = if seat == "p1" { penta::PlayerId::One }
+                   else { penta::PlayerId::Two };
+    let (d1, d2) = if our_seat == penta::PlayerId::One {
+        (our_deck.as_str(), opp_deck.as_str())
+    } else {
+        (opp_deck.as_str(), our_deck.as_str())
+    };
+    let deck_slots = deck_slots_for(&policy.tables, &decks, d1, d2);
+    let cfg = crate::mcts::MctsConfig {
+        iters, c_puct, inert: false,
+        // Off: measured 6.4x slower for identical strength (RESULTS.md).
+        use_dominance: false,
+        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        opponent: crate::mcts::OpponentModel::Greedy,
+        max_decisions: 800,
+        max_depth: 400,
+        // Deployment plays the policy the loop produced, not a noised one.
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
+        max_actions,
+    };
+    let search = crate::mcts::Ismcts {
+        policy: &policy, decks: &decks, deck_slots: &deck_slots,
+        my_deck: &our_deck, opp_deck: &opp_deck, our_seat, cfg,
+    };
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    raw_obs.hash(&mut hasher);
+    let mut prng = crate::prng::SplitMix64::new(hasher.finish() ^ 0xD1B5);
+    Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
+}
+
 /// Native SO-ISMCTS gate: play `n_games` full games vs the engine's
 /// handcrafted bot across the deck matchup (alternating seats, mirroring
 /// gate_hosted's pairing), entirely in Rust -- no per-move Python/JSON
@@ -1135,6 +1196,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ismcts_choose, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_gate, m)?)?;
     m.add_function(wrap_pyfunction!(az_gate, m)?)?;
+    m.add_function(wrap_pyfunction!(az_choose, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
