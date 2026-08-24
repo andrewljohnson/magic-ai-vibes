@@ -214,6 +214,13 @@ def main():
     ap.add_argument("--init-from", default="",
                     help="Save-prefix of an existing checkpoint to warm "
                          "start from, instead of random init.")
+    ap.add_argument("--revert-sd", type=float, default=1.0,
+                    help="Revert when a gate is this many SE below best. "
+                         "The gate is DETERMINISTIC -- fixed seeds, fixed "
+                         "opponent, no root noise -- so comparing two nets "
+                         "over the same 300 games is paired and a drop is "
+                         "real. At 2 SE a run walked 48.7 -> 46.8 -> 43.3 "
+                         "with every step inside the band and no revert.")
     ap.add_argument("--revert-on-regress", type=int, default=1,
                     help="Restore the best-gated weights when a gate comes "
                          "back more than 2 SE below best. No training metric "
@@ -615,7 +622,8 @@ def main():
                 log(f"    PROMOTED: new best {100*rate:.1f}%"
                     + (f" (was {100*prev:.1f}%)" if prev is not None else
                        " (first gate)"), args.log)
-            elif args.revert_on_regress and rate < best["rate"] - 2 * se:
+            elif args.revert_on_regress and \
+                    rate < best["rate"] - args.revert_sd * se:
                 reverts.append(rate)
                 policy.load_state_dict(best["policy"])
                 value.load_state_dict(best["value"])
@@ -629,7 +637,8 @@ def main():
                 export_value(value, val_path)
                 log(f"    REVERTED to round {best['round']} "
                     f"({100*best['rate']:.1f}%): this gate {100*rate:.1f}% "
-                    f"is more than 2 SE below best", args.log)
+                    f"is more than {args.revert_sd:g} SE below best",
+                    args.log)
                 if len(reverts) >= 2:
                     # Two honest measurements below the record; the record
                     # was the outlier, not these.
