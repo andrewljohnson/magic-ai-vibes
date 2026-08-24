@@ -8,6 +8,47 @@ gain has to be structural.** The missing structure is a value function.
 
 ---
 
+## BLOCKED: the public server is seven wire epochs ahead
+
+Discovered 2026-08-24 trying to deploy. Registration is refused before a
+single game:
+
+    409 {"code":"incompatible_bot",
+         "server":{"protocolVersion":29,"capabilities":["reconstruction.checkpoint.v8"]},
+         "bot":{"protocolVersion":21}}
+
+`protocolVersion` is the breaking bot-wire EPOCH. Our engine (0.7.0) speaks
+22; `penta.lacker.workers.dev` speaks 29.
+
+Fixed already: the bot never declared `{protocolVersion, capabilities,
+requiredCapabilities}` at all, so the server defaulted it to 21. It now
+sends its real manifest at registration and heartbeat, with an EMPTY
+capability list -- the docs are explicit that a bot which only reads
+`legalActions` must not echo the server's advertised capabilities without
+implementing them.
+
+That is necessary but not sufficient: 22 != 29 either way.
+
+**The upgrade is not just a rebuild, and this is the part to think about
+before starting.** The local penta checkout is 173 commits behind, and 120
+of those are `Catalog <card>` commits. Our pinned catalog holds 244 cards,
+and the feature layout indexes card DEFINITIONS directly (`t.defs` in
+`action_feat.rs`, and the belief block's per-definition counts). A larger
+card pool moves every feature slot after it, so **the trained nets do not
+transfer** -- upgrading the engine most likely means retraining.
+
+Protocol 22 also introduced `simulationFingerprint` precisely so trained
+weights can be pinned to the simulation that produced them, and ours will
+not match.
+
+→ Options, in the order a human should weigh them:
+  1. Stay on 22 and keep improving offline. The 54.3% number is real and
+     measured; it just cannot be played on the public server today.
+  2. Upgrade the engine and retrain from scratch on the new catalog. The
+     loop is now known to work end to end, so this is time rather than
+     research -- roughly a day of self-play to get back to parity.
+  3. Ask upstream whether a protocol-22 compatibility window exists.
+
 ## THE NEXT FEW THINGS (ordered, 2026-08-22)
 
 ### A. Fix the aggro matchups — biggest measured lever

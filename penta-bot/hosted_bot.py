@@ -55,9 +55,39 @@ def _request(url, payload=None, headers=None, timeout=30):
         return json.loads(resp.read().decode())
 
 
-def register(server, name, deck):
+def compatibility(engine=None):
+    """The manifest the server matches us against.
+
+    Protocol 22 made `protocolVersion` the breaking bot-wire EPOCH, and
+    hosted bots must declare `{protocolVersion, capabilities,
+    requiredCapabilities}` at registration and heartbeat. We were sending
+    neither, so the server defaulted us to protocol 21 and refused:
+
+        409 {"code":"incompatible_bot",
+             "server":{"protocolVersion":29,...},
+             "bot":{"protocolVersion":21,...}}
+
+    Capabilities stay EMPTY on purpose. The docs are explicit that a bot
+    which only reads `legalActions` must not echo the server's advertised
+    capabilities without implementing them -- claiming
+    `reconstruction.checkpoint.v8` we do not support would fail later and
+    less legibly.
+    """
+    version = 22
+    if engine is not None:
+        try:
+            version = int(engine.protocol_version())
+        except Exception:
+            pass
+    return {"protocolVersion": version,
+            "capabilities": [],
+            "requiredCapabilities": []}
+
+
+def register(server, name, deck, engine=None):
     me = _request(f"{server}/_bots/register",
-                  {"name": name, "deck": deck})
+                  {"name": name, "deck": deck,
+                   "compatibility": compatibility(engine)})
     state = {"server": server, "name": name, "deck": deck, **me}
     with open(STATE_PATH, "w") as f:
         json.dump(state, f)
@@ -66,14 +96,14 @@ def register(server, name, deck):
     return state
 
 
-def load_or_register(server, name, deck):
+def load_or_register(server, name, deck, engine=None):
     if os.path.exists(STATE_PATH):
         with open(STATE_PATH) as f:
             state = json.load(f)
         if state.get("server") == server:
             print(f"resuming registration id={state['id']}", flush=True)
             return state
-    return register(server, name, deck)
+    return register(server, name, deck, engine)
 
 
 def fallback_choice(obs):
@@ -267,7 +297,7 @@ def main():
     else:
         policy = HostedPolicy(weight=args.weight,
                               value_path=args.value_net)
-    state = load_or_register(args.server, args.name, args.deck)
+    state = load_or_register(args.server, args.name, args.deck, engine)
 
     # Heartbeat on its OWN thread. It used to share the main loop with
     # play_room, so while a game was in progress nothing was sent -- and
@@ -287,7 +317,8 @@ def main():
                     sid, tok = hb["state"]["id"], hb["state"]["token"]
                     done, hb["done"] = hb["done"], []
                 reply = _request(f"{args.server}/_bots/{sid}/heartbeat",
-                                 {"token": tok, "done": done})
+                                 {"token": tok, "done": done,
+                                  "compatibility": compatibility(engine)})
                 hb["beats"] += 1
                 if hb["beats"] % 360 == 1:      # roughly hourly
                     print(f"heartbeat ok ({hb['beats']} total)", flush=True)
