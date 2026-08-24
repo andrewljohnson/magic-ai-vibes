@@ -1,6 +1,76 @@
 use super::runtime_support::*;
 use super::*;
-use crate::{CostDef, PaymentDef};
+use crate::card::{AppliedRuleDef, InstalledTriggerDef, PartitionItemsDef, SplitIntoPilesDef};
+use crate::{
+    BattlefieldEntryModificationDef, CounterKind, DamageEventMatcherDef, ObjectSetBindingIndex,
+    ReplacementConditionDef, TargetIndex, ZoneChangeEventMatcherDef,
+};
+
+#[test]
+fn shared_zone_change_events_cover_every_committed_transition() {
+    for (from, to) in [
+        (ZoneKind::Library, ZoneKind::Battlefield),
+        (ZoneKind::Hand, ZoneKind::Battlefield),
+        (ZoneKind::Graveyard, ZoneKind::Battlefield),
+        (ZoneKind::Exile, ZoneKind::Battlefield),
+        (ZoneKind::Stack, ZoneKind::Battlefield),
+        (ZoneKind::Battlefield, ZoneKind::Graveyard),
+        (ZoneKind::Battlefield, ZoneKind::Exile),
+        (ZoneKind::Battlefield, ZoneKind::Hand),
+        (ZoneKind::Battlefield, ZoneKind::Library),
+    ] {
+        assert!(
+            shared_trigger_event(TriggerEventDef::zone_changed(
+                ObjectPredicateDef::Any,
+                Some(from),
+                Some(to),
+            )),
+            "{from:?} -> {to:?} is published by the shared runtime",
+        );
+    }
+
+    let live_only = ObjectPredicateDef::HasNonManaActivatedAbility;
+    assert!(shared_trigger_event(TriggerEventDef::zone_changed(
+        live_only,
+        Some(ZoneKind::Hand),
+        Some(ZoneKind::Battlefield),
+    )));
+    assert!(!shared_trigger_event(TriggerEventDef::zone_changed(
+        live_only,
+        Some(ZoneKind::Battlefield),
+        Some(ZoneKind::Graveyard),
+    )));
+
+    let damaged_death = ZoneChangeEventMatcherDef::new(
+        ObjectPredicateDef::Any,
+        Some(ZoneKind::Battlefield),
+        Some(ZoneKind::Graveyard),
+    )
+    .previously_damaged_by(ObjectRefDef::Source);
+    assert!(shared_trigger_event(TriggerEventDef::ZoneChanged(
+        damaged_death,
+    )));
+    assert!(!shared_trigger_event(TriggerEventDef::ZoneChanged(
+        ZoneChangeEventMatcherDef {
+            to: Some(ZoneKind::Exile),
+            ..damaged_death
+        },
+    )));
+}
+
+#[test]
+fn shared_trigger_event_audit_rejects_live_only_stack_predicates() {
+    let live_only = ObjectPredicateDef::HasNonManaActivatedAbility;
+    assert!(!shared_trigger_event(
+        TriggerEventDef::SpellCast(live_only,)
+    ));
+    assert!(!shared_trigger_event(TriggerEventDef::DamageDealt(
+        DamageEventMatcherDef {
+            source: DamageSourceMatcherDef::Matching(live_only),
+            ..DamageEventMatcherDef::ANY
+        },
+    )));
+}
 
 #[test]
 fn activated_cost_boundary_is_specific_to_the_source_zone() {
@@ -16,6 +86,14 @@ fn activated_cost_boundary_is_specific_to_the_source_zone() {
     assert!(shared_activated_costs(
         &[ZoneKind::Battlefield],
         &[mana, AbilityCostDef::TapSource],
+    ));
+    assert!(shared_activated_costs(
+        &[ZoneKind::Battlefield],
+        &[mana, AbilityCostDef::UntapSource],
+    ));
+    assert!(!shared_activated_costs(
+        &[ZoneKind::Hand],
+        &[AbilityCostDef::UntapSource],
     ));
     assert!(!shared_activated_costs(
         &[ZoneKind::Battlefield],
@@ -38,30 +116,47 @@ fn activated_cost_boundary_is_specific_to_the_source_zone() {
 #[test]
 fn triggered_mana_conditions_stay_outside_the_shared_runtime_boundary() {
     static CONDITION: TriggerConditionDef = TriggerConditionDef::ObjectCount {
-        query: ObjectQueryDef {
-            object: ObjectPredicateDef::Any,
-            zones: &[ZoneKind::Battlefield],
-            controller: PlayerRelation::You,
-        },
+        query: ObjectQueryDef::matching(
+            ObjectPredicateDef::Any,
+            &[ZoneKind::Battlefield],
+            PlayerRelation::You,
+        ),
         comparison: ComparisonDef::GreaterOrEqual,
         amount: 1,
     };
     let ordinary = AbilityDef::triggered_mana(
-        "Whenever this becomes tapped, add {C}.",
-        TriggerEventDef::BecomesTapped(ObjectPredicateDef::Source),
+        "Whenever this is tapped for mana, add {C}.",
+        TriggerEventDef::tapped_for_mana(ObjectPredicateDef::Source),
         EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
     );
     let DeclarativeAbilityDef::TriggeredMana(definition) = ordinary.definition else {
         unreachable!("triggered_mana must construct a triggered mana definition");
     };
     let conditional = AbilityDef::defined(
-        "Whenever this becomes tapped, if you control a permanent, add {C}.",
+        "Whenever this is tapped for mana, if you control a permanent, add {C}.",
         DeclarativeAbilityDef::TriggeredMana(definition.with_condition(&CONDITION)),
-        ordinary.effect.definition,
+        ordinary
+            .declarative_effect()
+            .expect("ordinary triggered mana has a resolving effect"),
     );
 
     assert!(shared_definition_ability(&ordinary));
     assert!(!shared_definition_ability(&conditional));
+}
+
+#[test]
+fn static_queries_reject_resolution_only_player_references() {
+    static EVENT_PLAYERS_PERMANENTS: ObjectQueryDef = ObjectQueryDef::controlled_by(
+        ObjectPredicateDef::Any,
+        &[ZoneKind::Battlefield],
+        PlayerSetDef::One(PlayerRefDef::EventPlayer),
+    );
+    let effect = EffectDef::StaticApply {
+        recipient: EffectRecipientDef::objects(ObjectSetDef::Query(EVENT_PLAYERS_PERMANENTS)),
+        effect: AppliedEffectDef::add_basic_land_types(&[BasicLandType::Plains]),
+    };
+
+    assert!(!shared_static_effect(&[ZoneKind::Battlefield], effect));
 }
 
 fn assert_stack_effect_support(effects: &[EffectDef], expected: bool) {
@@ -70,44 +165,44 @@ fn assert_stack_effect_support(effects: &[EffectDef], expected: bool) {
     }
 }
 
-fn assert_unsupported_optional_payments(tap: &'static EffectDef) {
-    static ONE_MANA: [CostDef; 1] = [CostDef::Mana(ManaCost::new(1, 0))];
-    static ONE_LIFE: [CostDef; 1] = [CostDef::PayLife(1)];
-    static TWO_MANA_PAYMENTS: [CostDef; 2] = [
-        CostDef::Mana(ManaCost::new(1, 0)),
-        CostDef::Mana(ManaCost::new(1, 0)),
-    ];
+fn assert_optional_payment_boundaries(tap: &'static EffectDef) {
+    let any_payer = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::mana(
+            PlayerSetDef::Related(PlayerRelation::Any),
+            ManaCost::new(1, 0),
+        ),
+        tap,
+    ));
+    let chosen_payer = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::mana(
+            PlayerSetDef::Related(PlayerRelation::ChosenPlayer),
+            ManaCost::new(1, 0),
+        ),
+        tap,
+    ));
+    let event_payer = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::mana(
+            PlayerSetDef::Related(PlayerRelation::EventPlayer),
+            ManaCost::new(1, 0),
+        ),
+        tap,
+    ));
+    let life_payment = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::life(PlayerSetDef::Related(PlayerRelation::You), 1),
+        tap,
+    ));
+    let dynamic_mana = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::generic_mana(
+            PlayerSetDef::Related(PlayerRelation::You),
+            ValueDef::Constant(1),
+        ),
+        tap,
+    ));
 
-    let any_payer = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::Any, &ONE_MANA),
-        if_paid: tap,
-    };
-    let chosen_payer = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::ChosenPlayer, &ONE_MANA),
-        if_paid: tap,
-    };
-    let event_payer = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::EventPlayer, &ONE_MANA),
-        if_paid: tap,
-    };
-    let life_payment = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::You, &ONE_LIFE),
-        if_paid: tap,
-    };
-    let multiple_mana_payments = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::You, &TWO_MANA_PAYMENTS),
-        if_paid: tap,
-    };
-
+    assert_stack_effect_support(&[any_payer], false);
     assert_stack_effect_support(
-        &[
-            any_payer,
-            chosen_payer,
-            event_payer,
-            life_payment,
-            multiple_mana_payments,
-        ],
-        false,
+        &[chosen_payer, event_payer, life_payment, dynamic_mana],
+        true,
     );
 }
 
@@ -125,20 +220,27 @@ fn decision_effects_suspend_inside_shared_stack_sequences() {
         player: EffectRecipientDef::Controller,
         effect: &TAP,
     };
-    static OPTIONAL_TAP: EffectDef = EffectDef::OptionalPayment {
-        payment: PaymentDef::new(PlayerRelation::You, &[CostDef::Mana(ManaCost::new(1, 0))]),
-        if_paid: &TAP,
-    };
+    static OPTIONAL_TAP: EffectDef = EffectDef::PayOr(PayOrDef::optional(
+        EffectPaymentDef::mana(
+            PlayerSetDef::Related(PlayerRelation::You),
+            ManaCost::new(1, 0),
+        ),
+        &TAP,
+    ));
     static SOURCE_PRESENT: TriggerConditionDef = TriggerConditionDef::SourceOnBattlefield;
     static CONDITIONAL_MAY: EffectDef = EffectDef::IfCondition {
         condition: &SOURCE_PRESENT,
         then: &MAY_TAP,
     };
-    static DELAYED_MAY: EffectDef = EffectDef::AtNextStep {
-        step: TurnStepDef::End,
-        player: PlayerRelation::You,
-        effect: &MAY_TAP,
-    };
+    static DELAYED_MAY: EffectDef =
+        EffectDef::InstallTrigger(InstalledTriggerDef::once(&AbilityDef::triggered(
+            "At the beginning of your next end step, you may tap this permanent.",
+            TriggerEventDef::StepBegins {
+                step: TurnStepDef::End,
+                player: PlayerRelation::You,
+            },
+            MAY_TAP,
+        )));
     static SEQUENCE_WITH_MAY: [EffectDef; 2] = [MAY_TAP, UNTAP];
     static SEQUENCE_WITH_CONDITIONAL_MAY: [EffectDef; 2] = [CONDITIONAL_MAY, UNTAP];
     static SEQUENCE_WITH_PAYMENT: [EffectDef; 2] = [OPTIONAL_TAP, UNTAP];
@@ -148,12 +250,14 @@ fn decision_effects_suspend_inside_shared_stack_sequences() {
         source: ZoneKind::Library,
         object: ObjectPredicateDef::Any,
         minimum: 1,
-        maximum: 1,
+        maximum: ValueDef::Constant(1),
         reveal: false,
         destination: ZoneKind::Hand,
         placement: ZonePlacement::Top,
         shuffle: true,
         enters_tapped: false,
+        binding: None,
+        then: None,
     };
     static SEQUENCE_WITH_EARLY_SEARCH: [EffectDef; 2] = [SEARCH, UNTAP];
     static SEQUENCE_WITH_TERMINAL_SEARCH: [EffectDef; 2] = [TAP, SEARCH];
@@ -176,7 +280,41 @@ fn decision_effects_suspend_inside_shared_stack_sequences() {
         ],
         true,
     );
-    assert_unsupported_optional_payments(&TAP);
+    assert_optional_payment_boundaries(&TAP);
+}
+
+#[test]
+fn pile_split_runtime_support_requires_singleton_player_roles() {
+    static THEN: EffectDef = EffectDef::GainLife {
+        recipient: EffectRecipientDef::Controller,
+        amount: ValueDef::Constant(1),
+    };
+    let partition = |divider, chooser| {
+        EffectDef::SplitIntoPiles(SplitIntoPilesDef {
+            items: PartitionItemsDef::Objects(ObjectSetDef::Query(ObjectQueryDef::new(
+                ObjectPredicateDef::Any,
+                &[ZoneKind::Battlefield],
+            ))),
+            divider,
+            chooser,
+            chosen: ObjectSetBindingIndex::PRIMARY,
+            unchosen: ObjectSetBindingIndex::new(1),
+            then: &THEN,
+        })
+    };
+
+    assert!(shared_stack_effect(partition(
+        PlayerSetDef::Related(PlayerRelation::Opponent),
+        PlayerSetDef::One(PlayerRefDef::EffectController),
+    )));
+    assert!(!shared_stack_effect(partition(
+        PlayerSetDef::All,
+        PlayerSetDef::One(PlayerRefDef::EffectController),
+    )));
+    assert!(!shared_stack_effect(partition(
+        PlayerSetDef::One(PlayerRefDef::EffectController),
+        PlayerSetDef::Related(PlayerRelation::Any),
+    )));
 }
 
 #[test]
@@ -192,46 +330,47 @@ fn zone_search_boundary_rejects_ambiguous_or_incoherent_shapes() {
         placement: ZonePlacement::Top,
         shuffle,
         enters_tapped: false,
+        binding: None,
+        then: None,
     };
 
     assert!(shared_stack_effect(search(
         ZoneKind::Library,
         ZoneKind::Hand,
-        2,
+        ValueDef::Constant(2),
         true,
     )));
     assert!(shared_stack_effect(search(
         ZoneKind::Library,
         ZoneKind::Battlefield,
-        1,
+        ValueDef::Constant(1),
         true,
     )));
-    assert!(!shared_stack_effect(search(
+    assert!(shared_stack_effect(search(
         ZoneKind::Library,
         ZoneKind::Battlefield,
-        2,
+        ValueDef::Constant(2),
         true,
     )));
     assert!(!shared_stack_effect(search(
         ZoneKind::Library,
         ZoneKind::Library,
-        2,
+        ValueDef::Constant(2),
         true,
     )));
     assert!(!shared_stack_effect(search(
         ZoneKind::Graveyard,
         ZoneKind::Hand,
-        1,
+        ValueDef::Constant(1),
         true,
     )));
 }
 
 #[test]
 fn static_conditions_require_only_source_battlefield_state() {
-    static APPLIED: EffectDef = EffectDef::Apply {
+    static APPLIED: EffectDef = EffectDef::StaticApply {
         recipient: EffectRecipientDef::Source,
-        effect: AppliedEffectDef::CannotBeEnchanted,
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
+        effect: AppliedEffectDef::Rule(AppliedRuleDef::CannotBeEnchanted),
     };
     static SOURCE_UNTAPPED: TriggerConditionDef = TriggerConditionDef::SourceUntapped;
     static TARGET_MATCHES: TriggerConditionDef = TriggerConditionDef::TargetMatches {
@@ -274,31 +413,47 @@ fn replacement_perform_stays_coupled_to_its_prospective_event() {
 }
 
 #[test]
+fn conditional_source_entry_replacements_stay_within_the_shared_runtime_boundary() {
+    let ability = AbilityDef::as_enters_if(
+        "This creature enters with a counter on it if a creature died this turn.",
+        ReplacementConditionDef::CreatureDiedThisTurn,
+        ReplacementEffectDef::ModifyBattlefieldEntry(
+            BattlefieldEntryModificationDef::AddCounters {
+                kind: CounterKind::PlusOnePlusOne,
+                amount: 1,
+            },
+        ),
+    );
+
+    assert!(shared_definition_ability(&ability));
+}
+
+#[test]
 #[should_panic(expected = "nested shared declarative ability outside the shared runtime boundary")]
 fn nested_definition_assertions_descend_replacement_programs() {
     static UNSUPPORTED: AbilityDef = AbilityDef::static_ability(
         "This nested ability is intentionally outside the boundary.",
         EffectDef::Special("unsupported nested effect"),
     );
-    static GRANT: EffectDef = EffectDef::Apply {
+    static GRANT: EffectDef = EffectDef::StaticApply {
         recipient: EffectRecipientDef::Source,
-        effect: AppliedEffectDef::GrantAbility(&UNSUPPORTED),
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
+        effect: AppliedEffectDef::add_ability(&UNSUPPORTED),
     };
     static PROGRAM: [ReplacementEffectDef; 1] = [ReplacementEffectDef::Perform(&GRANT)];
 
-    assert_nested_definition_abilities(
+    assert_nested_replacement_definition_abilities(
         "Replacement fixture",
-        EffectDef::Replacement(ReplacementEffectDef::Sequence(&PROGRAM)),
+        ReplacementEffectDef::Sequence(&PROGRAM),
     );
 }
 
 #[test]
 fn composite_uncounterability_stays_within_the_shared_runtime_boundary() {
-    static CANNOT_BE_COUNTERED: [AppliedEffectDef; 1] = [AppliedEffectDef::CannotBeCountered];
+    static CANNOT_BE_COUNTERED: [AppliedEffectDef; 1] =
+        [AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)];
     static MIXED: [AppliedEffectDef; 2] = [
-        AppliedEffectDef::CannotBeCountered,
-        AppliedEffectDef::Special("unsupported"),
+        AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered),
+        AppliedEffectDef::Rule(AppliedRuleDef::CANNOT_BLOCK),
     ];
     static RIDERS: [ManaSpendEffectDef; 1] = [ManaSpendEffectDef::ApplyToPaidSpell(
         AppliedEffectDef::Composite(&CANNOT_BE_COUNTERED),
@@ -307,10 +462,9 @@ fn composite_uncounterability_stays_within_the_shared_runtime_boundary() {
         AppliedEffectDef::Composite(&MIXED),
     )];
 
-    let stack_effect = |effect| EffectDef::Apply {
+    let stack_effect = |effect| EffectDef::StaticApply {
         recipient: EffectRecipientDef::Source,
         effect,
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
     };
     assert!(shared_static_effect(
         &[ZoneKind::Stack],
@@ -401,7 +555,9 @@ fn fully_declarative_clauses_stay_within_the_shared_runtime_boundary() {
                     part.id,
                     ability_id,
                 );
-                if ability.declarative_effect().is_some() {
+                if ability.declarative_effect().is_some()
+                    || ability.declarative_replacement().is_some()
+                {
                     assert!(
                         shared_definition_ability(&ability),
                         "{} {:?} ability {:?} claims shared declarative execution outside the shared runtime boundary: {ability:?}",
@@ -410,12 +566,12 @@ fn fully_declarative_clauses_stay_within_the_shared_runtime_boundary() {
                         ability_id,
                     );
                 }
-                assert_nested_definition_abilities(&definition.name, ability.effect.definition);
-                if let DeclarativeAbilityDef::Spell(spell) = ability.definition
-                    && let Some(modal) = spell.modal()
-                {
+                assert_nested_program_abilities(&definition.name, ability.effect.definition);
+                if let Some(modal) = ability.modal() {
                     for mode in modal.modes {
-                        if mode.declarative_effect().is_some() {
+                        if mode.declarative_effect().is_some()
+                            || mode.declarative_replacement().is_some()
+                        {
                             assert!(
                                 shared_definition_ability(mode),
                                 "{} {:?} ability {:?} contains a shared declarative modal branch outside the shared runtime boundary: {mode:?}",
@@ -424,10 +580,7 @@ fn fully_declarative_clauses_stay_within_the_shared_runtime_boundary() {
                                 ability_id,
                             );
                         }
-                        assert_nested_definition_abilities(
-                            &definition.name,
-                            mode.effect.definition,
-                        );
+                        assert_nested_program_abilities(&definition.name, mode.effect.definition);
                     }
                 }
             }
@@ -446,18 +599,42 @@ fn long_lived_composite_ability_changes_accept_shared_activated_grants() {
         },
     );
     static CHANGES: [AppliedEffectDef; 2] = [
-        AppliedEffectDef::RemoveAbilities(AbilityPredicateDef::Any),
-        AppliedEffectDef::GrantAbility(&ACTIVATED),
+        AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any),
+        AppliedEffectDef::add_ability(&ACTIVATED),
     ];
-    let recipient = EffectRecipientDef::MatchingObjects {
-        object: ObjectPredicateDef::HasType(CardType::Creature),
-        zones: &[ZoneKind::Battlefield],
-        controller: PlayerRelation::Any,
-    };
+    let recipient = EffectRecipientDef::matching_objects(
+        ObjectPredicateDef::HasType(CardType::Creature),
+        &[ZoneKind::Battlefield],
+        PlayerRelation::Any,
+    );
 
     assert!(shared_resolving_apply(
         recipient,
         AppliedEffectDef::Composite(&CHANGES),
-        EffectDurationDef::Permanent,
+        ResolvedEffectDurationDef::Permanent,
+    ));
+}
+
+#[test]
+fn source_tapped_duration_accepts_only_supported_recursive_leaves() {
+    static SUPPORTED: [AppliedEffectDef; 2] = [
+        AppliedEffectDef::modify_power_toughness(ValueDef::Constant(1), ValueDef::Constant(1)),
+        AppliedEffectDef::Rule(AppliedRuleDef::DoesNotUntapDuringUntapStep),
+    ];
+    static UNSUPPORTED: [AppliedEffectDef; 2] = [
+        AppliedEffectDef::Rule(AppliedRuleDef::DoesNotUntapDuringUntapStep),
+        AppliedEffectDef::Rule(AppliedRuleDef::CANNOT_BLOCK),
+    ];
+    let recipient = EffectRecipientDef::Target(TargetIndex::PRIMARY);
+
+    assert!(shared_resolving_apply(
+        recipient,
+        AppliedEffectDef::Composite(&SUPPORTED),
+        ResolvedEffectDurationDef::WhileSourceTapped,
+    ));
+    assert!(!shared_resolving_apply(
+        recipient,
+        AppliedEffectDef::Composite(&UNSUPPORTED),
+        ResolvedEffectDurationDef::WhileSourceTapped,
     ));
 }

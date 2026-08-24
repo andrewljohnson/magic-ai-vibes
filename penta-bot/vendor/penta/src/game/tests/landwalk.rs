@@ -207,6 +207,30 @@ fn the_negation_is_read_from_any_permanent_on_the_battlefield() {
     );
 }
 
+#[test]
+fn losing_the_negation_ability_restores_landwalk() {
+    let (mut game, attacker) = walk_game(cards::BOG_WRAITH, cards::SWAMP);
+    let ur_drago = creature(10_010, cards::UR_DRAGO, PlayerId::One);
+    let ur_drago_id = ur_drago.card.id;
+    game.battlefield.push(ur_drago);
+    assert!(
+        can_be_blocked(&game, attacker),
+        "Ur-Drago initially turns swampwalk off"
+    );
+
+    attach_constant_resolved_characteristics(
+        &mut game,
+        ur_drago_id,
+        &[AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any)],
+        ContinuousEffectExpiration::Never,
+    );
+
+    assert!(
+        !can_be_blocked(&game, attacker),
+        "removing Ur-Drago's abilities restores swampwalk"
+    );
+}
+
 /// The keyword survives; only blocking ignores it.
 #[test]
 fn negating_a_walk_does_not_remove_the_keyword() {

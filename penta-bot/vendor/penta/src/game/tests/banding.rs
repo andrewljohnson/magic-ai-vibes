@@ -1,10 +1,11 @@
 //! Banding's blocking half.
 //!
-//! CR 702.22 gives banding two separate jobs. Attacking in a band is a
-//! declaration rule and is not implemented. Blocking with banding is a
-//! combat-damage rule: it moves the choice of how the attacker assigns its
-//! damage from the attacker's controller to the defending player. That half
-//! is here, and it is the half that decides who is asked a question.
+//! CR 702.21 gives banding more than one job. This file holds the one where a
+//! creature with banding blocks: the choice of how the attacker assigns its
+//! combat damage moves from the attacker's controller to the defending
+//! player. The declaration rules are in `banding_formation` and
+//! `banding_blocked`, and the mirror-image assignment in
+//! `banding_assignment`.
 
 use super::*;
 
@@ -20,7 +21,7 @@ fn banded_block(blocker_has_banding: bool) -> (Game, GameObjectId) {
     game.battlefield.push(attacker);
     for index in 0..2 {
         let mut blocker = creature(10_001 + index, cards::SAVANNAH_LIONS, PlayerId::Two);
-        blocker.blocking = Some(attacker_id);
+        blocker.blocking = vec![attacker_id];
         if blocker_has_banding && index == 0 {
             blocker.temporary_keywords.push(KeywordAbility::Banding);
         }
@@ -35,7 +36,7 @@ fn banded_block(blocker_has_banding: bool) -> (Game, GameObjectId) {
 fn without_banding_the_attacking_player_assigns() {
     let (game, attacker) = banded_block(false);
     assert!(
-        !game.pending_combat_attackers.is_empty(),
+        !game.pending_combat_assignments.is_empty(),
         "two blockers make the split a real choice"
     );
     assert_eq!(game.combat_damage_assigner(attacker), PlayerId::One);
@@ -87,24 +88,23 @@ fn the_defending_player_can_direct_the_attackers_damage() {
     game.apply(PlayerId::Two, action)
         .expect("the defending player may assign");
     assert!(
-        game.pending_combat_attackers.is_empty()
+        game.pending_combat_assignments.is_empty()
             || game.combat_damage_assigner(attacker) == PlayerId::Two,
         "the assignment was accepted from the defending player"
     );
 }
 
-/// Banding is one keyword with two jobs, and only one is done. A card that
-/// prints it must not claim to be complete.
+/// Every job banding has is now done, so a card that prints it may claim to
+/// be complete.
 #[test]
-fn banding_reports_itself_partial() {
+fn banding_reports_itself_complete() {
     let banding = crate::card::abilities::banding();
     assert_eq!(
         banding.coverage.status,
-        crate::ImplementationStatus::Partial,
-        "attacking in a band is still missing"
+        crate::ImplementationStatus::Complete,
     );
     assert!(
         banding.is_executable(),
-        "the blocking half is real, so the keyword is not metadata"
+        "the keyword is executed, not metadata"
     );
 }

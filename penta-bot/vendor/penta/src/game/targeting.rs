@@ -1,8 +1,8 @@
 use super::{
     CardBehavior, CardDefinition, CardDefinitionId, CardSupertype, CardType, CardTypeSet,
     CharacteristicContext, Cow, DeclarativeAbilityDef, Game, GameObjectId, ManaCost, ModeId,
-    PlayRestriction, PlayerId, StackObject, StackObjectKind, Step, Target, TargetPredicate,
-    TargetSelection, TriggerEventObject, applicable_part_ids,
+    ObjectCharacteristics, PlayRestriction, PlayerId, RetiredObject, StackObject, StackObjectKind,
+    Step, Target, TargetPredicate, TargetSelection, TriggerEventObject, applicable_part_ids,
 };
 
 impl Game {
@@ -44,7 +44,9 @@ impl Game {
     }
 
     pub(super) fn stack_spell_types(&self, object: &StackObject) -> Option<CardTypeSet> {
-        let definition = self.catalog.get(object.card.definition)?;
+        let definition = self
+            .catalog
+            .get(object.card.definition.card_definition()?)?;
         let signature = object.signature.as_ref()?;
         let option = definition.play_option(signature.play_option())?;
         Self::play_option_types(definition, option)
@@ -57,12 +59,96 @@ impl Game {
         let signature = object.signature.as_ref()?;
         self.printed_trigger_event_object(
             object.id,
-            object.card.definition,
+            object.card.definition.card_definition()?,
             object.controller,
             &CharacteristicContext::Stack {
                 form: signature.form().clone(),
             },
         )
+    }
+
+    /// The same view, widened to the abilities waiting on the stack. An
+    /// ability has no cast signature and no characteristics of its own, so it
+    /// borrows its source's and keeps its own id and controller: what a
+    /// predicate asks about one is which stack object it is and what it
+    /// targets, not what it costs.
+    pub(super) fn stack_object_event_object(
+        &self,
+        object: &StackObject,
+    ) -> Option<TriggerEventObject> {
+        self.stack_trigger_event_object(object).or_else(|| {
+            let token = object.source.is_some_and(|source| {
+                self.battlefield
+                    .iter()
+                    .find(|permanent| permanent.card.id == source)
+                    .map(|permanent| permanent.card.definition.is_token())
+                    .or_else(|| match self.retired_objects.get(&source) {
+                        Some(RetiredObject::Permanent { permanent, .. }) => {
+                            Some(permanent.card.definition.is_token())
+                        }
+                        Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => None,
+                    })
+                    .unwrap_or(false)
+            });
+            let mut view = self.presentation_trigger_event_object(
+                object.id,
+                object.presentation(),
+                object.controller,
+                token,
+            )?;
+            view.controller = object.controller;
+            Some(view)
+        })
+    }
+
+    fn presentation_trigger_event_object(
+        &self,
+        id: GameObjectId,
+        presentation: ObjectCharacteristics,
+        controller: PlayerId,
+        token: bool,
+    ) -> Option<TriggerEventObject> {
+        let rules = match presentation {
+            ObjectCharacteristics::Card { definition, part } => {
+                self.catalog.get(definition)?.part(part)?.rules
+            }
+            ObjectCharacteristics::Token { token, part } => token.part(part)?.rules,
+            ObjectCharacteristics::Emblem { emblem } => emblem.rules_view(),
+            ObjectCharacteristics::FaceDown { face_down } => face_down.rules(),
+        };
+        let mut keywords = 0_u64;
+        for ability in rules.ability_clauses() {
+            if ability.is_executable()
+                && let DeclarativeAbilityDef::Keyword(keyword) = ability.definition
+                && let Some(index) = keyword.simple_index()
+            {
+                keywords |= 1 << index;
+            }
+        }
+        let stats = rules.creature_stats();
+        let mut supertypes = [false; CardSupertype::COUNT];
+        for supertype in CardSupertype::ALL {
+            supertypes[supertype.index()] = rules.has_supertype(supertype);
+        }
+        Some(TriggerEventObject {
+            id,
+            token,
+            types: rules.types(),
+            controller,
+            colors: rules.colors(),
+            subtypes: Cow::Owned(rules.subtypes().to_vec()),
+            attacking_or_blocking: false,
+            keywords,
+            mana_value: rules.mana_cost().map_or(0, ManaCost::mana_value),
+            power: stats.map(|stats| stats.power),
+            toughness: stats.map(|stats| stats.toughness),
+            supertypes,
+            attacking: false,
+            tapped: false,
+            attacked_during_controllers_last_turn: false,
+            attacked_this_turn: false,
+            saddled: false,
+        })
     }
 
     pub(super) fn printed_trigger_event_object(
@@ -81,7 +167,7 @@ impl Game {
         let mut power = None;
         let mut toughness = None;
         let mut supertypes = [false; CardSupertype::COUNT];
-        let mut keywords = 0;
+        let mut keywords = 0_u64;
         for part in parts {
             let part = definition.part(part)?;
             types = types.union(part.rules.types());
@@ -112,7 +198,7 @@ impl Game {
         }
         Some(TriggerEventObject {
             id,
-            token: self.is_token(definition.id),
+            token: false,
             types,
             controller,
             colors,
@@ -127,7 +213,9 @@ impl Game {
             attacking: false,
             // A card outside the battlefield is not a tapped permanent.
             tapped: false,
+            attacked_during_controllers_last_turn: false,
             attacked_this_turn: false,
+            saddled: false,
         })
     }
 
@@ -135,9 +223,26 @@ impl Game {
     /// restriction. "Before the combat damage step" means combat damage has
     /// not started; once it has, the window is gone for the rest of the turn
     /// even in a later step.
-    pub(super) fn play_timing_allows(&self, restriction: PlayRestriction) -> bool {
+    pub(super) fn play_timing_allows(
+        &self,
+        player: PlayerId,
+        restriction: PlayRestriction,
+    ) -> bool {
         match restriction {
             PlayRestriction::Normal | PlayRestriction::FromHandOnly => true,
+            // Their turn, their first step. Read from whoever is casting
+            // rather than from the spell's controller-to-be, because they are
+            // the same player and only one of them is in hand here.
+            PlayRestriction::OpponentsUpkeep => {
+                self.step == Step::Upkeep && self.active_player != player
+            }
+            PlayRestriction::DeclareAttackersStep => self.step == Step::DeclareAttackers,
+            // Their turn, past the upkeep. Cleanup is excluded with it: no
+            // player receives priority there unless something has to be
+            // discarded, and the card is not meant to be held that long.
+            PlayRestriction::OpponentsTurnAfterUpkeep => {
+                self.active_player != player && !matches!(self.step, Step::Upkeep | Step::Cleanup)
+            }
             PlayRestriction::BeforeCombatDamage => !matches!(
                 self.step,
                 Step::CombatDamage
@@ -146,6 +251,13 @@ impl Game {
                     | Step::End
                     | Step::Cleanup
             ),
+            // Combat has started and the blockers are not committed yet.
+            // There is no priority inside the blocker declaration itself --
+            // the defending player is choosing blocks and nobody may cast --
+            // so the window is exactly the two steps before it.
+            PlayRestriction::BeforeBlockersDeclared => {
+                matches!(self.step, Step::BeginningOfCombat | Step::DeclareAttackers)
+            }
         }
     }
 
@@ -159,23 +271,24 @@ impl Game {
         behavior: CardBehavior,
         player: PlayerId,
         exact_count: Option<usize>,
+        source: GameObjectId,
     ) -> Vec<Vec<Target>> {
-        self.printed_target_lists(behavior, player, exact_count)
+        self.printed_target_lists(behavior, exact_count)
             .into_iter()
             .filter(|choice| {
                 choice.iter().all(|target| match target {
-                    Target::Permanent(id) => self
-                        .battlefield
-                        .iter()
-                        .find(|permanent| permanent.card.id == *id)
-                        .is_none_or(|permanent| {
-                            // Hexproof stops opponents only; you can always
-                            // target your own. Protection stops everyone,
-                            // including the permanent's own controller.
-                            (permanent.controller == player || !self.has_hexproof(permanent))
-                                && !self
-                                    .is_protected_from_colors(permanent, behavior.rules().colors())
-                        }),
+                    Target::Permanent(id) => {
+                        self.battlefield
+                            .iter()
+                            .find(|permanent| permanent.card.id == *id)
+                            .is_none_or(|permanent| {
+                                // Hexproof stops opponents only; you can always
+                                // target your own. Protection stops everyone,
+                                // including the permanent's own controller.
+                                (permanent.controller == player || !self.has_hexproof(permanent))
+                                    && !self.is_protected_from_object(permanent, source, true)
+                            })
+                    }
                     Target::Player(_) | Target::Card(_) | Target::Spell(_) => true,
                 })
             })
@@ -186,11 +299,9 @@ impl Game {
     pub(super) fn printed_target_lists(
         &self,
         behavior: CardBehavior,
-        player: PlayerId,
         exact_count: Option<usize>,
     ) -> Vec<Vec<Target>> {
         match behavior {
-            CardBehavior::Duress => vec![vec![Target::Player(player.opponent())]],
             CardBehavior::ChainLightning
             | CardBehavior::PillarOfFlame
             | CardBehavior::GoblinGrenade => self

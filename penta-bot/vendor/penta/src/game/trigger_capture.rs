@@ -1,105 +1,274 @@
+use crate::CharacteristicContext;
+use crate::card::{
+    AbilityPredicateDef, AttackDeclarationRangeDef, AttackEventMatcherDef,
+    BattlefieldEntryChoiceDestinationDef, DamageSourceGroupDef,
+};
+
 use super::{
     AbilityDef, AbilityId, AbilityOrigin, AbilityProcedureDef, AbilitySourceRef, AddManaEffectDef,
     BattlefieldTriggerListener, CardDefinitionId, CardPartId, CardType, CommittedTriggerEvent,
-    DeclarativeAbilityDef, EffectDef, EffectRecipientDef, EffectiveAbility, FrozenActivatedAbility,
-    Game, GameEvent, GameObjectId, Mana, ManaSelectionDef, ManaSource, ObjectPredicateDef,
-    PendingTrigger, Permanent, PlayerId, PlayerRelation, RetiredObject, ScopedEffect,
-    StackAbilityResolver, Target, TriggerCapture, TriggerContext, TriggerEventDef,
+    DamageEventMatcherDef, DamageKindDef, DamageRecipientMatcherDef, DamageSourceMatcherDef,
+    DeclarativeAbilityDef, EffectDef, EffectRecipientSetDef, EffectResolutionContext,
+    EffectiveAbility, FrozenActivatedAbility, Game, GameEvent, GameObjectId, GrantId,
+    InstalledTriggerLifetime, KeywordAbility, Mana, ManaSelectionDef, ManaSource,
+    ObjectCharacteristics, ObjectPredicateDef, ObjectRefDef, ObjectSetDef, PendingTrigger,
+    Permanent, PlayerId, PlayerRefDef, PlayerRelation, PlayerSetDef, RetiredObject, ScopedEffect,
+    StackAbilityResolver, TapPurposeDef, Target, TriggerCapture, TriggerContext, TriggerEventDef,
     TriggerEventObject, ZoneKind,
 };
 
+mod graveyard;
+include!("trigger_capture/drawing.rs");
+
 impl Game {
-    /// Finishes an atomic rules procedure before a player can receive
-    /// priority. Mana abilities invoked while casting resolve inside the
-    /// procedure, while ordinary triggers collected by them wait here.
-    pub(super) fn finish_rules_procedure(&mut self) {
-        // A decision can be one step in a still-resolving spell or turn-based
-        // procedure. Neither state-based actions nor trigger placement happen
-        // in the middle of that procedure: for example, a creature dealt
-        // lethal damage by Chain Lightning can still activate a mana ability
-        // when its controller is asked whether to pay for the copy. Drain the
-        // continuation chain before reaching either priority-boundary check.
-        loop {
-            if self.pending_decisions.is_empty() && !self.pending_events.is_empty() {
-                self.continue_pending_events();
-            }
-            if !self.pending_decisions.is_empty() || !self.pending_events.is_empty() {
-                return;
-            }
-            if self.pending_procedures.is_empty() {
-                break;
-            }
-            self.continue_pending_procedures();
-        }
-
-        self.check_state_based_actions();
-        if self.result.is_none()
-            && self.pending_decisions.is_empty()
-            && self.pending_events.is_empty()
-            && self.pending_procedures.is_empty()
-        {
-            self.begin_trigger_placement();
-        }
-    }
-
-    pub(super) fn capture_trigger(&mut self, capture: &TriggerCapture) {
-        // Rule 603.4: an intervening-if condition is checked as the ability
-        // would trigger. Failing it means the ability never triggers at all,
-        // so nothing reaches the stack and nothing is reported.
-        if let Some(condition) = capture.condition
-            && !self.trigger_condition_holds(
-                condition,
-                capture.source.object,
-                capture.controller,
-                capture.context,
-                Some(capture.source.ability),
-                None,
-            )
-        {
-            return;
-        }
-        let id = self.next_trigger_id;
-        self.next_trigger_id = self.next_trigger_id.saturating_add(1);
-        self.pending_triggers.push(PendingTrigger {
-            id,
-            source: capture.source,
-            definition: capture.definition,
-            owner: capture.owner,
-            controller: capture.controller,
-            text: capture.text,
-            target_defs: capture.target_defs,
-            targets: Vec::new(),
-            effect: capture.effect,
-            resolver: capture.resolver,
-            context: capture.context,
-            condition: capture.condition,
-        });
-        self.events.push(GameEvent::AbilityTriggered {
-            player: capture.controller,
-            trigger: id,
-            source: capture.source.object,
-            definition: capture.definition,
-        });
-    }
-
-    pub(super) const fn ability_presentation_definition(
-        origin: AbilityOrigin,
-        fallback: CardDefinitionId,
-    ) -> CardDefinitionId {
-        match origin {
-            AbilityOrigin::Printed { definition, .. } => definition,
-            AbilityOrigin::IntrinsicBasicLand(_) | AbilityOrigin::Granted { .. } => fallback,
-        }
-    }
-
     pub(super) fn capture_battlefield_triggers(&mut self, event: &CommittedTriggerEvent) {
         let listeners = self.battlefield_trigger_listeners();
         self.capture_battlefield_triggers_from_snapshot(&listeners, event);
     }
 
+    /// "Whenever one or more counters are put on this permanent." One event
+    /// per permanent the placement touched, and one per placement rather
+    /// than one per counter: two at once is one event carrying two.
+    pub(in crate::game) fn capture_counters_placed(
+        &mut self,
+        permanents: &[GameObjectId],
+        kind: crate::card::CounterKind,
+        amount: u16,
+    ) {
+        if amount == 0 {
+            return;
+        }
+        for permanent in permanents {
+            let Some(object) = self
+                .battlefield
+                .iter()
+                .find(|candidate| candidate.card.id == *permanent)
+                .map(|candidate| self.trigger_event_object(candidate))
+            else {
+                continue;
+            };
+            self.capture_battlefield_triggers(&CommittedTriggerEvent::CountersPlaced {
+                object,
+                kind,
+                amount,
+            });
+        }
+    }
+
+    /// "Whenever this becomes the target of a spell or ability", for the
+    /// ability half. Raised once the ability is on the stack, which is where
+    /// its targets are locked in, and once per targeting ability however many
+    /// of its slots name the same permanent (CR 115.7c) -- the same rule the
+    /// cast side follows.
+    pub(super) fn capture_ability_targeting_triggers(&mut self, ability: GameObjectId) {
+        let Some(object) = self.stack.iter().find(|object| object.id == ability) else {
+            return;
+        };
+        let Some(event) = self.stack_object_event_object(object) else {
+            return;
+        };
+        let mut targeted = Vec::new();
+        for target in object
+            .ability
+            .as_ref()
+            .into_iter()
+            .flat_map(|payload| payload.targets.iter())
+            .flat_map(crate::TargetSelection::targets)
+        {
+            if let Target::Permanent(id) | Target::Card(id) = target
+                && !targeted.contains(id)
+            {
+                targeted.push(*id);
+            }
+        }
+        for target in targeted {
+            self.capture_battlefield_triggers(&CommittedTriggerEvent::BecameTargetOfAbility {
+                target,
+                object: event.clone(),
+            });
+        }
+    }
+
+    /// "When you cycle this card" (CR 702.29b), raised as the cycling ability
+    /// is activated. Only the cycled card can carry the clause, so its own
+    /// printed abilities are the entire listener list -- there is no zone to
+    /// scan. The card is read in the graveyard the discard cost has already
+    /// put it in, which is also the object the trigger names.
+    pub(super) fn capture_cycling_triggers(&mut self, cycled: GameObjectId, player: PlayerId) {
+        let Some((_zone, card)) = self.card_in_nonbattlefield_zone(cycled) else {
+            return;
+        };
+        let card = card.clone();
+        let Some(object) = self.printed_trigger_event_object(
+            cycled,
+            card.definition,
+            player,
+            &CharacteristicContext::Graveyard,
+        ) else {
+            return;
+        };
+        let mut listeners = Vec::new();
+        self.for_each_printed_card_ability(&card, &CharacteristicContext::Graveyard, |effective| {
+            let ability = effective.ability;
+            let DeclarativeAbilityDef::Triggered(definition) = ability.definition else {
+                return;
+            };
+            if !ability.is_executable()
+                || definition.event != TriggerEventDef::Cycled
+                || definition.procedure != AbilityProcedureDef::Shared
+            {
+                return;
+            }
+            listeners.push(BattlefieldTriggerListener {
+                event: definition.event,
+                uses_stack: true,
+                trigger_limit: definition.trigger_limit,
+                installed: None,
+                capture: TriggerCapture {
+                    source: AbilitySourceRef {
+                        object: cycled,
+                        ability: effective.origin,
+                    },
+                    presentation: Self::ability_presentation(
+                        effective.origin,
+                        ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                    ),
+                    owner: card.owner,
+                    controller: player,
+                    text: ability.text,
+                    target_defs: definition.targets.to_vec(),
+                    targets: Vec::new(),
+                    effect: ability.declarative_effect().unwrap_or(EffectDef::None),
+                    resolver: Self::ability_resolver(effective.origin, &ability),
+                    context: TriggerContext::empty().into(),
+                    condition: definition.condition,
+                    modes: definition.modes,
+                    x: 0,
+                },
+            });
+        });
+        if listeners.is_empty() {
+            return;
+        }
+        self.capture_battlefield_triggers_from_snapshot(
+            &listeners,
+            &CommittedTriggerEvent::Cycled { object },
+        );
+    }
+
+    /// A spell's own "when you cast this spell" clause, raised as it is put on
+    /// the stack. Storm is the case: the ability belongs to the spell rather
+    /// than to anything on the battlefield, so the ordinary listener scan
+    /// never sees it, and the spell it copies is still on the stack beneath
+    /// the trigger when that trigger resolves.
+    pub(super) fn capture_own_cast_triggers(&mut self, spell: GameObjectId) {
+        let Some(cast) = self.stack.iter().find(|object| object.id == spell).cloned() else {
+            return;
+        };
+        let Some(object) = self.stack_object_event_object(&cast) else {
+            return;
+        };
+        let Some(card) = cast.card.clone().into_card() else {
+            return;
+        };
+        let Some(signature) = cast.signature.as_ref() else {
+            return;
+        };
+        let context = CharacteristicContext::Stack {
+            form: signature.form().clone(),
+        };
+        let mut listeners = Vec::new();
+        self.for_each_printed_card_ability(&card, &context, |effective| {
+            let ability = effective.ability;
+            let DeclarativeAbilityDef::Triggered(definition) = ability.definition else {
+                return;
+            };
+            if !ability.is_executable()
+                || definition.event != TriggerEventDef::SpellCast(ObjectPredicateDef::Source)
+                || definition.procedure != AbilityProcedureDef::Shared
+            {
+                return;
+            }
+            listeners.push(BattlefieldTriggerListener {
+                event: definition.event,
+                uses_stack: true,
+                trigger_limit: definition.trigger_limit,
+                installed: None,
+                capture: TriggerCapture {
+                    source: AbilitySourceRef {
+                        object: spell,
+                        ability: effective.origin,
+                    },
+                    presentation: Self::ability_presentation(
+                        effective.origin,
+                        ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                    ),
+                    owner: card.owner,
+                    controller: cast.controller,
+                    text: ability.text,
+                    target_defs: definition.targets.to_vec(),
+                    targets: Vec::new(),
+                    effect: ability.declarative_effect().unwrap_or(EffectDef::None),
+                    resolver: Self::ability_resolver(effective.origin, &ability),
+                    context: TriggerContext::empty().into(),
+                    condition: definition.condition,
+                    modes: definition.modes,
+                    x: 0,
+                },
+            });
+        });
+        if listeners.is_empty() {
+            return;
+        }
+        self.capture_battlefield_triggers_from_snapshot(
+            &listeners,
+            &CommittedTriggerEvent::SpellCast { object },
+        );
+    }
+
+    /// How many times this object's copy of one ability has triggered this
+    /// turn, for the abilities that cap themselves.
+    fn triggers_this_turn(&self, source: AbilitySourceRef) -> u8 {
+        self.battlefield
+            .iter()
+            .chain(self.emblems.iter())
+            .find(|permanent| permanent.card.id == source.object)
+            .and_then(|permanent| {
+                permanent
+                    .triggers_this_turn
+                    .iter()
+                    .find(|(origin, _)| *origin == source.ability)
+            })
+            .map_or(0, |(_, count)| *count)
+    }
+
+    fn record_trigger_this_turn(&mut self, source: AbilitySourceRef) {
+        let Some(permanent) = self
+            .battlefield
+            .iter_mut()
+            .chain(self.emblems.iter_mut())
+            .find(|permanent| permanent.card.id == source.object)
+        else {
+            return;
+        };
+        if let Some(entry) = permanent
+            .triggers_this_turn
+            .iter_mut()
+            .find(|(origin, _)| *origin == source.ability)
+        {
+            entry.1 = entry.1.saturating_add(1);
+        } else {
+            permanent.triggers_this_turn.push((source.ability, 1));
+        }
+    }
+
     pub(super) fn battlefield_trigger_listeners(&self) -> Vec<BattlefieldTriggerListener> {
         let mut listeners = Vec::new();
-        for permanent in &self.battlefield {
+        // Emblems listen alongside the battlefield, the way they already sit
+        // in every other sweep. Nothing about an emblem is in a zone, so the
+        // battlefield an emblem's clause names is the one its abilities were
+        // written against rather than a place it can be found.
+        for permanent in self.battlefield.iter().chain(self.emblems.iter()) {
             self.for_each_effective_ability(permanent, |effective| {
                 let ability = effective.ability;
                 if !ability.is_executable() {
@@ -119,6 +288,7 @@ impl Game {
                     | DeclarativeAbilityDef::Static(_)
                     | DeclarativeAbilityDef::Replacement(_)
                     | DeclarativeAbilityDef::AlternativeCast(_)
+                    | DeclarativeAbilityDef::OptionalAdditionalCost(_)
                     | DeclarativeAbilityDef::SpecialAction(_)
                     | DeclarativeAbilityDef::Keyword(_)
                     | DeclarativeAbilityDef::Legacy => return,
@@ -138,32 +308,40 @@ impl Game {
                 listeners.push(BattlefieldTriggerListener {
                     event: definition.event,
                     uses_stack,
+                    trigger_limit: definition.trigger_limit,
+                    installed: None,
                     capture: TriggerCapture {
                         source,
-                        definition: Self::ability_presentation_definition(
+                        presentation: Self::ability_presentation(
                             effective.origin,
-                            Self::effective_rules_source(permanent).0,
+                            Self::effective_rules_source(permanent),
                         ),
                         owner: permanent.card.owner,
                         controller: permanent.controller,
                         text: ability.text,
-                        target_defs: definition.targets,
-                        effect: ability.effect.definition,
+                        target_defs: definition.targets.to_vec(),
+                        targets: Vec::new(),
+                        effect: ability.declarative_effect().unwrap_or(EffectDef::None),
                         resolver: Self::ability_resolver(effective.origin, &ability),
-                        context: TriggerContext::empty(),
+                        context: TriggerContext::empty().into(),
                         condition: definition.condition,
+                        modes: definition.modes,
+                        x: 0,
                     },
                 });
             });
         }
-        // A floating trigger listens the same way, minus a permanent to hang
-        // on; it is appended last so a permanent's own triggers keep the
+        self.extend_with_graveyard_trigger_listeners(&mut listeners);
+        // Installed triggers listen the same way, minus a permanent to hang
+        // on; they are appended last so a permanent's own triggers keep the
         // relative order they had before any existed.
-        listeners.extend(self.floating_triggers.iter().map(|floating| {
+        listeners.extend(self.installed_triggers.iter().map(|installed| {
             BattlefieldTriggerListener {
-                event: floating.event,
+                trigger_limit: None,
+                event: installed.event,
                 uses_stack: true,
-                capture: floating.capture,
+                installed: Some(installed.id),
+                capture: installed.capture.clone(),
             }
         }));
         listeners
@@ -174,187 +352,110 @@ impl Game {
         listeners: &[BattlefieldTriggerListener],
         event: &CommittedTriggerEvent,
     ) {
-        let mana_triggers = listeners
-            .iter()
-            .copied()
-            .filter(|listener| {
-                !listener.uses_stack
-                    && self.trigger_event_matches(
-                        listener.event,
-                        event,
-                        listener.capture.source.object,
-                    )
-            })
-            .collect::<Vec<_>>();
-        for listener in mana_triggers {
-            self.resolve_triggered_mana_effect(
-                listener.capture.source,
-                listener.capture.controller,
-                listener.capture.effect,
-            );
-        }
-
-        let stack_triggers = listeners
-            .iter()
-            .copied()
-            .filter(|listener| {
-                listener.uses_stack
-                    && self.trigger_event_matches(
-                        listener.event,
-                        event,
-                        listener.capture.source.object,
-                    )
-            })
-            .collect::<Vec<_>>();
-        for listener in stack_triggers {
-            self.capture_trigger(&TriggerCapture {
-                context: event.context(),
-                ..listener.capture
-            });
-        }
-    }
-
-    pub(super) fn resolve_triggered_mana_effect(
-        &mut self,
-        source: AbilitySourceRef,
-        controller: PlayerId,
-        effect: EffectDef,
-    ) {
-        match effect {
-            EffectDef::Sequence(effects) => {
-                for effect in effects {
-                    self.resolve_triggered_mana_effect(source, controller, *effect);
-                }
-            }
-            EffectDef::AddMana(effect) => {
-                self.resolve_triggered_add_mana_effect(source, controller, effect);
-            }
-            EffectDef::None
-            | EffectDef::Randomized { .. }
-            | EffectDef::ChoosePermanent { .. }
-            | EffectDef::ChooseDamageSource { .. }
-            | EffectDef::PreventNextDamageFromSource { .. }
-            | EffectDef::DealDamage { .. }
-            | EffectDef::DrainLife { .. }
-            | EffectDef::GainLife { .. }
-            | EffectDef::AddPoisonCounters { .. }
-            | EffectDef::DrawCards { .. }
-            | EffectDef::Discard { .. }
-            | EffectDef::ShuffleLibrary { .. }
-            | EffectDef::EmptyManaPool { .. }
-            | EffectDef::LoseLife { .. }
-            | EffectDef::LoseTheGame { .. }
-            | EffectDef::AddManaEqualTo { .. }
-            | EffectDef::Regenerate { .. }
-            | EffectDef::Tap { .. }
-            | EffectDef::RemoveFromCombat { .. }
-            | EffectDef::SetColor { .. }
-            | EffectDef::DestroyAtEndOfCombat { .. }
-            | EffectDef::SkipNextUntapSteps { .. }
-            | EffectDef::RemoveAllCounters { .. }
-            | EffectDef::Untap { .. }
-            | EffectDef::PreventAllCombatDamageThisTurn
-            | EffectDef::PreventNextDamage { .. }
-            | EffectDef::PreventAllDamageThisTurn { .. }
-            | EffectDef::PreventCombatDamageThisTurn { .. }
-            | EffectDef::PreventCombatDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerAndControlledCreaturesThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerFromThisTurn { .. }
-            | EffectDef::PreventAllCombatDamageExceptSourceThisTurn { .. }
-            | EffectDef::Destroy { .. }
-            | EffectDef::Sacrifice { .. }
-            | EffectDef::SacrificeOfChoice { .. }
-            | EffectDef::DestroyOfChoice { .. }
-            | EffectDef::SplitPermanentsAndSacrificeAPile { .. }
-            | EffectDef::RevealAndSplitIntoPiles { .. }
-            | EffectDef::Mill { .. }
-            | EffectDef::LookAtTopAndMayTake { .. }
-            | EffectDef::LookAtTopAndSelect { .. }
-            | EffectDef::LookAtHand { .. }
-            | EffectDef::SearchZone { .. }
-            | EffectDef::ChooseCards { .. }
-            | EffectDef::ReplaceNextDrawThisTurn { .. }
-            | EffectDef::IfFormat { .. }
-            | EffectDef::Counter { .. }
-            | EffectDef::CounterUnlessPaid { .. }
-            | EffectDef::AddCounters { .. }
-            | EffectDef::ChangeTextBasicLandType { .. }
-            | EffectDef::BecomeCopyOf { .. }
-            | EffectDef::OptionalPayment { .. }
-            | EffectDef::UnlessPaid { .. }
-            | EffectDef::May { .. }
-            | EffectDef::CannotBeForcedToSacrifice
-            | EffectDef::CreateEmblem { .. }
-            | EffectDef::Transform { .. }
-            | EffectDef::AdditionalCombatPhase
-            | EffectDef::TakeExtraTurn { .. }
-            | EffectDef::CannotCastNoncreatureSpellsThisTurn { .. }
-            | EffectDef::GrantFlashToNextSorcery
-            | EffectDef::ExileLinkedToSource { .. }
-            | EffectDef::ReturnLinkedExiles { .. }
-            | EffectDef::Detain { .. }
-            | EffectDef::CannotRegenerateThisTurn { .. }
-            | EffectDef::MakeUnblockableThisTurn { .. }
-            | EffectDef::GainControlWhileSourceRemains { .. }
-            | EffectDef::GainControlThisTurn { .. }
-            | EffectDef::AtNextStep { .. }
-            | EffectDef::IfCondition { .. }
-            | EffectDef::TriggerUntilYourNextTurn { .. }
-            | EffectDef::ReduceGenericCostBy(_)
-            | EffectDef::PlayersCantPlay(_)
-            | EffectDef::LandwalkCanBeBlocked(_)
-            | EffectDef::CannotAttackUnless(_)
-            | EffectDef::MultiplyEventAmount(_)
-            | EffectDef::Replacement(_)
-            | EffectDef::MoveToZone { .. }
-            | EffectDef::Attach { .. }
-            | EffectDef::CreateToken { .. }
-            | EffectDef::CreateTokenCopyOf { .. }
-            | EffectDef::ChooseCardName { .. }
-            | EffectDef::ChoosePlayer { .. }
-            | EffectDef::CopyPermanentAsItEnters { .. }
-            | EffectDef::ChooseCreatureType { .. }
-            | EffectDef::Apply { .. }
-            | EffectDef::Special(_) => {
-                // Choice-bearing and non-mana primitives need a dedicated
-                // immediate procedure before a supported card can use them.
-            }
-        }
-    }
-
-    fn resolve_triggered_add_mana_effect(
-        &mut self,
-        source: AbilitySourceRef,
-        controller: PlayerId,
-        effect: AddManaEffectDef,
-    ) {
-        let AddManaEffectDef {
-            mana: ManaSelectionDef::One(kind),
-            amount,
-            restrictions,
-            spend_effects,
-            damage_to_controller,
-        } = effect
-        else {
-            return;
-        };
-        let mana = Mana::from_ability(
-            kind,
-            ManaSource {
-                object: source.object,
-                ability: source.ability,
-            },
-            restrictions,
-            spend_effects,
+        self.capture_battlefield_trigger_batch_from_snapshot(
+            listeners,
+            std::slice::from_ref(event),
         );
-        self.add_mana(controller, std::iter::repeat_n(mana, usize::from(amount)));
-        if damage_to_controller > 0 {
-            self.damage_target_from(
-                Some(source.object),
-                Some(Target::Player(controller)),
-                damage_to_controller,
-            );
+    }
+
+    /// Determine every match and intervening-if result for one atomic event
+    /// batch before any triggered-mana ability can mutate the game. Attack
+    /// declarations and simultaneous exits both publish more than one
+    /// object-local event, but all of those facts belong to one rules event.
+    pub(super) fn capture_battlefield_trigger_batch_from_snapshot(
+        &mut self,
+        listeners: &[BattlefieldTriggerListener],
+        events: &[CommittedTriggerEvent],
+    ) {
+        self.capture_battlefield_trigger_batch_with_mana_resolver(
+            listeners,
+            events,
+            |game, capture| {
+                game.resolve_triggered_mana_effect(
+                    capture.source,
+                    capture.controller,
+                    capture.effect,
+                    &capture.context,
+                );
+            },
+        );
+    }
+
+    pub(super) fn capture_battlefield_trigger_batch_with_mana_resolver(
+        &mut self,
+        listeners: &[BattlefieldTriggerListener],
+        events: &[CommittedTriggerEvent],
+        mut resolve_mana: impl FnMut(&mut Self, TriggerCapture),
+    ) {
+        let mut consumed_once = Vec::new();
+        let mut matched = Vec::new();
+        // "Triggers only once each turn" counts the triggering rather than
+        // the resolution, and one batch can offer a capped ability several
+        // matching events, so the count has to rise inside this loop as
+        // well as be read from the turn so far.
+        let mut limited = Vec::new();
+        for event in events {
+            for listener in listeners {
+                if !self.trigger_event_matches_for_controller(
+                    listener.event,
+                    event,
+                    listener.capture.source.object,
+                    Some(listener.capture.controller),
+                ) {
+                    continue;
+                }
+                if let Some(limit) = listener.trigger_limit {
+                    let source = listener.capture.source;
+                    let already = self.triggers_this_turn(source);
+                    let in_batch = limited.iter().filter(|counted| **counted == source).count();
+                    if usize::from(already).saturating_add(in_batch) >= usize::from(limit) {
+                        continue;
+                    }
+                    limited.push(source);
+                }
+                if let Some(id) = listener.installed
+                    && self
+                        .installed_triggers
+                        .iter()
+                        .find(|installed| installed.id == id)
+                        .is_some_and(|installed| {
+                            matches!(installed.lifetime, InstalledTriggerLifetime::Once)
+                        })
+                {
+                    if consumed_once.contains(&id) {
+                        continue;
+                    }
+                    // A once-only listener is consumed by the first matching
+                    // event even when its intervening-if condition is false.
+                    consumed_once.push(id);
+                }
+                let mut capture = listener.capture.clone();
+                // Keep installer bindings and targets; only the committed
+                // event-local context changes for this match.
+                capture.context.trigger = event.context();
+                let condition_holds = self.trigger_capture_condition_holds(&capture);
+                matched.push((listener.uses_stack, capture, condition_holds));
+            }
+        }
+
+        self.installed_triggers
+            .retain(|installed| !consumed_once.contains(&installed.id));
+        for source in limited {
+            self.record_trigger_this_turn(source);
+        }
+
+        // Record ordinary triggers first, using the precomputed condition.
+        // Any triggers caused while a triggered-mana ability resolves are
+        // therefore later in the pending stream than the event that caused it.
+        for (uses_stack, capture, condition_holds) in &matched {
+            if *uses_stack && *condition_holds {
+                self.capture_trigger_prechecked(capture);
+            }
+        }
+        for (uses_stack, capture, condition_holds) in matched {
+            if !uses_stack && condition_holds {
+                resolve_mana(self, capture);
+            }
         }
     }
 
@@ -372,13 +473,21 @@ impl Game {
                         && definition.procedure == AbilityProcedureDef::Legacy
                         && effective.ability.custom_behavior().is_some()
                         && definition.source_zones.contains(&ZoneKind::Battlefield)
-                        && self.trigger_event_matches(definition.event, event, source.card.id) =>
+                        && self.trigger_event_matches_for_controller(
+                            definition.event,
+                            event,
+                            source.card.id,
+                            Some(source.controller),
+                        ) =>
                 {
                     Some((
                         effective.origin,
                         effective.ability.text,
                         definition.targets,
-                        effective.ability.effect.definition,
+                        effective
+                            .ability
+                            .declarative_effect()
+                            .unwrap_or(EffectDef::None),
                         Self::ability_resolver(effective.origin, &effective.ability),
                     ))
                 }
@@ -390,6 +499,7 @@ impl Game {
                 | DeclarativeAbilityDef::Static(_)
                 | DeclarativeAbilityDef::Replacement(_)
                 | DeclarativeAbilityDef::AlternativeCast(_)
+                | DeclarativeAbilityDef::OptionalAdditionalCost(_)
                 | DeclarativeAbilityDef::SpecialAction(_)
                 | DeclarativeAbilityDef::Keyword(_)
                 | DeclarativeAbilityDef::Legacy => None,
@@ -401,313 +511,51 @@ impl Game {
                     object: source.card.id,
                     ability,
                 },
-                definition: Self::ability_presentation_definition(
+                presentation: Self::ability_presentation(
                     ability,
-                    Self::effective_rules_source(source).0,
+                    Self::effective_rules_source(source),
                 ),
                 owner: source.card.owner,
                 controller: source.controller,
                 text,
-                target_defs: targets,
+                target_defs: targets.to_vec(),
+                targets: Vec::new(),
                 effect,
                 resolver,
-                context: event.context(),
+                context: event.context().into(),
                 // A legacy custom trigger states its own condition inside its
-                // behavior rather than declaring one here.
+                // behavior rather than declaring one here, and prints no
+                // modes.
                 condition: None,
+                modes: None,
+                x: 0,
             });
         }
     }
 
-    pub(super) fn ability_resolver(
-        origin: AbilityOrigin,
-        ability: &AbilityDef,
-    ) -> StackAbilityResolver {
-        if let Some(binding) = crate::card::ability_binding(origin, ability) {
-            return StackAbilityResolver::CardOwned(binding.resolver());
-        }
-        if let Some(behavior) = ability.custom_behavior() {
-            StackAbilityResolver::Custom(behavior)
-        } else {
-            let effect = match ability.declarative_effect() {
-                Some(effect) => effect,
-                None => EffectDef::None,
-            };
-            StackAbilityResolver::Declarative(ScopedEffect::primary(effect))
-        }
-    }
-
-    pub(super) fn ability_origin_components(
-        origin: AbilityOrigin,
-        fallback: CardDefinitionId,
-    ) -> (CardDefinitionId, CardPartId, AbilityId) {
-        match origin {
-            AbilityOrigin::Printed {
-                definition,
-                part,
-                ability,
-            } => (definition, part, ability),
-            AbilityOrigin::Granted {
-                source_definition,
-                source_part,
-                source_ability,
-                ..
-            } => (source_definition, source_part, source_ability),
-            AbilityOrigin::IntrinsicBasicLand(_) => {
-                (fallback, CardPartId::PRIMARY, AbilityId::PRIMARY)
-            }
-        }
-    }
-
-    pub(super) fn freeze_activated_ability(
+    // Long only because every event definition pairs with its committed event.
+    fn trigger_event_player_reference(
         &self,
-        permanent: &Permanent,
-        origin: AbilityOrigin,
-    ) -> FrozenActivatedAbility {
-        let effective =
-            self.find_effective_ability(permanent, |effective| effective.origin == origin);
-        let fallback_definition = Self::effective_rules_source(permanent).0;
-        let presentation_definition =
-            Self::ability_presentation_definition(origin, fallback_definition);
-        let text = effective.map(|effective| effective.ability.text);
-        let definition = effective.map(|effective| Box::new(effective.ability));
-        let (target_defs, resolver) = effective.map_or(
-            (
-                &[][..],
-                StackAbilityResolver::Declarative(ScopedEffect::primary(EffectDef::None)),
-            ),
-            |effective| {
-                let target_defs = match effective.ability.definition {
-                    DeclarativeAbilityDef::Activated(definition) => definition.targets,
-                    DeclarativeAbilityDef::Spell(_)
-                    | DeclarativeAbilityDef::ActivatedMana(_)
-                    | DeclarativeAbilityDef::TriggeredMana(_)
-                    | DeclarativeAbilityDef::Triggered(_)
-                    | DeclarativeAbilityDef::Static(_)
-                    | DeclarativeAbilityDef::Replacement(_)
-                    | DeclarativeAbilityDef::AlternativeCast(_)
-                    | DeclarativeAbilityDef::SpecialAction(_)
-                    | DeclarativeAbilityDef::Keyword(_)
-                    | DeclarativeAbilityDef::Legacy => &[],
-                };
-                (
-                    target_defs,
-                    Self::ability_resolver(effective.origin, &effective.ability),
-                )
-            },
-        );
-        FrozenActivatedAbility {
-            origin,
-            definition,
-            presentation_definition,
-            text,
-            target_defs,
-            resolver,
-            // Filled in by the activation, which is where X is chosen.
-            x: 0,
-        }
-    }
-
-    /// Combat damage arriving at the ability's own source. A planeswalker is
-    /// dealt combat damage as a permanent, so this is the only shape that can
-    /// see it; the player-facing variants read a life total instead.
-    pub(super) fn combat_damage_to_source_matches(
-        &self,
-        definition: TriggerEventDef,
+        reference: PlayerRefDef,
+        ability_source: GameObjectId,
+        controller: Option<PlayerId>,
         event: &CommittedTriggerEvent,
-        source: GameObjectId,
-    ) -> bool {
-        let (
-            TriggerEventDef::CombatDamageDealtToSource { source: predicate },
-            CommittedTriggerEvent::DamageDealt {
-                source: dealer,
-                recipient,
-                combat: true,
-                ..
-            },
-        ) = (definition, event)
-        else {
-            return false;
-        };
-        *recipient == Target::Permanent(source)
-            && self.trigger_object_matches(predicate, dealer, source, false)
-    }
-
-    // Long because the event vocabulary is wide, not because the function
-    // does several things: every arm pairs one definition with one event.
-    #[allow(clippy::too_many_lines)]
-    pub(super) fn trigger_event_matches(
-        &self,
-        definition: TriggerEventDef,
-        event: &CommittedTriggerEvent,
-        source: GameObjectId,
-    ) -> bool {
-        match (definition, event) {
-            (
-                TriggerEventDef::ZoneChanged {
-                    object: predicate,
-                    from,
-                    to,
-                },
-                CommittedTriggerEvent::ZoneChanged {
-                    object,
-                    from: actual_from,
-                    to: actual_to,
-                },
-            ) => {
-                from.is_none_or(|expected| expected == *actual_from)
-                    && to.is_none_or(|expected| expected == *actual_to)
-                    && self.trigger_object_matches(predicate, object, source, false)
+    ) -> Option<PlayerId> {
+        match reference {
+            PlayerRefDef::EffectController => controller,
+            PlayerRefDef::EnchantedPlayer => {
+                self.current_or_last_known_enchanted_player(ability_source)
             }
-            (
-                TriggerEventDef::BecomesTapped(predicate),
-                CommittedTriggerEvent::BecomesTapped { object },
-            )
-            | (
-                TriggerEventDef::TappedForMana(predicate),
-                CommittedTriggerEvent::TappedForMana { object },
-            )
-            | (
-                TriggerEventDef::CombatDamageDealtToPlayer { source: predicate },
-                CommittedTriggerEvent::CombatDamageDealtToPlayer { object, .. },
-            )
-            | (
-                TriggerEventDef::BecomesBlocked(predicate),
-                CommittedTriggerEvent::BecomesBlocked { object, .. },
-            )
-            | (
-                TriggerEventDef::AttacksAndIsNotBlocked {
-                    attacker: predicate,
-                },
-                CommittedTriggerEvent::AttacksAndIsNotBlocked { object },
-            )
-            | (
-                TriggerEventDef::DamageDealtBy { source: predicate },
-                CommittedTriggerEvent::DamageDealt { source: object, .. },
-            ) => self.trigger_object_matches(predicate, object, source, false),
-            (
-                TriggerEventDef::BlocksOrBecomesBlockedBy { object: predicate },
-                CommittedTriggerEvent::BlocksOrBecomesBlocked { creature, other },
-            ) => {
-                creature.id == source
-                    && self.trigger_object_matches(predicate, other, source, false)
-            }
-            (
-                TriggerEventDef::AttacksInGroup {
-                    attacker: predicate,
-                    minimum_total,
-                    maximum_total,
-                },
-                CommittedTriggerEvent::AttacksInGroup { object, total },
-            ) => {
-                *total >= minimum_total
-                    && maximum_total.is_none_or(|maximum| *total <= maximum)
-                    && self.trigger_object_matches(predicate, object, source, false)
-            }
-            (
-                trigger @ TriggerEventDef::CombatDamageDealtToSource { .. },
-                damage @ CommittedTriggerEvent::DamageDealt { .. },
-            ) => self.combat_damage_to_source_matches(trigger, damage, source),
-            (TriggerEventDef::Attacks(predicate), CommittedTriggerEvent::Attacks { object }) => {
-                self.trigger_object_matches(predicate, object, source, false)
-            }
-            (
-                TriggerEventDef::AttacksFirstTimeThisTurn(predicate),
-                CommittedTriggerEvent::Attacks { object },
-            ) => {
-                self.trigger_object_matches(predicate, object, source, false)
-                    && self
-                        .battlefield
-                        .iter()
-                        .find(|permanent| permanent.card.id == object.id)
-                        .is_some_and(|permanent| permanent.attacks_this_turn == 1)
-            }
-
-            (
-                TriggerEventDef::TransformsIntoThisFace,
-                CommittedTriggerEvent::Transformed { object },
-            ) => object.id == source,
-            (
-                TriggerEventDef::DamageDealt {
-                    source: _,
-                    recipient: EffectRecipientDef::Source,
-                },
-                CommittedTriggerEvent::DamageDealt { recipient, .. },
-            ) => *recipient == Target::Permanent(source),
-            (
-                TriggerEventDef::LifeGained(relation),
-                CommittedTriggerEvent::LifeGained { player, .. },
-            ) => {
-                let controller = self
-                    .current_or_last_known_controller(source)
-                    .unwrap_or(*player);
-                self.player_relation_matches(*player, relation, controller, event.context())
-            }
-            (
-                TriggerEventDef::SpellCast(predicate),
-                CommittedTriggerEvent::SpellCast { object },
-            ) => self.trigger_object_matches(predicate, object, source, true),
-            (
-                TriggerEventDef::StepBegins { step, player },
-                CommittedTriggerEvent::StepBegins {
-                    step: actual_step,
-                    player: actual_player,
-                },
-            ) => {
-                if step != *actual_step {
-                    return false;
-                }
-                if player == PlayerRelation::ChosenPlayer {
-                    return self.chosen_player_of(source) == Some(*actual_player);
-                }
-                if player == PlayerRelation::ControllerOfAttachedPermanent {
-                    return self.attached_host_controller_of(source) == Some(*actual_player);
-                }
-                let controller = self
-                    .current_or_last_known_controller(source)
-                    .unwrap_or(*actual_player);
-                self.player_relation_matches(*actual_player, player, controller, event.context())
-            }
-            (
-                TriggerEventDef::DamagedCreatureDied,
-                CommittedTriggerEvent::DamagedCreatureDied {
-                    source: actual_source,
-                    ..
-                },
-            ) => source == *actual_source,
-            _ => self.damage_to_player_trigger_matches(definition, event, source),
+            PlayerRefDef::Opponent => controller.map(PlayerId::opponent),
+            PlayerRefDef::EventPlayer => event.context().event_player,
+            PlayerRefDef::ControllerOf(reference) => self
+                .trigger_event_object_reference(reference, ability_source, event)
+                .and_then(|object| self.current_or_last_known_controller(object)),
+            PlayerRefDef::OwnerOf(reference) => self
+                .trigger_event_object_reference(reference, ability_source, event)
+                .and_then(|object| self.current_or_last_known_owner(object)),
+            PlayerRefDef::Target(_) => None,
         }
-    }
-
-    /// The one trigger family that reads both what dealt the damage and who
-    /// took it, so "an opponent" excludes a source hitting its own side.
-    pub(super) fn damage_to_player_trigger_matches(
-        &self,
-        definition: TriggerEventDef,
-        event: &CommittedTriggerEvent,
-        source: GameObjectId,
-    ) -> bool {
-        let (
-            TriggerEventDef::DamageDealtToPlayer {
-                source: predicate,
-                player,
-            },
-            CommittedTriggerEvent::DamageDealtToPlayer {
-                object,
-                player: damaged,
-                ..
-            },
-        ) = (definition, event)
-        else {
-            return false;
-        };
-        self.trigger_object_matches(predicate, object, source, false)
-            && self.player_relation_matches(
-                *damaged,
-                player,
-                object.controller,
-                TriggerContext::empty(),
-            )
     }
 
     /// Who controls an object, whether it is still on the battlefield or has
@@ -724,235 +572,42 @@ impl Game {
                 Some(RetiredObject::Card(_)) | None => None,
             })
     }
+}
 
-    /// Whether `object` satisfies `predicate`. `source` is the ability's own
-    /// object, which is what a controller relation is measured against.
-    /// The predicates comparing a stat against a value read off the ability's
-    /// own source. They share a shape, so they share a body.
-    fn computed_stat_matches(
-        &self,
-        predicate: ObjectPredicateDef,
-        object: &TriggerEventObject,
-        source: GameObjectId,
-    ) -> bool {
-        let (value, stat, greater) = match predicate {
-            ObjectPredicateDef::ToughnessLessThan(value) => (value, object.toughness, false),
-            ObjectPredicateDef::PowerGreaterThan(value) => (value, object.power, true),
-            ObjectPredicateDef::PowerLessThan(value) => (value, object.power, false),
-            ObjectPredicateDef::ToughnessGreaterThan(value) => (value, object.toughness, true),
-            _ => return false,
+include!("trigger_capture/event_matching.rs");
+include!("trigger_capture/attack_matching.rs");
+include!("trigger_capture/ability_resolver.rs");
+include!("trigger_capture/damage_matching.rs");
+include!("trigger_capture/triggered_mana.rs");
+include!("trigger_capture/object_matching.rs");
+include!("trigger_capture/procedure.rs");
+
+#[cfg(test)]
+mod emblem_trigger_limit_tests {
+    use super::*;
+
+    #[test]
+    fn emblem_trigger_counts_are_read_from_the_emblem() {
+        let mut game = crate::game::tests::ready_game();
+        let owner = PlayerId::One;
+        let card = game
+            .unbacked_emblem_object(crate::EmblemCharacteristics::new("Test emblem", &[]), owner);
+        let source = AbilitySourceRef {
+            object: card.id,
+            ability: AbilityOrigin::Emblem {
+                ability: AbilityId::PRIMARY,
+            },
         };
-        self.value_from_source(value, source)
-            .zip(stat)
-            .is_some_and(|(limit, stat)| {
-                if greater {
-                    i32::from(stat) > limit
-                } else {
-                    i32::from(stat) < limit
-                }
-            })
-    }
+        game.emblems.push(Permanent::entering(
+            card,
+            CardPartId::PRIMARY,
+            owner,
+            game.turns_started[owner.index()],
+            game.turn,
+        ));
 
-    /// The predicates answered by looking at the battlefield rather than at
-    /// the object's own recorded characteristics.
-    fn battlefield_relationship_matches(
-        &self,
-        predicate: ObjectPredicateDef,
-        object: &TriggerEventObject,
-        source: GameObjectId,
-    ) -> bool {
-        match predicate {
-            ObjectPredicateDef::HasNonManaActivatedAbility => self
-                .battlefield
-                .iter()
-                .find(|permanent| permanent.card.id == object.id)
-                .is_some_and(|permanent| self.has_nonmana_activated_ability(permanent)),
-            ObjectPredicateDef::AttachedToSource => self
-                .battlefield
-                .iter()
-                .find(|permanent| permanent.card.id == source)
-                .and_then(|permanent| permanent.attached_to)
-                .is_some_and(|host| host == object.id),
-            // Read from the source: the Wall knows what it blocked, and the
-            // attacker's own record does not name its blockers.
-            ObjectPredicateDef::BlockedBySource => self
-                .battlefield
-                .iter()
-                .find(|permanent| permanent.card.id == source)
-                .and_then(|permanent| permanent.blocking)
-                .is_some_and(|attacker| attacker == object.id),
-            ObjectPredicateDef::Enchanted => self.battlefield.iter().any(|candidate| {
-                candidate.attached_to == Some(object.id) && self.is_aura_permanent(candidate)
-            }),
-            // The Aura's own side of the question: what is it on?
-            ObjectPredicateDef::AttachedTo(predicate) => self
-                .battlefield
-                .iter()
-                .find(|candidate| candidate.card.id == object.id)
-                .and_then(|candidate| candidate.attached_to)
-                .and_then(|host| {
-                    self.battlefield
-                        .iter()
-                        .find(|candidate| candidate.card.id == host)
-                })
-                .is_some_and(|host| {
-                    self.trigger_object_matches(
-                        *predicate,
-                        &self.trigger_event_object(host),
-                        source,
-                        false,
-                    )
-                }),
-            _ => unreachable!("only the battlefield-reading predicates arrive here"),
-        }
-    }
-
-    pub(super) fn trigger_object_matches(
-        &self,
-        predicate: ObjectPredicateDef,
-        object: &TriggerEventObject,
-        source: GameObjectId,
-        is_spell: bool,
-    ) -> bool {
-        match predicate {
-            ObjectPredicateDef::Any => true,
-            ObjectPredicateDef::Source => object.id == source,
-            ObjectPredicateDef::Token => object.token,
-            ObjectPredicateDef::HasType(card_type) => object.types.contains(card_type),
-            ObjectPredicateDef::HasAnyBasicLandType(land_types) => {
-                object.types.contains(CardType::Land)
-                    && land_types
-                        .iter()
-                        .any(|land_type| object.subtypes.contains(&land_type.subtype()))
-            }
-            ObjectPredicateDef::Spell => is_spell,
-            ObjectPredicateDef::NoncreatureSpell => {
-                is_spell && !object.types.contains(CardType::Creature)
-            }
-            ObjectPredicateDef::Color(color) => color
-                .color_index()
-                .is_some_and(|index| object.colors[index]),
-            ObjectPredicateDef::ColorCount(count) => {
-                object.colors.iter().filter(|present| **present).count() == usize::from(count)
-            }
-            ObjectPredicateDef::Subtype(subtype) => object.subtypes.contains(&subtype),
-            ObjectPredicateDef::ManaValueAtMost(limit) => object.mana_value <= u16::from(limit),
-            ObjectPredicateDef::ManaValueEqualTo(value) => self
-                .value_from_source(value, source)
-                .is_some_and(|value| value == i32::from(object.mana_value)),
-            ObjectPredicateDef::ManaValueAtMostValue(value) => self
-                .value_from_source(value, source)
-                .is_some_and(|value| i32::from(object.mana_value) <= value),
-            ObjectPredicateDef::PowerAtLeast(minimum) => {
-                object.power.is_some_and(|power| power >= minimum)
-            }
-            ObjectPredicateDef::PowerExactly(exact) => object.power == Some(exact),
-            ObjectPredicateDef::ToughnessExactly(exact) => object.toughness == Some(exact),
-            ObjectPredicateDef::ToughnessLessThan(_)
-            | ObjectPredicateDef::PowerGreaterThan(_)
-            | ObjectPredicateDef::PowerLessThan(_)
-            | ObjectPredicateDef::ToughnessGreaterThan(_) => {
-                self.computed_stat_matches(predicate, object, source)
-            }
-            ObjectPredicateDef::Supertype(supertype) => object.supertypes[supertype.index()],
-            // Read from the definition rather than the object: what matters
-            // is where the card was first printed, not what it has become.
-            ObjectPredicateDef::DebutSet(set) => self
-                .object_debut_set(object.id)
-                .is_some_and(|debut| debut == set),
-            ObjectPredicateDef::AttackingOrBlocking => object.attacking_or_blocking,
-            ObjectPredicateDef::SharesNameWithSource => {
-                let name = self.object_card_name(object.id);
-                name.is_some() && name == self.object_card_name(source)
-            }
-            ObjectPredicateDef::HasKeyword(keyword) => keyword
-                .simple_index()
-                .is_some_and(|index| object.keywords & (1 << index) != 0),
-            // Counters are permanent state rather than a characteristic, so
-            // reading them live cannot feed back into the layer being
-            // computed the way a keyword or a stat could.
-            ObjectPredicateDef::HasCounter(kind) => {
-                self.current_or_last_known_counters(object.id, kind) > 0
-            }
-            ObjectPredicateDef::ControlledBy(relation) => {
-                self.controller_of_object(source).is_some_and(|controller| {
-                    self.player_relation_matches(
-                        object.controller,
-                        relation,
-                        controller,
-                        TriggerContext::empty(),
-                    )
-                })
-            }
-            ObjectPredicateDef::Attacking => {
-                object.types.contains(CardType::Creature) && object.attacking
-            }
-            // Still attacking is not the question: this asks whether the
-            // creature attacked at any point this turn, which is what an
-            // end-step check has to read once combat is over.
-            ObjectPredicateDef::AttackedThisTurn => {
-                object.types.contains(CardType::Creature) && object.attacked_this_turn
-            }
-            ObjectPredicateDef::Blocking => {
-                object.types.contains(CardType::Creature)
-                    && object.attacking_or_blocking
-                    && !object.attacking
-            }
-            ObjectPredicateDef::HasNonManaActivatedAbility
-            | ObjectPredicateDef::AttachedToSource
-            | ObjectPredicateDef::BlockedBySource
-            | ObjectPredicateDef::Enchanted
-            | ObjectPredicateDef::AttachedTo(_) => {
-                self.battlefield_relationship_matches(predicate, object, source)
-            }
-            ObjectPredicateDef::Tapped => object.tapped,
-            ObjectPredicateDef::All(predicates) => predicates
-                .iter()
-                .all(|predicate| self.trigger_object_matches(*predicate, object, source, is_spell)),
-            ObjectPredicateDef::AnyOf(predicates) => predicates
-                .iter()
-                .any(|predicate| self.trigger_object_matches(*predicate, object, source, is_spell)),
-            ObjectPredicateDef::Not(predicate) => {
-                !self.trigger_object_matches(*predicate, object, source, is_spell)
-            }
-            ObjectPredicateDef::Special(_) => false,
-        }
-    }
-
-    pub(super) fn player_relation_matches(
-        &self,
-        player: PlayerId,
-        relation: PlayerRelation,
-        controller: PlayerId,
-        context: TriggerContext,
-    ) -> bool {
-        match relation {
-            PlayerRelation::Any => true,
-            PlayerRelation::You => player == controller,
-            PlayerRelation::NotYou => player != controller,
-            PlayerRelation::Opponent => player == controller.opponent(),
-            PlayerRelation::ActivePlayer => player == self.active_player,
-            PlayerRelation::NonactivePlayer => player == self.active_player.opponent(),
-            PlayerRelation::EventPlayer => context.event_player == Some(player),
-            // Both of these live on the ability's source, which this does not
-            // have. The triggers that name them resolve the relation where
-            // the source is known.
-            PlayerRelation::ChosenPlayer | PlayerRelation::ControllerOfAttachedPermanent => false,
-        }
-    }
-
-    /// Whoever controls what this permanent is attached to. An Aura that has
-    /// come loose is attached to nothing and so matches nobody.
-    pub(super) fn attached_host_controller_of(&self, source: GameObjectId) -> Option<PlayerId> {
-        self.current_or_last_known_attached_host(source)
-            .and_then(|host| self.current_or_last_known_controller(host))
-    }
-
-    /// The player a permanent chose as it entered.
-    pub(super) fn chosen_player_of(&self, source: GameObjectId) -> Option<PlayerId> {
-        self.battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == source)
-            .and_then(|permanent| permanent.chosen_player)
+        assert_eq!(game.triggers_this_turn(source), 0);
+        game.record_trigger_this_turn(source);
+        assert_eq!(game.triggers_this_turn(source), 1);
     }
 }

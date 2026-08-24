@@ -1,4 +1,5 @@
 use super::*;
+use crate::card::catalog::MismatchedAlternativeCost;
 
 #[test]
 fn every_structure_family_rejects_undefined_or_repeated_parts() {
@@ -35,9 +36,9 @@ fn every_structure_family_rejects_undefined_or_repeated_parts() {
         assert!(matches!(
             error(card),
             CatalogError::UndefinedStructurePart {
-                definition: CardDefinitionId(1),
+                definition,
                 part: CardPartId(9),
-            }
+            } if definition == CardDefinitionId::new(1)
         ));
     }
 
@@ -49,7 +50,7 @@ fn every_structure_family_rejects_undefined_or_repeated_parts() {
     assert_eq!(
         error(repeated),
         CatalogError::DuplicateStructurePart {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
         }
     );
@@ -62,7 +63,7 @@ fn spell_forms_must_reference_defined_structural_parts() {
     assert_eq!(
         error(undefined),
         CatalogError::UndefinedSpellFormPart {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             part: CardPartId(9),
         }
@@ -79,7 +80,7 @@ fn spell_forms_must_reference_defined_structural_parts() {
     assert_eq!(
         error(empty),
         CatalogError::EmptySpellForm {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId(2),
         }
     );
@@ -90,7 +91,7 @@ fn fused_option_must_exist_and_match_all_split_parts_in_printed_order() {
     assert_eq!(
         error(split_definition(Some(PlayOptionId(2)))),
         CatalogError::MissingFusedPlayOption {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId(2),
         }
     );
@@ -124,7 +125,7 @@ fn fused_option_must_exist_and_match_all_split_parts_in_printed_order() {
     assert_eq!(
         error(undeclared),
         CatalogError::UnexpectedCombinedSpellForm {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId(2),
         }
     );
@@ -138,7 +139,7 @@ fn mode_and_alternative_cost_ids_are_local_to_options() {
     assert_eq!(
         error(duplicate_mode),
         CatalogError::DuplicateModeId {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(3),
         }
@@ -150,7 +151,7 @@ fn mode_and_alternative_cost_ids_are_local_to_options() {
     assert_eq!(
         error(nonpositional_mode),
         CatalogError::NonPositionalModeId {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             expected: ModeId(0),
             actual: ModeId(3),
@@ -173,7 +174,7 @@ fn mode_and_alternative_cost_ids_are_local_to_options() {
     assert_eq!(
         error(duplicate_alternative),
         CatalogError::DuplicateAlternativeCostId {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             cost: AlternativeCostId(4),
         }
@@ -196,17 +197,19 @@ fn mode_and_alternative_cost_ids_are_local_to_options() {
             id: AdditionalCostId(5),
             label: "first".into(),
             mana_cost: None,
+            repeatable: false,
         },
         AdditionalCostDef {
             id: AdditionalCostId(5),
             label: "second".into(),
             mana_cost: None,
+            repeatable: false,
         },
     ];
     assert_eq!(
         error(duplicate_additional),
         CatalogError::DuplicateAdditionalCostId {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             cost: AdditionalCostId(5),
         }
     );
@@ -235,7 +238,7 @@ fn alternative_cast_ability_requires_its_derived_cost_projection() {
     assert_eq!(
         error(missing),
         CatalogError::MissingAlternativeCostForAbility {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
             ability: AbilityId::PRIMARY,
             cost: AlternativeCostId(AbilityId::PRIMARY.0),
@@ -272,8 +275,8 @@ fn alternative_cast_ability_requires_its_derived_cost_projection() {
     mismatched_label.play_options[0].alternative_costs[0].label = "Overload".into();
     assert_eq!(
         error(mismatched_label),
-        CatalogError::MismatchedAlternativeCostForAbility {
-            definition: CardDefinitionId(1),
+        CatalogError::MismatchedAlternativeCostForAbility(Box::new(MismatchedAlternativeCost {
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
             ability: AbilityId(1),
             option: PlayOptionId::DEFAULT,
@@ -282,15 +285,15 @@ fn alternative_cast_ability_requires_its_derived_cost_projection() {
             actual_label: "Overload".into(),
             expected_mana_cost: flashback_cost,
             actual_mana_cost: flashback_cost,
-        }
+        }))
     );
 
     let mut mismatched_mana = projected;
     mismatched_mana.play_options[0].alternative_costs[0].mana_cost = ManaCost::default();
     assert_eq!(
         error(mismatched_mana),
-        CatalogError::MismatchedAlternativeCostForAbility {
-            definition: CardDefinitionId(1),
+        CatalogError::MismatchedAlternativeCostForAbility(Box::new(MismatchedAlternativeCost {
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
             ability: AbilityId(1),
             option: PlayOptionId::DEFAULT,
@@ -299,7 +302,7 @@ fn alternative_cast_ability_requires_its_derived_cost_projection() {
             actual_label: "Flashback".into(),
             expected_mana_cost: flashback_cost,
             actual_mana_cost: ManaCost::default(),
-        }
+        }))
     );
 }
 
@@ -333,7 +336,7 @@ fn incomplete_alternative_cast_ability_remains_non_executable_catalog_metadata()
     set_primary_rules(&mut definition, &rules);
 
     let catalog = CardCatalog::new([definition]).expect("incomplete clauses stay cataloged");
-    let stored = catalog.get(CardDefinitionId(1)).unwrap();
+    let stored = catalog.get(CardDefinitionId::new(1)).unwrap();
     assert_eq!(
         stored.implementation_status(),
         crate::ImplementationStatus::Partial,
@@ -355,11 +358,12 @@ fn mode_and_target_cardinality_bounds_are_sane() {
         maximum: 1,
         may_repeat: false,
         modes: vec![mode(0, Vec::new()), mode(1, Vec::new())],
+        conditional_maximum: None,
     });
     assert_eq!(
         error(invalid_modes),
         CatalogError::InvalidModeBounds {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             minimum: 2,
             maximum: 1,
@@ -372,11 +376,12 @@ fn mode_and_target_cardinality_bounds_are_sane() {
         maximum: 2,
         may_repeat: false,
         modes: vec![mode(0, Vec::new())],
+        conditional_maximum: None,
     });
     assert_eq!(
         error(too_many_modes),
         CatalogError::TooManyModesWithoutRepetition {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             maximum: 2,
             available: 1,
@@ -388,7 +393,7 @@ fn mode_and_target_cardinality_bounds_are_sane() {
     assert_eq!(
         error(invalid_targets),
         CatalogError::InvalidTargetBounds {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: None,
             slot: TargetSlotId(0),
@@ -410,7 +415,7 @@ fn semantic_spell_modes_require_matching_presentation_mode_ids() {
     assert_eq!(
         error(missing_presentation),
         CatalogError::MissingPresentationSpellMode {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(0),
         }
@@ -426,7 +431,7 @@ fn semantic_spell_modes_require_matching_presentation_mode_ids() {
     assert_eq!(
         error(missing_semantic),
         CatalogError::MissingSemanticSpellMode {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(1),
         }
@@ -443,7 +448,7 @@ fn semantic_modal_spell_selection_must_be_possible() {
     assert_eq!(
         error(definition),
         CatalogError::InvalidModalSpellSelection {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
             ability: AbilityId(0),
             minimum: 1,
@@ -464,7 +469,7 @@ fn executable_nonmodal_spells_reject_presentation_modes() {
     assert_eq!(
         error(definition),
         CatalogError::UnexpectedPresentationSpellModes {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
         }
     );
@@ -479,7 +484,7 @@ fn nonmodal_spell_target_presentations_are_derived_positionally() {
     assert_eq!(
         error(missing),
         CatalogError::MissingPresentationSpellTarget {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             target: TargetSlotId(0),
         }
@@ -494,11 +499,11 @@ fn nonmodal_spell_target_presentations_are_derived_positionally() {
     assert!(matches!(
         error(mismatched),
         CatalogError::MismatchedSpellTargetPresentation {
-            definition: CardDefinitionId(1),
+            definition,
             option: PlayOptionId::DEFAULT,
             position: 0,
             ..
-        }
+        } if definition == CardDefinitionId::new(1)
     ));
 }
 
@@ -525,7 +530,7 @@ fn unpresentable_nonmodal_targets_use_only_the_semantic_runtime_definition() {
     assert_eq!(
         error(approximated),
         CatalogError::UnpresentableSpellTarget {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             target: TargetSlotId(0),
         }
@@ -557,7 +562,7 @@ fn unpresentable_modal_targets_use_only_the_semantic_runtime_definition() {
     assert_eq!(
         error(approximated),
         CatalogError::UnpresentableSpellModeTarget {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(0),
             target: TargetSlotId(0),
@@ -584,7 +589,7 @@ fn combined_play_options_reject_modal_constituent_parts() {
     assert_eq!(
         validate_semantic_spell_presentation(&definition, &option),
         Err(CatalogError::CombinedModalSpellUnsupported {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId(2),
             part: CardPartId::PRIMARY,
         })
@@ -602,7 +607,7 @@ fn semantic_modal_spells_keep_targets_on_their_branches() {
     assert_eq!(
         error(definition),
         CatalogError::UnexpectedModalSpellTargets {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             count: 1,
         }
@@ -618,13 +623,14 @@ fn semantic_spell_mode_selection_rules_cannot_drift_from_presentation() {
             maximum: 2,
             may_repeat: true,
             modes: vec![mode(0, Vec::new()), mode(1, Vec::new())],
+            conditional_maximum: None,
         }),
     );
 
     assert_eq!(
         error(mismatched),
         CatalogError::MismatchedSpellModeSelection {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             presentation_minimum: 1,
             presentation_maximum: 2,
@@ -649,7 +655,7 @@ fn executable_spell_mode_branches_are_declarative() {
     assert_eq!(
         error(definition),
         CatalogError::CustomSpellModeImplementation {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             part: CardPartId::PRIMARY,
             ability: AbilityId(0),
             mode: ModeId(0),
@@ -672,7 +678,7 @@ fn semantic_spell_mode_targets_require_matching_positions_and_cardinalities() {
     assert_eq!(
         error(missing_presentation),
         CatalogError::MissingPresentationSpellModeTarget {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(0),
             target: TargetSlotId(0),
@@ -686,7 +692,7 @@ fn semantic_spell_mode_targets_require_matching_positions_and_cardinalities() {
     assert_eq!(
         error(missing_semantic),
         CatalogError::MissingSemanticSpellModeTarget {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(0),
             target: TargetSlotId(0),
@@ -700,7 +706,7 @@ fn semantic_spell_mode_targets_require_matching_positions_and_cardinalities() {
     assert_eq!(
         error(mismatched_cardinality),
         CatalogError::MismatchedSpellModeTargetCardinality {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             mode: ModeId(0),
             target: TargetSlotId(0),
@@ -788,12 +794,13 @@ fn composed_target_count_fits_the_runtime_slot_space() {
         maximum: 2,
         may_repeat: false,
         modes: vec![mode(0, targets()), mode(1, targets())],
+        conditional_maximum: None,
     });
 
     assert_eq!(
         error(card),
         CatalogError::TooManyInstantiatedTargets {
-            definition: CardDefinitionId(1),
+            definition: CardDefinitionId::new(1),
             option: PlayOptionId::DEFAULT,
             count: 400,
         }
@@ -819,6 +826,7 @@ fn modal_target_slots_are_local_to_each_selected_occurrence() {
             mode(0, vec![target(0, 1, 1)]),
             mode(1, vec![target(0, 1, 1)]),
         ],
+        conditional_maximum: None,
     });
     CardCatalog::new([coexisting]).unwrap();
 
@@ -828,6 +836,7 @@ fn modal_target_slots_are_local_to_each_selected_occurrence() {
         maximum: 2,
         may_repeat: true,
         modes: vec![mode(0, vec![target(0, 1, 1)])],
+        conditional_maximum: None,
     });
     CardCatalog::new([repeatable]).unwrap();
 }

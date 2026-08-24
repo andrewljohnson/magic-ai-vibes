@@ -1,14 +1,44 @@
 use super::{
-    BattlefieldArrival, CardDefinitionId, CardInstance, CardPartId, CharacteristicContext,
-    CharacteristicSource, DeclarativeAbilityDef, EffectDef, EffectRecipientDef, EntryCompletion,
-    Game, GameEvent, GameObjectId, KeywordAbility, ObjectBacking, PendingBattlefieldEntry,
-    Permanent, PlayerId, PublicCard, ReplacementEventDef, Target, TriggerContext, ZoneCard,
+    ArrivalAttachment, BattlefieldArrival, CardDefinitionId, CardInstance, CardPartId,
+    CardStructure, CharacteristicContext, CharacteristicSource, CommittedTriggerEvent,
+    DeclarativeAbilityDef, EffectDef, EffectRecipientDef, EntryCompletion, Game, GameEvent,
+    GameObjectId, KeywordAbility, ObjectBacking, PendingBattlefieldEntry, Permanent, PlayerId,
+    PublicCard, ReplacementEffectDef, ReplacementEventDef, Target, TriggerContext, ZoneCard,
     ZoneError, ZoneKind, ZoneMoveCause, ZoneMoveCauseDef, ZonePlacement, applicable_part_ids,
 };
 
 impl Game {
+    /// Every card of this name in one player's zone, as targets. Cabal
+    /// Therapy names one and takes them all.
+    pub(super) fn cards_named_in_zone(
+        &self,
+        player: PlayerId,
+        zone: ZoneKind,
+        name: &str,
+    ) -> Vec<Target> {
+        let cards = match zone {
+            ZoneKind::Hand => &self.players[player.index()].hand,
+            ZoneKind::Graveyard => &self.players[player.index()].graveyard,
+            ZoneKind::Exile => &self.players[player.index()].exile,
+            ZoneKind::Library => &self.players[player.index()].library,
+            ZoneKind::Battlefield | ZoneKind::Stack | ZoneKind::Command => return Vec::new(),
+        };
+        cards
+            .iter()
+            .filter(|card| {
+                self.catalog
+                    .get(card.definition)
+                    .is_some_and(|definition| definition.name == name)
+            })
+            .map(|card| Target::Card(card.id))
+            .collect()
+    }
+
     /// Moves one object to a zone. Only the moves a supported card actually
     /// makes are handled; the rest stay seams rather than guesses.
+    /// Returns the battlefield object the card became, when it arrived on
+    /// the battlefield. A permanent that enters is a new object with a new
+    /// identity, so this is the only handle a later effect has on it.
     pub(super) fn move_target_to_zone(
         &mut self,
         target: Target,
@@ -16,7 +46,7 @@ impl Game {
         cause: ZoneMoveCause,
         arriving_controller: Option<BattlefieldArrival>,
         placement: ZonePlacement,
-    ) {
+    ) -> Option<GameObjectId> {
         if let Target::Permanent(id) = target {
             // Leaving the battlefield has its own procedure: last-known
             // information, exit events, and the triggers watching for them.
@@ -27,18 +57,37 @@ impl Game {
                 ZoneKind::Library => self.return_permanent_to_library(id, placement),
                 ZoneKind::Battlefield | ZoneKind::Stack | ZoneKind::Command => {}
             }
-            return;
+            return None;
         }
         let Target::Card(id) = target else {
-            return;
+            return None;
         };
-        let Some(from) = self
+        let from = self
             .card_in_nonbattlefield_zone(id)
-            .map(|(from, _card)| from)
-        else {
-            return;
-        };
-        let _ = self.move_card_from_nonbattlefield_zone(id, from, zone, cause, arriving_controller);
+            .map(|(from, _card)| from)?;
+        if from == ZoneKind::Library && zone == ZoneKind::Library {
+            let owner = self
+                .card_in_nonbattlefield_zone(id)
+                .map(|(_, card)| card.owner)?;
+            let card = remove_card(&mut self.players[owner.index()].library, id)?;
+            match placement {
+                ZonePlacement::Top => self.players[owner.index()].library.push(card),
+                ZonePlacement::Bottom => self.players[owner.index()].library.insert(0, card),
+            }
+            return None;
+        }
+        let (moved, actual_destination) =
+            self.move_card_from_nonbattlefield_zone(id, from, zone, cause, arriving_controller)?;
+        if actual_destination == ZoneKind::Library
+            && placement == ZonePlacement::Bottom
+            && let Some(card) =
+                remove_card(&mut self.players[moved.owner.index()].library, moved.id)
+        {
+            self.players[moved.owner.index()].library.insert(0, card);
+        }
+        (actual_destination == ZoneKind::Battlefield)
+            .then_some(())
+            .and(self.arrived.take())
     }
 
     /// One card in a hand or library, as a simulation sees it.
@@ -116,22 +165,48 @@ impl Game {
         let Some(card) = self.catalog.get(definition) else {
             return Err(ZoneError::UnknownCard(definition));
         };
-        let presented = card.primary_part_id();
+        let presented = card.battlefield_entry_part();
         let built = self.build_zone(player, &[definition])?;
         let card = built
             .into_iter()
             .next()
             .expect("build_zone returns one card for one definition");
         let id = card.id;
-        let mut permanent =
-            Permanent::entering(card, presented, player, self.turns_started[player.index()]);
+        let mut permanent = Permanent::entering(
+            card,
+            presented,
+            player,
+            self.turns_started[player.index()],
+            self.turn,
+        );
         self.initialize_battlefield_entry(&mut permanent);
         self.enqueue_battlefield_entry(PendingBattlefieldEntry {
             permanent,
             from: ZoneKind::Stack,
             completion: EntryCompletion::Setup,
+            redirected_to: None,
         });
         Ok(id)
+    }
+
+    /// Moves a card already on top of its owner's library down to sit just
+    /// beneath the top `depth` cards. A library is stored bottom-first, so
+    /// the top is the end and the card lands `depth` places back from it; a
+    /// depth past the library's length puts it on the bottom.
+    pub(super) fn sink_library_card(&mut self, card: GameObjectId, depth: usize) {
+        let Some(owner) = self
+            .card_in_nonbattlefield_zone(card)
+            .map(|(_, card)| card.owner)
+        else {
+            return;
+        };
+        let library = &mut self.players[owner.index()].library;
+        let Some(position) = library.iter().position(|held| held.id == card) else {
+            return;
+        };
+        let held = library.remove(position);
+        let target = library.len().saturating_sub(depth);
+        library.insert(target, held);
     }
 
     /// Puts a card into a player's graveyard directly, as a simulation and
@@ -206,9 +281,31 @@ impl Game {
                     // provenance, which only meld and copy effects consult.
                     backing: ObjectBacking::None,
                     characteristics: CharacteristicSource::Card(*definition),
+                    counters: crate::game::counters::Counters::new(),
                 })
             })
             .collect()
+    }
+
+    /// Discards that many cards picked at random from a player's hand.
+    ///
+    /// The picks come off the seeded generator one at a time, so a replay of
+    /// the same seed discards the same cards. Fewer cards in hand than asked
+    /// for discards the whole hand, which is what paying a cost you can only
+    /// partly afford would mean -- but activation legality already refuses
+    /// that case, so in practice the hand is always big enough.
+    pub(super) fn discard_at_random(&mut self, player: PlayerId, amount: usize) {
+        let mut chosen = Vec::with_capacity(amount);
+        let mut remaining: Vec<_> = self.players[player.index()]
+            .hand
+            .iter()
+            .map(|card| card.id)
+            .collect();
+        for _ in 0..amount.min(remaining.len()) {
+            let index = self.rng.index_below(remaining.len());
+            chosen.push(remaining.swap_remove(index));
+        }
+        self.discard_cards(player, &chosen);
     }
 
     pub(super) fn discard_cards(&mut self, player: PlayerId, cards: &[GameObjectId]) {
@@ -220,7 +317,12 @@ impl Game {
     /// Where a card headed for one zone actually goes, when a permanent on the
     /// battlefield replaces every such move. Rest in Peace is the example:
     /// nothing reaches a graveyard while it is out, from any zone at all.
-    pub(super) fn external_zone_move_replacement(&self, to: ZoneKind) -> Option<ZoneKind> {
+    pub(super) fn external_zone_move_replacement(
+        &self,
+        to: ZoneKind,
+        owner: PlayerId,
+        is_token: bool,
+    ) -> Option<ZoneKind> {
         let mut replacement = None;
         for permanent in &self.battlefield {
             self.for_each_effective_ability(permanent, |effective| {
@@ -231,14 +333,27 @@ impl Game {
                 let DeclarativeAbilityDef::Replacement(definition) = ability.definition else {
                     return;
                 };
-                if definition.event != (ReplacementEventDef::AnyObjectWouldMove { to }) {
+                let ReplacementEventDef::AnyObjectWouldMove {
+                    to: watched,
+                    owner: watched_owner,
+                    tokens,
+                } = definition.event
+                else {
+                    return;
+                };
+                if watched != to
+                    || (!tokens && is_token)
+                    || !self.player_relation_matches(
+                        owner,
+                        watched_owner,
+                        permanent.controller,
+                        TriggerContext::empty(),
+                    )
+                {
                     return;
                 }
-                if let Some(EffectDef::MoveToZone {
-                    object: EffectRecipientDef::Source,
-                    zone,
-                    ..
-                }) = ability.declarative_effect()
+                if let Some(ReplacementEffectDef::MoveToZone(zone)) =
+                    ability.declarative_replacement()
                 {
                     replacement = Some(zone);
                 }
@@ -247,15 +362,99 @@ impl Game {
                 break;
             }
         }
+        // And the same replacement made by a resolving spell rather than
+        // printed on a permanent: the effect object holds it for as long as
+        // it lasts, which is where Yawgmoth's Will keeps its turn.
+        if replacement.is_none() {
+            for ongoing in &self.ongoing_effects {
+                let ability = ongoing.ability;
+                let DeclarativeAbilityDef::Replacement(definition) = ability.definition else {
+                    continue;
+                };
+                let ReplacementEventDef::AnyObjectWouldMove {
+                    to: watched,
+                    owner: watched_owner,
+                    tokens,
+                } = definition.event
+                else {
+                    continue;
+                };
+                if watched != to
+                    || (!tokens && is_token)
+                    || !self.player_relation_matches(
+                        owner,
+                        watched_owner,
+                        ongoing.controller,
+                        TriggerContext::empty(),
+                    )
+                {
+                    continue;
+                }
+                if let Some(ReplacementEffectDef::MoveToZone(zone)) =
+                    ability.declarative_replacement()
+                {
+                    replacement = Some(zone);
+                    break;
+                }
+            }
+        }
         replacement
     }
 
     /// The one way a card reaches a graveyard, so a replacement that sends it
     /// somewhere else has a single place to apply.
     pub(super) fn put_card_into_graveyard(&mut self, owner: PlayerId, card: CardInstance) {
-        match self.external_zone_move_replacement(ZoneKind::Graveyard) {
+        // Tokens cease to exist as they leave the battlefield and never become
+        // `CardInstance`s. A physical card remains a nontoken here even when
+        // its former permanent was copying token characteristics.
+        match self.external_zone_move_replacement(ZoneKind::Graveyard, owner, false) {
             Some(ZoneKind::Exile) => self.players[owner.index()].exile.push(card),
             _ => self.players[owner.index()].graveyard.push(card),
+        }
+    }
+
+    /// Whether a replacement program shuffles the library it just put a card
+    /// into. "Reveal it and shuffle it into its owner's library" would
+    /// otherwise leave the card on top, which is a very different card.
+    fn replacement_shuffles_library(effect: ReplacementEffectDef) -> bool {
+        match effect {
+            ReplacementEffectDef::Perform(effect) => matches!(
+                *effect,
+                EffectDef::ShuffleLibrary {
+                    player: EffectRecipientDef::Controller,
+                }
+            ),
+            ReplacementEffectDef::Sequence(effects) => effects
+                .iter()
+                .copied()
+                .any(Self::replacement_shuffles_library),
+            _ => false,
+        }
+    }
+
+    /// Whether the replacement that redirects this move also shuffles.
+    fn zone_move_replacement_shuffles(
+        &self,
+        card: &CardInstance,
+        from: ZoneKind,
+        to: ZoneKind,
+        actual_cause: ZoneMoveCause,
+    ) -> bool {
+        self.zone_move_replacement_program(card, from, to, actual_cause)
+            .is_some_and(Self::replacement_shuffles_library)
+    }
+
+    /// Where a replacement program sends the card, if it sends it anywhere.
+    /// A sequence carries the move alongside whatever else it does, and the
+    /// move is the part a zone change needs to know about.
+    fn replacement_move_destination(effect: ReplacementEffectDef) -> Option<ZoneKind> {
+        match effect {
+            ReplacementEffectDef::MoveToZone(zone) => Some(zone),
+            ReplacementEffectDef::Sequence(effects) => effects
+                .iter()
+                .copied()
+                .find_map(Self::replacement_move_destination),
+            _ => None,
         }
     }
 
@@ -266,6 +465,18 @@ impl Game {
         to: ZoneKind,
         actual_cause: ZoneMoveCause,
     ) -> Option<ZoneKind> {
+        self.zone_move_replacement_program(card, from, to, actual_cause)
+            .and_then(Self::replacement_move_destination)
+    }
+
+    /// The replacement program that answers this move, if one does.
+    fn zone_move_replacement_program(
+        &self,
+        card: &CardInstance,
+        from: ZoneKind,
+        to: ZoneKind,
+        actual_cause: ZoneMoveCause,
+    ) -> Option<ReplacementEffectDef> {
         let characteristic_context = match from {
             ZoneKind::Library => CharacteristicContext::Library,
             ZoneKind::Hand => CharacteristicContext::Hand,
@@ -307,18 +518,15 @@ impl Game {
                         )
                     }
                 };
-                if event_from == from
+                if event_from.is_none_or(|expected| expected == from)
                     && event_to == to
                     && cause_matches
                     && ability.is_executable()
                     && replacement.source_zones.contains(&from)
-                    && let Some(EffectDef::MoveToZone {
-                        object: EffectRecipientDef::Source,
-                        zone,
-                        ..
-                    }) = ability.declarative_effect()
+                    && let Some(effect) = ability.declarative_replacement()
+                    && Self::replacement_move_destination(effect).is_some()
                 {
-                    return Some(zone);
+                    return Some(effect);
                 }
             }
         }
@@ -331,36 +539,97 @@ impl Game {
         from: ZoneKind,
         arrival: BattlefieldArrival,
         grant: Option<KeywordAbility>,
-    ) -> CardInstance {
+    ) -> Option<CardInstance> {
         let controller = arrival.controller;
         let definition = self
             .catalog
             .get(card.definition)
             .expect("a card in hand remains cataloged");
-        let presented = applicable_part_ids(definition, &CharacteristicContext::Hand)
+        if definition.rules.has_metadata_only_creature_body() && arrival.face_down.is_none() {
+            // Catalog-only bodies may still exist in hidden-zone fixtures and
+            // may be manifested as the ordinary face-down 2/2, but no game
+            // effect can turn their printed metadata into a face-up vanilla
+            // permanent. Restore the card because the attempted move did not
+            // happen.
+            let owner = card.owner;
+            match from {
+                ZoneKind::Library => self.players[owner.index()].library.push(card),
+                ZoneKind::Hand => self.players[owner.index()].hand.push(card),
+                ZoneKind::Graveyard => self.players[owner.index()].graveyard.push(card),
+                ZoneKind::Exile => self.players[owner.index()].exile.push(card),
+                ZoneKind::Stack => self.put_card_into_graveyard(owner, card),
+                ZoneKind::Battlefield | ZoneKind::Command => {
+                    debug_assert!(false, "unsupported source for a battlefield arrival");
+                }
+            }
+            return None;
+        }
+        let front = applicable_part_ids(definition, &CharacteristicContext::Hand)
             .ok()
             .and_then(|parts| parts.first().copied())
             .unwrap_or(CardPartId::PRIMARY);
+        // A Room that arrives from anywhere but the stack has had no door
+        // chosen for it, so it arrives with both of them locked.
+        let front = if matches!(definition.structure, CardStructure::Room { .. }) {
+            definition.battlefield_entry_part()
+        } else {
+            front
+        };
+        // A card told to arrive transformed enters showing its other face.
+        // A single-faced card has no other face and simply ignores it.
+        let presented = if arrival.transformed {
+            definition.other_face(front).unwrap_or(front)
+        } else {
+            front
+        };
         let entered_card = card.clone();
         let mut permanent = Permanent::entering(
             card,
             presented,
             controller,
             self.turns_started[controller.index()],
+            self.turn,
         );
         // Set before entry replacements run, the same way an as-enters clause
         // would, so nothing observes the permanent arriving untapped first.
         permanent.tapped = arrival.tapped;
+        // A card put onto the battlefield face down was never face up there,
+        // so these are part of the arrival rather than a later turn-over.
+        permanent.face_down = arrival.face_down;
+        permanent.turn_up_for_mana_cost = arrival.turn_up_for_mana_cost;
+        // On it as it arrives, so an enters trigger reading its power sees
+        // them and a keyword counter is granting its keyword already.
+        if let Some((kind, amount)) = arrival.counters {
+            permanent.add_counters(kind, amount);
+        }
         self.initialize_battlefield_entry(&mut permanent);
         if let Some(keyword) = grant {
             permanent.temporary_keywords.push(keyword);
         }
+        let expected = permanent.card.definition;
         self.enqueue_battlefield_entry(PendingBattlefieldEntry {
             permanent,
             from,
-            completion: EntryCompletion::None,
+            completion: match arrival.attachment {
+                Some(ArrivalAttachment::SourceToArrival(source)) => {
+                    EntryCompletion::AttachSource { source }
+                }
+                Some(ArrivalAttachment::ArrivalToHost(host)) => {
+                    EntryCompletion::AttachToHost { host }
+                }
+                None => EntryCompletion::None,
+            },
+            redirected_to: None,
         });
-        entered_card
+        // The entry is committed here unless a replacement needs an answer
+        // first, and committing mints a fresh identity -- the card that left
+        // the graveyard and the permanent now standing there are two objects.
+        self.arrived = self
+            .battlefield
+            .last()
+            .filter(|permanent| permanent.card.definition == expected)
+            .map(|permanent| permanent.card.id);
+        Some(entered_card)
     }
 
     /// Moves a card between non-stack zones after applying replacement
@@ -387,6 +656,7 @@ impl Game {
         let destination = self
             .zone_move_replacement_destination(&card, from, requested_to, cause)
             .unwrap_or(requested_to);
+        let shuffles = self.zone_move_replacement_shuffles(&card, from, requested_to, cause);
         if matches!(destination, ZoneKind::Stack | ZoneKind::Command) {
             return None;
         }
@@ -406,7 +676,7 @@ impl Game {
                 from,
                 arrival.unwrap_or_else(|| BattlefieldArrival::under(owner)),
                 None,
-            )
+            )?
         } else {
             let (card, _zone_change) = self.zone_change_card(card);
             match destination {
@@ -420,7 +690,97 @@ impl Game {
             }
             card
         };
+        if shuffles && destination == ZoneKind::Library {
+            self.rng.shuffle(&mut self.players[owner.index()].library);
+        }
+        if destination == ZoneKind::Graveyard {
+            self.capture_nonbattlefield_graveyard_arrival(&card, from);
+        }
+        if destination == ZoneKind::Exile {
+            self.capture_cards_exiled(std::slice::from_ref(&card), from);
+        }
+        if from == ZoneKind::Graveyard {
+            self.note_card_left_graveyard(owner);
+        }
         Some((card, destination))
+    }
+
+    /// "When this is put into a graveyard from anywhere" for the halves that
+    /// are not a permanent dying: discarded from a hand, milled from a
+    /// library, exiled and then returned.
+    ///
+    /// Raised after the card has landed, which is what lets the graveyard
+    /// walk find the listener at all -- it reads the cards lying there. The
+    /// battlefield half is raised from the exit path instead, off a snapshot
+    /// taken before the permanent left, so no listener sees both.
+    fn capture_nonbattlefield_graveyard_arrival(&mut self, card: &CardInstance, from: ZoneKind) {
+        let Some(object) = self.printed_trigger_event_object(
+            card.id,
+            card.definition,
+            card.owner,
+            &CharacteristicContext::Graveyard,
+        ) else {
+            return;
+        };
+        self.capture_battlefield_triggers(&CommittedTriggerEvent::ZoneChanged {
+            object,
+            from,
+            to: ZoneKind::Graveyard,
+            damage_sources: Vec::new(),
+        });
+    }
+
+    /// "If a card left your graveyard this turn." Recorded rather than
+    /// reconstructed: by the time an end step asks, the card it is about is
+    /// somewhere else entirely and nothing left behind says where it came
+    /// from.
+    pub(super) fn note_card_left_graveyard(&mut self, owner: PlayerId) {
+        self.card_left_graveyard_this_turn[owner.index()] = true;
+    }
+
+    /// "Whenever one or more cards are put into exile from ...": one event
+    /// for the whole move, published once however many cards it took.
+    ///
+    /// Raised only where the cards came out of a hidden or public zone that
+    /// a clause can name -- a permanent exiled from the battlefield is a
+    /// zone change of its own and is published there.
+    pub(super) fn capture_cards_exiled(&mut self, cards: &[CardInstance], from: ZoneKind) {
+        let Some(owner) = cards.first().map(|card| card.owner) else {
+            return;
+        };
+        let objects = cards
+            .iter()
+            .filter_map(|card| {
+                self.printed_trigger_event_object(
+                    card.id,
+                    card.definition,
+                    card.owner,
+                    &CharacteristicContext::Exile,
+                )
+            })
+            .collect::<Vec<_>>();
+        if objects.is_empty() {
+            return;
+        }
+        self.capture_battlefield_triggers(&CommittedTriggerEvent::CardsExiled {
+            cards: objects,
+            from,
+            owner,
+        });
+    }
+
+    /// Raises the exile event for cards already sitting in exile, for the
+    /// tests that need one without an effect to make it.
+    #[cfg(test)]
+    pub(super) fn capture_exile_for_test(&mut self, cards: &[GameObjectId], from: ZoneKind) {
+        let moved = cards
+            .iter()
+            .filter_map(|id| {
+                self.card_in_nonbattlefield_zone(*id)
+                    .map(|(_, card)| card.clone())
+            })
+            .collect::<Vec<_>>();
+        self.capture_cards_exiled(&moved, from);
     }
 
     pub(super) fn discard_cards_with_cause(
@@ -448,13 +808,37 @@ impl Game {
                 continue;
             };
             let definition = card.definition;
-            discarded.push((card.id, definition));
+            // Read where the card now lies: a trigger that exiles "that
+            // card from your graveyard" needs the graveyard object, and the
+            // one that was in hand no longer exists.
+            let object = self.printed_trigger_event_object(
+                card.id,
+                definition,
+                player,
+                &CharacteristicContext::Graveyard,
+            );
+            discarded.push((card.id, definition, object));
         }
         if !discarded.is_empty() {
             self.events.push(GameEvent::CardsDiscarded {
                 player,
-                cards: discarded,
+                cards: discarded
+                    .iter()
+                    .map(|(id, definition, _)| (*id, *definition))
+                    .collect(),
             });
+            // One event per card: "whenever you discard a card" fires twice
+            // for a discard of two. Raised after the cards have moved, so
+            // anything the triggers read sees the finished hand.
+            for (_, _, object) in discarded {
+                self.capture_battlefield_triggers(&CommittedTriggerEvent::Discarded {
+                    player,
+                    card: object,
+                });
+            }
+            // And once for the whole discard, which is what "one or more
+            // cards" asks about.
+            self.capture_battlefield_triggers(&CommittedTriggerEvent::CardsDiscarded { player });
         }
     }
 }

@@ -38,7 +38,7 @@ impl Game {
             [] => self.commit_next_turn(player, deferred),
             [replacement] if !replacement.optional => {
                 applied.push(replacement.source);
-                if Self::apply_begin_turn_replacement(*replacement, &mut deferred) {
+                if Self::apply_begin_turn_replacement(replacement, &mut deferred) {
                     self.start_next_turn_with_deferred(deferred);
                 } else {
                     self.continue_begin_turn(player, kind, applied, deferred);
@@ -71,7 +71,7 @@ impl Game {
                 else {
                     return;
                 };
-                let Some(EffectDef::Replacement(effect)) = ability.declarative_effect() else {
+                let Some(effect) = ability.declarative_replacement() else {
                     return;
                 };
                 let source = AbilitySourceRef {
@@ -84,6 +84,14 @@ impl Game {
                     Some(ReplacementConditionDef::CreatureDiedThisTurn) => {
                         self.creature_died_this_turn
                     }
+                    // How a permanent's spell was paid for is a fact about
+                    // the entry, so nothing about a turn beginning asks it.
+                    // Hand and library sizes are likewise facts about draws.
+                    Some(
+                        ReplacementConditionDef::SourceCastWith(_)
+                        | ReplacementConditionDef::ControllerHandAtMost(_)
+                        | ReplacementConditionDef::ControllerLibraryEmpty,
+                    ) => false,
                 };
                 if applied.contains(&source)
                     || !definition.source_zones.contains(&ZoneKind::Battlefield)
@@ -105,9 +113,9 @@ impl Game {
                 replacements.push(ApplicableBeginTurnReplacement {
                     source,
                     controller: permanent.controller,
-                    definition: Self::ability_presentation_definition(
+                    presentation: Self::ability_presentation(
                         effective.origin,
-                        Self::effective_rules_source(permanent).0,
+                        Self::effective_rules_source(permanent),
                     ),
                     text: ability.text,
                     optional: definition.optional,
@@ -140,13 +148,12 @@ impl Game {
         }
         options.extend(replacements.iter().enumerate().map(|(index, replacement)| {
             let name = self
-                .catalog
-                .get(replacement.definition)
-                .map_or("the source", |definition| definition.name.as_str());
+                .presentation_name(replacement.presentation)
+                .unwrap_or_else(|| "the source".into());
             DecisionOption {
                 id: u32::try_from(index + 1).expect("begin-turn replacement count fits u32"),
                 label: format!("Apply {name}'s replacement effect"),
-                card: Some((replacement.source.object, replacement.definition)),
+                card: Some((replacement.source.object, replacement.presentation)),
                 members: Vec::new(),
                 ability_text: Some(replacement.text.into()),
                 zone: DecisionZone::Battlefield,
@@ -197,7 +204,7 @@ impl Game {
             return;
         };
         applied.push(replacement.source);
-        if Self::apply_begin_turn_replacement(replacement, &mut deferred) {
+        if Self::apply_begin_turn_replacement(&replacement, &mut deferred) {
             self.start_next_turn_with_deferred(deferred);
         } else {
             self.continue_begin_turn(player, kind, applied, deferred);
@@ -223,23 +230,27 @@ impl Game {
                 }
                 true
             }
-            ReplacementEffectDef::None
-            | ReplacementEffectDef::ModifyBattlefieldEntry(_)
+            ReplacementEffectDef::ModifyBattlefieldEntry(_)
             | ReplacementEffectDef::MoveToZone(_)
             | ReplacementEffectDef::Conditional { .. }
-            | ReplacementEffectDef::OptionalPayment { .. } => false,
+            | ReplacementEffectDef::PayOr { .. }
+            | ReplacementEffectDef::MultiplyEventAmount(_)
+            | ReplacementEffectDef::AddToEventAmount(_)
+            | ReplacementEffectDef::Choose(_)
+            | ReplacementEffectDef::LookAtHand(_)
+            | ReplacementEffectDef::CopyEntering { .. } => false,
         }
     }
 
     fn apply_begin_turn_replacement(
-        replacement: ApplicableBeginTurnReplacement,
+        replacement: &ApplicableBeginTurnReplacement,
         deferred: &mut Vec<DeferredBeginTurnEffect>,
     ) -> bool {
         Self::apply_begin_turn_replacement_effect(replacement, replacement.effect, deferred)
     }
 
     fn apply_begin_turn_replacement_effect(
-        replacement: ApplicableBeginTurnReplacement,
+        replacement: &ApplicableBeginTurnReplacement,
         effect: ReplacementEffectDef,
         deferred: &mut Vec<DeferredBeginTurnEffect>,
     ) -> bool {
@@ -255,16 +266,20 @@ impl Game {
             ReplacementEffectDef::ReplaceEventWithNothing => true,
             ReplacementEffectDef::Perform(effect) => {
                 deferred.push(DeferredBeginTurnEffect {
-                    replacement,
+                    replacement: *replacement,
                     effect: *effect,
                 });
                 false
             }
-            ReplacementEffectDef::None
-            | ReplacementEffectDef::ModifyBattlefieldEntry(_)
+            ReplacementEffectDef::ModifyBattlefieldEntry(_)
             | ReplacementEffectDef::MoveToZone(_)
             | ReplacementEffectDef::Conditional { .. }
-            | ReplacementEffectDef::OptionalPayment { .. } => false,
+            | ReplacementEffectDef::PayOr { .. }
+            | ReplacementEffectDef::MultiplyEventAmount(_)
+            | ReplacementEffectDef::AddToEventAmount(_)
+            | ReplacementEffectDef::Choose(_)
+            | ReplacementEffectDef::LookAtHand(_)
+            | ReplacementEffectDef::CopyEntering { .. } => false,
         }
     }
 
@@ -275,7 +290,7 @@ impl Game {
     ) {
         for deferred in deferred {
             self.perform_begin_turn_replacement_effect(
-                deferred.replacement,
+                &deferred.replacement,
                 deferred.effect,
                 player,
             );
@@ -284,7 +299,7 @@ impl Game {
 
     fn perform_begin_turn_replacement_effect(
         &mut self,
-        replacement: ApplicableBeginTurnReplacement,
+        replacement: &ApplicableBeginTurnReplacement,
         effect: EffectDef,
         player: PlayerId,
     ) {
@@ -303,17 +318,19 @@ impl Game {
             ability: Some(StackAbilityPayload {
                 origin: replacement.source.ability,
                 definition: None,
-                presentation_definition: replacement.definition,
+                presentation: replacement.presentation,
                 text: Some(replacement.text),
                 target_defs: Vec::new(),
                 targets: Vec::new(),
                 context: TriggerContext {
                     event_player: Some(player),
                     ..TriggerContext::empty()
-                },
+                }
+                .into(),
                 resolver: StackAbilityResolver::Declarative(ScopedEffect::primary(effect)),
                 condition: None,
                 mode_effects: Vec::new(),
+                resolution_destination: None,
                 x: 0,
             }),
             controller: replacement.controller,
@@ -323,6 +340,11 @@ impl Game {
             text_changes: Vec::new(),
             colors: None,
             cast_via_flashback: false,
+            cast_at_instant_speed: false,
+            cast_from_zone: None,
+            face_down: None,
+            colors_of_mana_spent: crate::card::ColorSet::empty(),
+            phyrexian_symbols_paid_with_life: 0,
             is_copy: false,
         };
         self.resolve_effect_def(

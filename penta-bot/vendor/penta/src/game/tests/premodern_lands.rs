@@ -23,6 +23,9 @@ fn painlands_offer_safe_colorless_or_colored_mana_with_immediate_damage() {
                 source,
                 ability: mana_ability_for(&game, source, ManaColor::Colorless),
                 color: ManaColor::Colorless,
+                counters_removed: None,
+                cost_object: None,
+                combination: None,
             },
         )
         .unwrap();
@@ -40,6 +43,9 @@ fn painlands_offer_safe_colorless_or_colored_mana_with_immediate_damage() {
                     source,
                     ability: mana_ability_for(&game, source, color),
                     color,
+                    counters_removed: None,
+                    cost_object: None,
+                    combination: None,
                 },
             )
             .unwrap();
@@ -66,6 +72,9 @@ fn ancient_tomb_adds_two_colorless_and_deals_two_damage_immediately() {
             source,
             ability: mana_ability_for(&game, source, ManaColor::Colorless),
             color: ManaColor::Colorless,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -90,15 +99,17 @@ fn wasteland_sacrifices_to_destroy_a_nonbasic_but_cannot_target_a_basic() {
         source,
         ability,
         targets: activated_targets(Target::Permanent(basic_id)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let target_nonbasic = Action::ActivateAbility {
         source,
         ability,
         targets: activated_targets(Target::Permanent(nonbasic_id)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(!game.legal_actions(PlayerId::One).contains(&target_basic));
@@ -140,8 +151,9 @@ fn dust_bowl_sacrifices_a_land_and_rishadan_port_taps_one() {
             source: bowl_id,
             ability: activated_ability_for(&game, bowl_id, 0),
             targets: activated_targets(Target::Permanent(target_id)),
-            cost_object: Some(fodder_id),
+            cost_objects: vec![fodder_id],
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -178,8 +190,9 @@ fn dust_bowl_sacrifices_a_land_and_rishadan_port_taps_one() {
             source: port_id,
             ability: activated_ability_for(&game, port_id, 0),
             targets: activated_targets(Target::Permanent(land_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -230,8 +243,9 @@ fn coastal_tower_enters_tapped_and_fetchlands_find_only_their_land_types() {
                 source,
                 ability: activated_ability_for(&game, source, 0),
                 targets: Vec::new(),
-                cost_object: None,
+                cost_objects: Vec::new(),
                 x: 0,
+                modes: Vec::new(),
             },
         )
         .unwrap();
@@ -250,7 +264,11 @@ fn coastal_tower_enters_tapped_and_fetchlands_find_only_their_land_types() {
         let offered = decision
             .options
             .iter()
-            .filter_map(|option| option.card.map(|(_, definition)| definition))
+            .filter_map(|option| {
+                option
+                    .card
+                    .and_then(|(_, characteristics)| characteristics.card_definition())
+            })
             .collect::<Vec<_>>();
         assert!(offered.contains(&eligible));
         assert!(!offered.contains(&ineligible));
@@ -258,9 +276,9 @@ fn coastal_tower_enters_tapped_and_fetchlands_find_only_their_land_types() {
             .options
             .iter()
             .find(|option| {
-                option
-                    .card
-                    .is_some_and(|(_, definition)| definition == eligible)
+                option.card.is_some_and(|(_, characteristics)| {
+                    characteristics.card_definition() == Some(eligible)
+                })
             })
             .expect("the matching land is selectable")
             .id;

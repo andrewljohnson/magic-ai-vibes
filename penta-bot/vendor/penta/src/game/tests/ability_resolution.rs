@@ -14,8 +14,9 @@ fn copied_grant_source_definition_is_part_of_the_granted_ability_origin() {
         source: receiver,
         ability: first_origin,
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&stale_action));
 
@@ -38,8 +39,9 @@ fn copied_grant_source_definition_is_part_of_the_granted_ability_origin() {
         source: receiver,
         ability: second_origin,
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     }));
 }
 
@@ -71,7 +73,7 @@ static MULTI_SLOT_ACTIVATION_ABILITIES: [AbilityDef; 1] = [AbilityDef::activated
 
 #[test]
 fn declarative_activation_preserves_multiple_slots_before_sacrificing_its_source() {
-    let definition_id = CardDefinitionId(10_063);
+    let definition_id = CardDefinitionId::new(10_063);
     let mut definition = CardDefinition::new(
         definition_id,
         "Multi-slot activation test card",
@@ -106,8 +108,9 @@ fn declarative_activation_preserves_multiple_slots_before_sacrificing_its_source
         source,
         ability: primary_ability(definition_id),
         targets: targets.clone(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     let invalid_slots = Action::ActivateAbility {
@@ -117,8 +120,9 @@ fn declarative_activation_preserves_multiple_slots_before_sacrificing_its_source
             TargetSelection::single(TargetSlotId(1), Target::Player(PlayerId::Two)),
             TargetSelection::single(TargetSlotId(0), Target::Permanent(creature_target)),
         ],
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.apply(PlayerId::One, invalid_slots).is_err());
     assert!(
@@ -170,6 +174,8 @@ fn one_ability_target_slot_resolves_for_every_selected_legal_target() {
         minimum: 1,
         maximum: 2,
         divided_total: None,
+        another: false,
+        excludes_source: false,
     }];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::activated_with_targets(
         "Deal 1 damage to up to two target creatures an opponent controls.",
@@ -181,7 +187,7 @@ fn one_ability_target_slot_resolves_for_every_selected_legal_target() {
         },
     )];
 
-    let definition_id = CardDefinitionId(10_064);
+    let definition_id = CardDefinitionId::new(10_064);
     let mut definition = CardDefinition::new(
         definition_id,
         "Multi-target slot test card",
@@ -219,8 +225,9 @@ fn one_ability_target_slot_resolves_for_every_selected_legal_target() {
                 Target::Permanent(second_target),
             ],
         )],
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&action));
@@ -256,19 +263,20 @@ fn granted_ability_keeps_its_frozen_resolver_when_the_source_changes() {
             object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
         },
     )
-    .with_effect_execution(EffectExecutionDef::Custom(CardBehavior::SedgeTroll))
+    .with_effect_execution(EffectExecutionDef::Custom(
+        CardBehavior::LibraryOfAlexandria,
+    ))
     .with_coverage(AbilityCoverageDef::explained_complete(
         "The test intentionally grants a custom resolver.",
     ));
     static SOURCE_ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "This permanent has the test ability.",
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
     )];
-    let definition_id = CardDefinitionId(10_061);
+    let definition_id = CardDefinitionId::new(10_061);
     let mut definition = CardDefinition::new(
         definition_id,
         "Granted resolver test card",
@@ -319,17 +327,21 @@ fn granted_ability_keeps_its_frozen_resolver_when_the_source_changes() {
             .ability
             .as_ref()
             .map(|ability| ability.resolver),
-        Some(StackAbilityResolver::Custom(CardBehavior::SedgeTroll))
+        Some(StackAbilityResolver::Custom(
+            CardBehavior::LibraryOfAlexandria
+        ))
     ));
 
     // This models a continuous/copy effect changing the effective rules of a
     // source after activation. The origin remains provenance, while the stack
-    // object's executable payload must remain the Sedge Troll procedure.
+    // object's executable payload must remain the Library procedure.
     game.battlefield[0].copy_effect = Some(copied_characteristics(cards::JAYEMDAE_TOME));
+    pass_priority_pair(&mut game);
     pass_priority_pair(&mut game);
 
     assert_eq!(
-        game.battlefield[0].regeneration_shields, 1,
+        game.players[PlayerId::One.index()].hand.len(),
+        1,
         "resolution must not rediscover a different handler from the changed source",
     );
 }
@@ -355,7 +367,7 @@ fn declarative_clause_uses_its_own_resolver_on_a_card_with_custom_behavior() {
             "The test keeps one explicitly custom clause beside the declarative clause.",
         ),
     ];
-    let definition_id = CardDefinitionId(10_060);
+    let definition_id = CardDefinitionId::new(10_060);
     let mut definition = CardDefinition::new(
         definition_id,
         "Mixed resolver test card",
@@ -402,9 +414,7 @@ fn declarative_clause_uses_its_own_resolver_on_a_card_with_custom_behavior() {
 }
 
 #[test]
-fn legacy_activated_clauses_dispatch_from_their_own_effect_execution() {
-    static REGENERATION_COSTS: [AbilityCostDef; 1] =
-        [AbilityCostDef::Mana(ManaCost::colored(0, 0, 0, 1, 0, 0))];
+fn legacy_activated_clauses_keep_their_own_origins() {
     static ABILITIES: [AbilityDef; 2] = [
         AbilityDef::activated(
             "{T}: Draw a card. Activate only if you have exactly seven cards in hand.",
@@ -422,17 +432,22 @@ fn legacy_activated_clauses_dispatch_from_their_own_effect_execution() {
         ))
         .with_legacy_procedure(),
         AbilityDef::activated(
-            "{B}: Regenerate this permanent.",
-            &REGENERATION_COSTS,
-            EffectDef::Special("Regenerate the source permanent"),
+            "{T}: Draw a card. Activate only if you have exactly seven cards in hand.",
+            &[AbilityCostDef::TapSource],
+            EffectDef::DrawCards {
+                recipient: EffectRecipientDef::Controller,
+                amount: ValueDef::Constant(1),
+            },
         )
-        .with_effect_execution(EffectExecutionDef::Custom(CardBehavior::SedgeTroll))
+        .with_effect_execution(EffectExecutionDef::Custom(
+            CardBehavior::LibraryOfAlexandria,
+        ))
         .with_coverage(AbilityCoverageDef::explained_complete(
-            "The test uses the Sedge Troll regeneration resolver.",
+            "The test uses the Library of Alexandria resolver.",
         ))
         .with_legacy_procedure(),
     ];
-    let definition_id = CardDefinitionId(10_096);
+    let definition_id = CardDefinitionId::new(10_096);
     let mut definition = CardDefinition::new(
         definition_id,
         "Multiple legacy activation test",
@@ -455,46 +470,20 @@ fn legacy_activated_clauses_dispatch_from_their_own_effect_execution() {
     let source = CardInstanceId(10_000);
     game.battlefield
         .push(creature(source.0, definition_id, PlayerId::One));
-    game.players[PlayerId::One.index()].mana_pool.black = 1;
     game.players[PlayerId::One.index()]
         .hand
         .extend((0..7).map(|offset| card(10_001 + offset, cards::MOUNTAIN, PlayerId::One)));
-    let library_origin = activated_ability_for(&game, source, 0);
-    let regeneration_origin = activated_ability_for(&game, source, 1);
-    let library = Action::ActivateAbility {
-        source,
-        ability: library_origin,
-        targets: Vec::new(),
-        cost_object: None,
-        x: 0,
-    };
-    let regeneration = Action::ActivateAbility {
-        source,
-        ability: regeneration_origin,
-        targets: Vec::new(),
-        cost_object: None,
-        x: 0,
-    };
+    let first_origin = activated_ability_for(&game, source, 0);
+    let second_origin = activated_ability_for(&game, source, 1);
+    let first = plain_activation(source, first_origin);
+    let second = plain_activation(source, second_origin);
     let actions = game.legal_actions(PlayerId::One);
-    assert!(actions.contains(&library));
-    assert!(actions.contains(&regeneration));
-    assert_ne!(library_origin, regeneration_origin);
+    assert!(actions.contains(&first));
+    assert!(actions.contains(&second));
+    assert_ne!(first_origin, second_origin);
 
-    game.apply(PlayerId::One, regeneration).unwrap();
-    assert_eq!(game.stack[0].ability_origin(), Some(regeneration_origin));
-    assert_eq!(
-        game.stack[0]
-            .ability
-            .as_ref()
-            .map(|ability| ability.resolver),
-        Some(StackAbilityResolver::Custom(CardBehavior::SedgeTroll)),
-    );
-    pass_priority_pair(&mut game);
-    assert_eq!(game.battlefield[0].regeneration_shields, 1);
-
-    game.apply(PlayerId::One, library).unwrap();
-    assert!(game.battlefield[0].tapped);
-    assert_eq!(game.stack[0].ability_origin(), Some(library_origin));
+    game.apply(PlayerId::One, second).unwrap();
+    assert_eq!(game.stack[0].ability_origin(), Some(second_origin));
     assert_eq!(
         game.stack[0]
             .ability
@@ -505,13 +494,12 @@ fn legacy_activated_clauses_dispatch_from_their_own_effect_execution() {
         )),
     );
     pass_priority_pair(&mut game);
+    assert!(game.battlefield[0].tapped);
     assert_eq!(game.players[PlayerId::One.index()].hand.len(), 8);
 }
 
 #[test]
 fn a_legacy_activation_after_a_shared_clause_keeps_its_own_origin() {
-    static REGENERATION_COSTS: [AbilityCostDef; 1] =
-        [AbilityCostDef::Mana(ManaCost::colored(0, 0, 0, 1, 0, 0))];
     static ABILITIES: [AbilityDef; 2] = [
         AbilityDef::activated(
             "You gain 1 life.",
@@ -522,17 +510,22 @@ fn a_legacy_activation_after_a_shared_clause_keeps_its_own_origin() {
             },
         ),
         AbilityDef::activated(
-            "{B}: Regenerate this creature.",
-            &REGENERATION_COSTS,
-            EffectDef::Special("Regenerate the source creature"),
+            "{T}: Draw a card. Activate only if you have exactly seven cards in hand.",
+            &[AbilityCostDef::TapSource],
+            EffectDef::DrawCards {
+                recipient: EffectRecipientDef::Controller,
+                amount: ValueDef::Constant(1),
+            },
         )
-        .with_effect_execution(EffectExecutionDef::Custom(CardBehavior::SedgeTroll))
+        .with_effect_execution(EffectExecutionDef::Custom(
+            CardBehavior::LibraryOfAlexandria,
+        ))
         .with_coverage(AbilityCoverageDef::explained_complete(
-            "The test uses the Sedge Troll regeneration resolver.",
+            "The test uses the Library of Alexandria resolver.",
         ))
         .with_legacy_procedure(),
     ];
-    let definition_id = CardDefinitionId(10_097);
+    let definition_id = CardDefinitionId::new(10_097);
     let mut definition = CardDefinition::new(
         definition_id,
         "Mixed shared and legacy activation test",
@@ -556,14 +549,17 @@ fn a_legacy_activation_after_a_shared_clause_keeps_its_own_origin() {
     let source = CardInstanceId(10_000);
     game.battlefield
         .push(creature(source.0, definition_id, PlayerId::One));
-    game.players[PlayerId::One.index()].mana_pool.black = 1;
+    game.players[PlayerId::One.index()]
+        .hand
+        .extend((0..7).map(|offset| card(10_001 + offset, cards::MOUNTAIN, PlayerId::One)));
     let legacy_origin = activated_ability_for(&game, source, 1);
     let action = Action::ActivateAbility {
         source,
         ability: legacy_origin,
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&action));
@@ -574,11 +570,13 @@ fn a_legacy_activation_after_a_shared_clause_keeps_its_own_origin() {
             .ability
             .as_ref()
             .map(|ability| ability.resolver),
-        Some(StackAbilityResolver::Custom(CardBehavior::SedgeTroll)),
+        Some(StackAbilityResolver::Custom(
+            CardBehavior::LibraryOfAlexandria,
+        )),
     );
     assert_eq!(game.players[PlayerId::One.index()].life, 20);
     pass_priority_pair(&mut game);
-    assert_eq!(game.battlefield[0].regeneration_shields, 1);
+    assert_eq!(game.players[PlayerId::One.index()].hand.len(), 8);
     assert!(game.stack.is_empty());
 }
 
@@ -602,7 +600,7 @@ fn fellwar_mana_and_nested_color_queries_use_their_typed_legacy_clauses() {
         ))
         .with_legacy_procedure(),
     ];
-    let definition_id = CardDefinitionId(10_098);
+    let definition_id = CardDefinitionId::new(10_098);
     let mut definition = CardDefinition::new(
         definition_id,
         "Typed Fellwar mana test",
@@ -612,7 +610,7 @@ fn fellwar_mana_and_nested_color_queries_use_their_typed_legacy_clauses() {
     );
     definition.rules = CardRules::new_artifact(ManaCost::default()).with_abilities(&ABILITIES);
     synchronize_single_part_definition(&mut definition);
-    let proxy_definition_id = CardDefinitionId(10_099);
+    let proxy_definition_id = CardDefinitionId::new(10_099);
     let mut proxy_definition = CardDefinition::new(
         proxy_definition_id,
         "Typed Fellwar land proxy test",
@@ -643,6 +641,9 @@ fn fellwar_mana_and_nested_color_queries_use_their_typed_legacy_clauses() {
         source,
         ability: mana_ability_for(&game, source, ManaColor::Blue),
         color: ManaColor::Blue,
+        counters_removed: None,
+        cost_object: None,
+        combination: None,
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&action));
@@ -651,33 +652,33 @@ fn fellwar_mana_and_nested_color_queries_use_their_typed_legacy_clauses() {
     assert_eq!(game.players[PlayerId::One.index()].mana_pool.blue, 1);
 }
 
+static TWO_SLOT_TARGETS: [AbilityTargetDef; 2] = [
+    AbilityTargetDef::exactly_one(AbilityTargetPredicate::Object {
+        object: ObjectPredicateDef::HasType(CardType::Creature),
+        zones: &[ZoneKind::Battlefield],
+        controller: Some(PlayerRelation::You),
+        owner: None,
+    }),
+    AbilityTargetDef::exactly_one(AbilityTargetPredicate::Object {
+        object: ObjectPredicateDef::HasType(CardType::Creature),
+        zones: &[ZoneKind::Battlefield],
+        controller: Some(PlayerRelation::You),
+        owner: None,
+    }),
+];
+static TWO_SLOT_EFFECTS: [EffectDef; 2] = [
+    EffectDef::DealDamage {
+        recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+        amount: ValueDef::Constant(1),
+    },
+    EffectDef::DealDamage {
+        recipient: EffectRecipientDef::Target(TargetIndex(1)),
+        amount: ValueDef::Constant(1),
+    },
+];
+
 #[test]
 fn resolving_ability_masks_an_illegal_target_in_each_frozen_slot() {
-    static TARGETS: [AbilityTargetDef; 2] = [
-        AbilityTargetDef::exactly_one(AbilityTargetPredicate::Object {
-            object: ObjectPredicateDef::HasType(CardType::Creature),
-            zones: &[ZoneKind::Battlefield],
-            controller: Some(PlayerRelation::You),
-            owner: None,
-        }),
-        AbilityTargetDef::exactly_one(AbilityTargetPredicate::Object {
-            object: ObjectPredicateDef::HasType(CardType::Creature),
-            zones: &[ZoneKind::Battlefield],
-            controller: Some(PlayerRelation::You),
-            owner: None,
-        }),
-    ];
-    static EFFECTS: [EffectDef; 2] = [
-        EffectDef::DealDamage {
-            recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
-            amount: ValueDef::Constant(1),
-        },
-        EffectDef::DealDamage {
-            recipient: EffectRecipientDef::Target(TargetIndex(1)),
-            amount: ValueDef::Constant(1),
-        },
-    ];
-
     let mut game = ready_game();
     let source = CardInstanceId(10_000);
     let first = CardInstanceId(10_001);
@@ -690,30 +691,32 @@ fn resolving_ability_masks_an_illegal_target_in_each_frozen_slot() {
     game.stack.push(StackObject {
         id: StackObjectId(20_000),
         kind: StackObjectKind::TriggeredAbility,
-        card: card(20_000, cards::ANKH_OF_MISHRA, PlayerId::One),
+        card: card(20_000, cards::ANKH_OF_MISHRA, PlayerId::One).into(),
         source: Some(source),
         ability: Some(StackAbilityPayload {
             origin: primary_ability(cards::ANKH_OF_MISHRA),
             definition: None,
-            presentation_definition: cards::ANKH_OF_MISHRA,
+            presentation: ObjectCharacteristics::card(cards::ANKH_OF_MISHRA, CardPartId::PRIMARY),
             text: Some("Test two-slot trigger"),
-            target_defs: TARGETS.to_vec(),
+            target_defs: TWO_SLOT_TARGETS.to_vec(),
             targets: vec![
                 TargetSelection::single(TargetSlotId(0), Target::Permanent(first)),
                 TargetSelection::single(TargetSlotId(1), Target::Permanent(second)),
             ],
             context: TriggerContext {
                 object: None,
-                chosen_objects: [None; 8],
                 object_controller: None,
                 event_player: None,
                 amount: None,
-            },
+                damaged_object: None,
+            }
+            .into(),
             resolver: StackAbilityResolver::Declarative(ScopedEffect::primary(
-                EffectDef::Sequence(&EFFECTS),
+                EffectDef::Sequence(&TWO_SLOT_EFFECTS),
             )),
             condition: None,
             mode_effects: Vec::new(),
+            resolution_destination: None,
             x: 0,
         }),
         controller: PlayerId::One,
@@ -723,6 +726,11 @@ fn resolving_ability_masks_an_illegal_target_in_each_frozen_slot() {
         text_changes: Vec::new(),
         colors: None,
         cast_via_flashback: false,
+        cast_at_instant_speed: false,
+        cast_from_zone: None,
+        face_down: None,
+        colors_of_mana_spent: ColorSet::empty(),
+        phyrexian_symbols_paid_with_life: 0,
         is_copy: false,
     });
 
@@ -779,6 +787,9 @@ fn copy_artifact_copies_declarative_mana_abilities_without_a_behavior_hook() {
             source: copied_id,
             ability,
             color: ManaColor::Colorless,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();

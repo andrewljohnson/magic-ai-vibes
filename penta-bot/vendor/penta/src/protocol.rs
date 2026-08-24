@@ -43,7 +43,7 @@ pub use decks::{
 pub use observation_json::{observation_json, observation_json_for_format};
 
 #[cfg(test)]
-use observation_json::{card_part_name, decision_json, stack_object_json};
+use observation_json::{decision_json, stack_object_json};
 
 /// The breaking bot-wire epoch. Bumped when an old consumer could misread an
 /// existing field or tag: removal, rename, type change, or changed meaning.
@@ -81,8 +81,22 @@ use observation_json::{card_part_name, decision_json, stack_object_json};
 /// state, restricted mana, and retired-object last-known information. Version
 /// 22 establishes open-world JSON objects, advertises
 /// named capabilities and a simulation fingerprint, and separates
-/// checkpoint/replay formats from the bot wire.
-pub const PROTOCOL_VERSION: u32 = 22;
+/// checkpoint/replay formats from the bot wire. Version 23 renames the
+/// canonical Innistrad-through-Dragon's-Maze format slug from
+/// `isd-rtr-standard` to `isd-dgm-standard`. Version 24 makes a permanent's
+/// `blocking` an array of attacker ids rather than one id or null, because a
+/// creature can block a band as a group and can be allowed more than one block.
+/// Version 25 renames
+/// an activated ability's singular `costObject` to the `costObjects` array.
+/// Version 26 removes synthetic card-definition identities from tokens and
+/// reports their creator-owned inline characteristics instead. Version 27
+/// does the same for face-down spells and permanents: their rules-defined
+/// characteristics travel inline while their physical card keeps its real
+/// definition identity. Version 28 broadens catalog mana symbols beyond
+/// ordinary two-color hybrid and records explicitly announced flexible-mana
+/// alternatives on cast actions. Version 29 removes the `isd-dgm-standard`
+/// format value; use the final pre-Theros `isd-m14-standard` profile.
+pub const PROTOCOL_VERSION: u32 = 29;
 
 /// The engine package release. This is ordinary Cargo `SemVer`, not an exact
 /// ruleset identity; use [`SIMULATION_FINGERPRINT`] for replay and model
@@ -103,14 +117,14 @@ pub const SIMULATION_FINGERPRINT_NUL: &str = concat!(env!("PENTA_SIMULATION_FING
 
 /// Named additive facilities emitted by this wire epoch. Consumers may ignore
 /// capabilities they do not use; hosted bots may require the subset they use.
-pub const PROTOCOL_CAPABILITIES: &[&str] = &["reconstruction.checkpoint.v2"];
+pub const PROTOCOL_CAPABILITIES: &[&str] = &["reconstruction.checkpoint.v9"];
 
 /// Capabilities every bot must understand before a host may assign it a game.
 /// The base indexed-action contract currently needs no optional facility.
 pub const REQUIRED_BOT_CAPABILITIES: &[&str] = &[];
 
 /// Version of the hidden-safe reconstruction payload nested at `checkpoint`.
-pub const CHECKPOINT_VERSION: u32 = 2;
+pub const CHECKPOINT_VERSION: u32 = 9;
 
 /// Undeclared hosted bots predate negotiation and therefore belong to the last
 /// wire epoch that could not make an explicit declaration. They do not

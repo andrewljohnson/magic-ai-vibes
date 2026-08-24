@@ -1,9 +1,13 @@
 #![allow(clippy::wildcard_imports)]
 
+use super::super::model::{ManaCostSnapshot, ResolvedEffectPaymentSnapshot};
 use super::super::procedure::draw_replacement_referenced_object_ids;
 use super::*;
+use crate::card::SacrificedAmountDef;
 use crate::game::{ApplicableZoneMoveReplacement, PendingBattlefieldExitBatch};
+use crate::game::{ResolvedEffectPayment, SacrificeDeclined};
 
+#[allow(clippy::too_many_lines)]
 pub(in crate::game::state_checkpoint) fn decision_referenced_object_ids(
     continuation: &DecisionContinuation,
 ) -> Vec<GameObjectId> {
@@ -15,22 +19,59 @@ pub(in crate::game::state_checkpoint) fn decision_referenced_object_ids(
             deferred,
             ..
         } => extend_begin_turn_ids(&mut ids, applied, replacements, deferred),
-        DecisionContinuation::OptionalManaPayment {
-            object, context, ..
-        }
-        | DecisionContinuation::ManaPaymentOrElse {
+        DecisionContinuation::Endure { permanent, .. } => ids.push(*permanent),
+        DecisionContinuation::ChooseColor {
             object, context, ..
         }
         | DecisionContinuation::OptionalEffect {
             object, context, ..
         }
-        | DecisionContinuation::ChoosePermanentForEffect {
+        | DecisionContinuation::MayCastExiled {
+            object, context, ..
+        }
+        | DecisionContinuation::PayOr {
             object, context, ..
         }
         | DecisionContinuation::TopCardSelection {
-            followup: Some((object, context, _)),
+            object, context, ..
+        } => extend_stack_continuation_ids(&mut ids, object, context),
+        DecisionContinuation::DrawActionWindow { card }
+        | DecisionContinuation::MayCastAlternative { card, .. }
+        | DecisionContinuation::MayCastGranted { card, .. } => ids.push(*card),
+        DecisionContinuation::ChooseForEffect {
+            object,
+            context,
+            candidates,
             ..
-        } => extend_stack_continuation_ids(&mut ids, object, *context),
+        } => {
+            extend_stack_continuation_ids(&mut ids, object, context);
+            ids.extend(candidates.iter().copied().filter_map(target_object_id));
+        }
+        DecisionContinuation::SplitForEffect {
+            object,
+            context,
+            items,
+            ..
+        } => {
+            extend_stack_continuation_ids(&mut ids, object, context);
+            ids.extend(items.iter().copied().filter_map(target_object_id));
+        }
+        DecisionContinuation::ChoosePileForEffect {
+            object,
+            context,
+            first,
+            second,
+            ..
+        } => {
+            extend_stack_continuation_ids(&mut ids, object, context);
+            ids.extend(
+                first
+                    .iter()
+                    .chain(second)
+                    .copied()
+                    .filter_map(target_object_id),
+            );
+        }
         DecisionContinuation::ChainLightning { spell, .. }
         | DecisionContinuation::Fork { spell, .. } => {
             ids.extend(referenced_object_ids(spell));
@@ -38,9 +79,10 @@ pub(in crate::game::state_checkpoint) fn decision_referenced_object_ids(
         DecisionContinuation::SacrificeOfChoice {
             followup: Some(followup),
             ..
-        } => extend_stack_continuation_ids(&mut ids, &followup.object, followup.context),
-        DecisionContinuation::BattlefieldEntryOptional { context }
-        | DecisionContinuation::BattlefieldEntryPayment { context, .. } => {
+        } => extend_stack_continuation_ids(&mut ids, &followup.object, &followup.context),
+
+        DecisionContinuation::BattlefieldEntryPayment { context, .. }
+        | DecisionContinuation::BattlefieldEntryOptional { context, .. } => {
             ids.push(context.source.object);
         }
         DecisionContinuation::BattlefieldEntryReplacement { candidates } => {
@@ -57,8 +99,34 @@ pub(in crate::game::state_checkpoint) fn decision_referenced_object_ids(
                     .flat_map(draw_replacement_referenced_object_ids),
             );
         }
+        DecisionContinuation::ExploredCardPlacement { revealed, .. } => ids.push(*revealed),
+        DecisionContinuation::Proliferate { candidates } => {
+            ids.extend(candidates.iter().copied().filter_map(target_object_id));
+        }
+        DecisionContinuation::CascadeCast { card, exiled, .. } => {
+            ids.push(*card);
+            ids.extend(exiled.iter().copied());
+        }
         DecisionContinuation::BattlefieldExitReplacement { batch, candidates } => {
             extend_battlefield_exit_ids(&mut ids, batch, candidates);
+        }
+        DecisionContinuation::ActivationCostSacrifice {
+            pending, chosen, ..
+        }
+        | DecisionContinuation::ActivationCostTap {
+            pending, chosen, ..
+        } => {
+            ids.push(pending.source);
+            ids.push(pending.source_card.id);
+            ids.extend(pending.chosen_permanents.iter().copied());
+            ids.extend(
+                pending
+                    .targets
+                    .iter()
+                    .flat_map(crate::TargetSelection::targets)
+                    .filter_map(|target| target_object_id(*target)),
+            );
+            ids.extend(chosen.iter().copied());
         }
         DecisionContinuation::TriggerOrder { batch, remaining } => {
             extend_trigger_batch_ids(&mut ids, batch);
@@ -71,37 +139,66 @@ pub(in crate::game::state_checkpoint) fn decision_referenced_object_ids(
             pending,
             remaining,
             ..
+        }
+        | DecisionContinuation::TriggerMode {
+            trigger,
+            pending,
+            remaining,
+            ..
+        }
+        | DecisionContinuation::TriggerDivision {
+            trigger,
+            pending,
+            remaining,
+            ..
         } => extend_trigger_placement_ids(&mut ids, trigger, pending, remaining),
-        DecisionContinuation::SearchZone { .. }
+        DecisionContinuation::SacrificeToTotalPower { object, context, .. }
+        | DecisionContinuation::BasicLandTypeSubstitution { object, context, .. } => {
+            extend_stack_continuation_ids(&mut ids, object, context);
+        }
+        DecisionContinuation::BattlefieldEntryExile {
+            entering,
+            candidates,
+            ..
+        } => {
+            ids.push(*entering);
+            ids.extend(candidates.iter().map(|(card, _)| *card));
+        }
+        // The prototype names the object its mana came from, which is a
+        // provenance rather than a reference the decision has to keep alive.
+        DecisionContinuation::SimultaneousChoose {
+            object,
+            context,
+            candidates,
+            chosen,
+            ..
+        } => {
+            extend_stack_continuation_ids(&mut ids, object, context);
+            ids.extend(candidates.iter().copied());
+            ids.extend(chosen.iter().copied());
+        }
+        DecisionContinuation::ChosenColorMana { .. }
+        | DecisionContinuation::SearchZone { .. }
+        // Nothing in a name choice is an object id.
+        | DecisionContinuation::CardNameChoice { .. }
         | DecisionContinuation::ChooseCards { .. }
         | DecisionContinuation::DiscardForEffect { .. }
         | DecisionContinuation::BasicLandTypeTextChange { .. }
         | DecisionContinuation::RecallDiscard { .. }
         | DecisionContinuation::RecallReturn { .. }
-        | DecisionContinuation::Duress { .. }
-        | DecisionContinuation::MiracleReveal { .. }
-        | DecisionContinuation::PileSplit { .. }
-        | DecisionContinuation::RevealedPileSplit { .. }
-        | DecisionContinuation::RevealedPileChoice { .. }
-        | DecisionContinuation::PileChoice { .. }
+        | DecisionContinuation::SpellLibraryEnd { .. }
         | DecisionContinuation::SeparateIntoPiles { .. }
         | DecisionContinuation::ChoosePile { .. }
         | DecisionContinuation::SacrificeOfChoice { followup: None, .. }
-        | DecisionContinuation::DestroyOfChoice { .. }
-        | DecisionContinuation::CounterUnlessPaid { .. }
         | DecisionContinuation::GrislySalvage { .. }
         | DecisionContinuation::Balance { .. }
-        | DecisionContinuation::SylvanOffer { .. }
-        | DecisionContinuation::SylvanSelect { .. }
-        | DecisionContinuation::SylvanMode { .. }
+        | DecisionContinuation::SearchZonesAndExileRest { .. }
+        | DecisionContinuation::Vote { .. }
         | DecisionContinuation::TetravusDetach { .. }
         | DecisionContinuation::TetravusAssemble { .. }
-        | DecisionContinuation::ExileFromHand { .. }
         | DecisionContinuation::AugurOfBolas { .. }
-        | DecisionContinuation::TopCardSelection { followup: None, .. }
-        | DecisionContinuation::BattlefieldEntryCardName { .. }
-        | DecisionContinuation::BattlefieldEntryCopy { .. }
-        | DecisionContinuation::BattlefieldEntryCreatureType { .. } => {}
+        | DecisionContinuation::BattlefieldEntryScalarChoice { .. }
+        | DecisionContinuation::BattlefieldEntryCopy { .. } => {}
     }
     ids
 }
@@ -162,17 +259,23 @@ fn extend_battlefield_exit_ids(
 fn extend_stack_continuation_ids(
     ids: &mut Vec<GameObjectId>,
     object: &super::super::StackObject,
-    context: super::super::TriggerContext,
+    context: &super::super::EffectResolutionContext,
 ) {
     ids.extend(referenced_object_ids(object));
-    ids.extend(context.object);
-    ids.extend(context.chosen_objects.iter().flatten().copied());
+    ids.extend(resolution_context_referenced_object_ids(context));
 }
 
 fn extend_pending_trigger_ids(ids: &mut Vec<GameObjectId>, trigger: &PendingTrigger) {
     ids.push(trigger.source.object);
-    ids.extend(trigger.context.object);
-    ids.extend(trigger.context.chosen_objects.iter().flatten().copied());
+    ids.extend(target_selections_referenced_object_ids(&trigger.targets));
+    ids.extend(resolution_context_referenced_object_ids(&trigger.context));
+}
+
+fn target_object_id(target: Target) -> Option<GameObjectId> {
+    match target {
+        Target::Player(_) => None,
+        Target::Card(id) | Target::Permanent(id) | Target::Spell(id) => Some(id),
+    }
 }
 
 fn extend_trigger_batch_ids(ids: &mut Vec<GameObjectId>, batch: &TriggerPlacementBatch) {
@@ -183,18 +286,33 @@ fn extend_trigger_batch_ids(ids: &mut Vec<GameObjectId>, batch: &TriggerPlacemen
 
 pub(super) fn effect_continuation_snapshot(
     game: &Game,
+    viewer: PlayerId,
     object: &super::super::StackObject,
-    context: super::super::TriggerContext,
+    context: &super::super::EffectResolutionContext,
     effect: super::super::ScopedEffect,
+    visible_rebindings: &[GameObjectId],
 ) -> Option<EffectContinuationSnapshot> {
-    let ability = stack_ability_snapshot(game, object)?.ability_locator?;
+    if trigger_capture_has_unrebindable_hidden_reference_except(
+        game,
+        viewer,
+        &[],
+        context,
+        visible_rebindings,
+    ) {
+        return None;
+    }
+    let ability = stack_ability_snapshot_allowing(game, viewer, object, visible_rebindings)?
+        .ability_locator?;
     let definition = catalog_ability(&game.catalog, &ability)?;
-    let object = detached_stack_snapshot(game, object)?;
+    let object = detached_stack_snapshot_allowing(game, viewer, object, visible_rebindings)?;
     Some(EffectContinuationSnapshot {
         object,
         ability,
-        context: trigger_context_snapshot(context),
+        context: effect_resolution_context_snapshot(context),
         effect: scoped_effect_snapshot(&definition, effect)?,
+        // Set by the sacrifice sites, which are the only continuations that
+        // read a characteristic off what was sacrificed.
+        reads_toughness: false,
     })
 }
 
@@ -204,103 +322,28 @@ pub(super) fn parse_effect_continuation(
 ) -> Result<SacrificeFollowup, String> {
     Ok(SacrificeFollowup {
         object: Box::new(parse_detached_stack(&snapshot.object, game)?),
-        context: parse_trigger_context(snapshot.context)?,
+        context: parse_effect_resolution_context(snapshot.context.clone())?,
         effect: catalog_scoped_effect(&game.catalog, &snapshot.ability, &snapshot.effect)
             .ok_or("effect continuation locator is absent from this catalog")?,
-    })
-}
-
-pub(in crate::game::state_checkpoint) fn pending_trigger_snapshot(
-    game: &Game,
-    trigger: &PendingTrigger,
-) -> Option<PendingTriggerSnapshot> {
-    let ability = ability_locator(&game.catalog, |ability| {
-        let DeclarativeAbilityDef::Triggered(definition) = ability.definition else {
-            return false;
-        };
-        ability.text == trigger.text
-            && definition.targets == trigger.target_defs
-            && ability.effect.definition == trigger.effect
-            && definition.condition == trigger.condition
-            && Game::ability_resolver(trigger.source.ability, ability) == trigger.resolver
-    })?;
-    Some(PendingTriggerSnapshot {
-        id: trigger.id,
-        source: AbilitySourceSnapshot {
-            object: trigger.source.object.0,
-            ability: ability_origin_snapshot(trigger.source.ability),
+        amount: if snapshot.reads_toughness {
+            SacrificedAmountDef::Toughness
+        } else {
+            SacrificedAmountDef::Power
         },
-        ability,
-        definition: trigger.definition.0,
-        owner: trigger.owner.index(),
-        controller: trigger.controller.index(),
-        targets: trigger
-            .targets
-            .iter()
-            .map(target_selection_snapshot)
-            .collect(),
-        context: trigger_context_snapshot(trigger.context),
     })
 }
 
-pub(super) fn trigger_batch_snapshot(
+/// The declined branch reads nothing off a sacrificed permanent, so unlike
+/// the follow-up it carries no characteristic.
+pub(super) fn parse_sacrifice_declined(
+    snapshot: &EffectContinuationSnapshot,
     game: &Game,
-    batch: &TriggerPlacementBatch,
-) -> Option<TriggerPlacementBatchSnapshot> {
-    Some(TriggerPlacementBatchSnapshot {
-        controller: batch.controller.index(),
-        triggers: batch
-            .triggers
-            .iter()
-            .map(|trigger| pending_trigger_snapshot(game, trigger))
-            .collect::<Option<Vec<_>>>()?,
-    })
-}
-
-pub(in crate::game::state_checkpoint) fn parse_pending_trigger(
-    snapshot: &PendingTriggerSnapshot,
-    game: &Game,
-) -> Result<PendingTrigger, String> {
-    let ability = catalog_ability(&game.catalog, &snapshot.ability)
-        .ok_or("pending trigger ability locator is absent from this catalog")?;
-    let DeclarativeAbilityDef::Triggered(triggered) = ability.definition else {
-        return Err("pending trigger locator does not identify a triggered ability".into());
-    };
-    let source = super::super::AbilitySourceRef {
-        object: GameObjectId(snapshot.source.object),
-        ability: ability_origin_from_snapshot(snapshot.source.ability),
-    };
-    Ok(PendingTrigger {
-        id: snapshot.id,
-        source,
-        definition: CardDefinitionId(snapshot.definition),
-        owner: player(snapshot.owner)?,
-        controller: player(snapshot.controller)?,
-        text: ability.text,
-        target_defs: triggered.targets,
-        targets: snapshot
-            .targets
-            .iter()
-            .map(parse_target_selection)
-            .collect::<Result<Vec<_>, _>>()?,
-        effect: ability.effect.definition,
-        resolver: Game::ability_resolver(source.ability, &ability),
-        context: parse_trigger_context(snapshot.context)?,
-        condition: triggered.condition,
-    })
-}
-
-pub(super) fn parse_trigger_batch(
-    snapshot: &TriggerPlacementBatchSnapshot,
-    game: &Game,
-) -> Result<TriggerPlacementBatch, String> {
-    Ok(TriggerPlacementBatch {
-        controller: player(snapshot.controller)?,
-        triggers: snapshot
-            .triggers
-            .iter()
-            .map(|trigger| parse_pending_trigger(trigger, game))
-            .collect::<Result<Vec<_>, _>>()?,
+) -> Result<SacrificeDeclined, String> {
+    Ok(SacrificeDeclined {
+        object: Box::new(parse_detached_stack(&snapshot.object, game)?),
+        context: parse_effect_resolution_context(snapshot.context.clone())?,
+        effect: catalog_scoped_effect(&game.catalog, &snapshot.ability, &snapshot.effect)
+            .ok_or("declined-sacrifice locator is absent from this catalog")?,
     })
 }
 
@@ -370,7 +413,7 @@ pub(super) fn ids(ids: &[GameObjectId]) -> Vec<u32> {
 pub(super) fn detached_card_snapshot(card: &super::super::CardInstance) -> DetachedCardSnapshot {
     DetachedCardSnapshot {
         object_id: card.id.0,
-        definition: card.definition.0,
+        definition: card.definition,
         owner: card.owner.index(),
     }
 }
@@ -379,12 +422,19 @@ pub(super) fn parse_detached_cards(
     snapshots: &[DetachedCardSnapshot],
     game: &Game,
 ) -> Result<Vec<super::super::CardInstance>, String> {
+    let mut object_ids = std::collections::BTreeSet::new();
     snapshots
         .iter()
         .map(|snapshot| {
+            if !object_ids.insert(snapshot.object_id) {
+                return Err(format!(
+                    "checkpoint detached-card list repeats object id {}",
+                    snapshot.object_id
+                ));
+            }
             card(
                 GameObjectId(snapshot.object_id),
-                CardDefinitionId(snapshot.definition),
+                snapshot.definition,
                 player(snapshot.owner)?,
                 &game.catalog,
             )
@@ -396,61 +446,98 @@ pub(super) fn game_ids(ids: &[u32]) -> Vec<GameObjectId> {
     ids.iter().copied().map(GameObjectId).collect()
 }
 
-pub(super) fn decision_option_snapshot(option: &DecisionOption) -> DecisionOptionSnapshot {
-    let card = |(object, definition): (GameObjectId, CardDefinitionId)| DecisionCardSnapshot {
-        object_id: object.0,
-        definition: definition.0,
+pub(super) fn decision_option_snapshot(
+    catalog: &CardCatalog,
+    option: &DecisionOption,
+) -> Option<DecisionOptionSnapshot> {
+    let snapshot_card = |(object, characteristics): (GameObjectId, ObjectCharacteristics)| {
+        Some(DecisionCardSnapshot {
+            object_id: object.0,
+            characteristics: object_characteristics_snapshot(catalog, characteristics)?,
+        })
     };
-    DecisionOptionSnapshot {
+    let card = match option.card {
+        Some(value) => Some(snapshot_card(value)?),
+        None => None,
+    };
+    Some(DecisionOptionSnapshot {
         id: option.id,
         label: option.label.clone(),
-        card: option.card.map(card),
-        members: option.members.iter().copied().map(card).collect(),
+        card,
+        members: option
+            .members
+            .iter()
+            .copied()
+            .map(snapshot_card)
+            .collect::<Option<Vec<_>>>()?,
         ability_text: option.ability_text.clone(),
         zone: decision_zone_snapshot(option.zone),
-    }
+    })
 }
 
-pub(super) fn parse_decision_option_snapshot(snapshot: &DecisionOptionSnapshot) -> DecisionOption {
-    let card = |card: DecisionCardSnapshot| {
-        (
+pub(super) fn parse_decision_option_snapshot(
+    catalog: &CardCatalog,
+    snapshot: &DecisionOptionSnapshot,
+) -> Result<DecisionOption, String> {
+    let card = |card: &DecisionCardSnapshot| {
+        Ok((
             GameObjectId(card.object_id),
-            CardDefinitionId(card.definition),
-        )
+            object_characteristics_from_snapshot(catalog, &card.characteristics).ok_or_else(
+                || "decision card characteristics are absent from this catalog".to_owned(),
+            )?,
+        ))
     };
-    DecisionOption {
+    Ok(DecisionOption {
         id: snapshot.id,
         label: snapshot.label.clone(),
-        card: snapshot.card.map(card),
-        members: snapshot.members.iter().copied().map(card).collect(),
+        card: snapshot.card.as_ref().map(card).transpose()?,
+        members: snapshot
+            .members
+            .iter()
+            .map(card)
+            .collect::<Result<Vec<_>, String>>()?,
         ability_text: snapshot.ability_text.clone(),
         zone: parse_decision_zone_snapshot(snapshot.zone),
-    }
+    })
 }
 
-pub(super) fn pile_split_snapshot(piles: &PileSplit) -> PileSplitSnapshot {
-    PileSplitSnapshot {
+pub(super) fn pile_split_snapshot(
+    catalog: &CardCatalog,
+    piles: &PileSplit,
+) -> Option<PileSplitSnapshot> {
+    Some(PileSplitSnapshot {
         resolving_controller: piles.resolving_controller.index(),
         subject: piles.subject.index(),
-        first: piles.first.iter().map(decision_option_snapshot).collect(),
-        second: piles.second.iter().map(decision_option_snapshot).collect(),
-    }
+        first: piles
+            .first
+            .iter()
+            .map(|option| decision_option_snapshot(catalog, option))
+            .collect::<Option<Vec<_>>>()?,
+        second: piles
+            .second
+            .iter()
+            .map(|option| decision_option_snapshot(catalog, option))
+            .collect::<Option<Vec<_>>>()?,
+    })
 }
 
-pub(super) fn parse_pile_split_snapshot(snapshot: &PileSplitSnapshot) -> Result<PileSplit, String> {
+pub(super) fn parse_pile_split_snapshot(
+    snapshot: &PileSplitSnapshot,
+    catalog: &CardCatalog,
+) -> Result<PileSplit, String> {
     Ok(PileSplit {
         resolving_controller: player(snapshot.resolving_controller)?,
         subject: player(snapshot.subject)?,
         first: snapshot
             .first
             .iter()
-            .map(parse_decision_option_snapshot)
-            .collect(),
+            .map(|option| parse_decision_option_snapshot(catalog, option))
+            .collect::<Result<Vec<_>, String>>()?,
         second: snapshot
             .second
             .iter()
-            .map(parse_decision_option_snapshot)
-            .collect(),
+            .map(|option| parse_decision_option_snapshot(catalog, option))
+            .collect::<Result<Vec<_>, String>>()?,
     })
 }
 
@@ -464,20 +551,39 @@ pub(super) fn parse_card_type_set(flags: [bool; CardType::COUNT]) -> CardTypeSet
         })
 }
 
-pub(super) fn balance_task_snapshot(viewer: PlayerId, task: &BalanceTask) -> BalanceTaskSnapshot {
-    BalanceTaskSnapshot {
+pub(super) fn balance_task_snapshot(
+    catalog: &CardCatalog,
+    viewer: PlayerId,
+    task: &BalanceTask,
+) -> Option<BalanceTaskSnapshot> {
+    let cards = if task.zone != DecisionZone::Hand || task.player == viewer {
+        Some(
+            task.cards
+                .iter()
+                .copied()
+                .map(|(object, characteristics)| {
+                    Some(DecisionCardSnapshot {
+                        object_id: object.0,
+                        characteristics: object_characteristics_snapshot(catalog, characteristics)?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()?,
+        )
+    } else {
+        None
+    };
+    Some(BalanceTaskSnapshot {
         player: task.player.index(),
         prompt: task.prompt.clone(),
         zone: decision_zone_snapshot(task.zone),
-        cards: (task.zone != DecisionZone::Hand || task.player == viewer)
-            .then(|| task.cards.iter().map(detached_card_snapshot).collect()),
+        cards,
         count: task.count,
         action: match task.action {
             BalanceAction::Sacrifice => BalanceActionSnapshot::Sacrifice,
             BalanceAction::Discard => BalanceActionSnapshot::Discard,
         },
         cause: cause_snapshot(task.cause),
-    }
+    })
 }
 
 pub(super) fn parse_balance_task(
@@ -487,8 +593,28 @@ pub(super) fn parse_balance_task(
     let owner = player(snapshot.player)?;
     let zone = parse_decision_zone_snapshot(snapshot.zone);
     let cards = match &snapshot.cards {
-        Some(cards) => parse_detached_cards(cards, game)?,
-        None if zone == DecisionZone::Hand => game.players[owner.index()].hand.clone(),
+        Some(cards) => cards
+            .iter()
+            .map(|card| {
+                Ok((
+                    GameObjectId(card.object_id),
+                    object_characteristics_from_snapshot(&game.catalog, &card.characteristics)
+                        .ok_or_else(|| {
+                            "Balance card characteristics are absent from this catalog".to_owned()
+                        })?,
+                ))
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        None if zone == DecisionZone::Hand => game.players[owner.index()]
+            .hand
+            .iter()
+            .map(|card| {
+                (
+                    card.id,
+                    ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                )
+            })
+            .collect(),
         None => return Err("only hidden Balance hand tasks may omit card identities".into()),
     };
     Ok(BalanceTask {
@@ -565,7 +691,11 @@ pub(super) const fn parse_zone_placement(placement: ZonePlacementSnapshot) -> Zo
     }
 }
 
-pub(super) fn mana_cost_snapshot(cost: ManaCost) -> ManaCostSnapshot {
+pub(in crate::game::state_checkpoint) fn mana_cost_snapshot(cost: ManaCost) -> ManaCostSnapshot {
+    let mut additional_flexible = cost.additional_flexible.to_vec();
+    while additional_flexible.last() == Some(&0) {
+        additional_flexible.pop();
+    }
     ManaCostSnapshot {
         generic: cost.generic,
         white: cost.white,
@@ -573,29 +703,73 @@ pub(super) fn mana_cost_snapshot(cost: ManaCost) -> ManaCostSnapshot {
         black: cost.black,
         red: cost.red,
         green: cost.green,
+        colorless: cost.colorless,
         hybrid: cost.hybrid.to_vec(),
+        // Keep the additive field sparse so an ordinary cost still matches a
+        // checkpoint written before flexible-symbol storage existed.
+        additional_flexible,
         variable_x: cost.variable_x,
         x_multiplier: cost.x_multiplier,
     }
 }
 
-pub(super) fn parse_mana_cost(value: &ManaCostSnapshot) -> Result<ManaCost, String> {
-    if value.hybrid.len() != crate::HybridPair::COUNT {
-        return Err("mana cost hybrid vector has the wrong length".into());
+/// The inverse of [`mana_cost_snapshot`]. A hybrid list shorter than the
+/// engine's is read as far as it goes and zero beyond, so a checkpoint
+/// written before a pair existed restores without one.
+pub(in crate::game::state_checkpoint) fn mana_cost_from_snapshot(
+    snapshot: &ManaCostSnapshot,
+) -> ManaCost {
+    let mut hybrid = [0; crate::card::HybridPair::COUNT];
+    for (slot, amount) in hybrid.iter_mut().zip(snapshot.hybrid.iter()) {
+        *slot = *amount;
     }
-    let mut hybrid = [0; crate::HybridPair::COUNT];
-    hybrid.copy_from_slice(&value.hybrid);
-    Ok(ManaCost {
-        generic: value.generic,
-        white: value.white,
-        blue: value.blue,
-        black: value.black,
-        red: value.red,
-        green: value.green,
+    let mut additional_flexible = [0; crate::card::FlexibleManaSymbol::ADDITIONAL_COUNT];
+    for (slot, amount) in additional_flexible
+        .iter_mut()
+        .zip(snapshot.additional_flexible.iter())
+    {
+        *slot = *amount;
+    }
+    ManaCost {
+        generic: snapshot.generic,
+        white: snapshot.white,
+        blue: snapshot.blue,
+        black: snapshot.black,
+        red: snapshot.red,
+        green: snapshot.green,
+        colorless: snapshot.colorless,
         hybrid,
-        variable_x: value.variable_x,
-        x_multiplier: value.x_multiplier,
-    })
+        additional_flexible,
+        variable_x: snapshot.variable_x,
+        x_multiplier: snapshot.x_multiplier,
+    }
+}
+
+pub(super) fn resolved_effect_payment_snapshot(
+    payment: ResolvedEffectPayment,
+) -> ResolvedEffectPaymentSnapshot {
+    match payment {
+        ResolvedEffectPayment::Mana(cost) => {
+            ResolvedEffectPaymentSnapshot::Mana(mana_cost_snapshot(cost))
+        }
+        ResolvedEffectPayment::Life(amount) => ResolvedEffectPaymentSnapshot::Life(amount),
+        ResolvedEffectPayment::Energy(amount) => ResolvedEffectPaymentSnapshot::Energy(amount),
+        ResolvedEffectPayment::Mill(amount) => ResolvedEffectPaymentSnapshot::Mill(amount),
+        ResolvedEffectPayment::Discard(amount) => ResolvedEffectPaymentSnapshot::Discard(amount),
+        ResolvedEffectPayment::DiscardMatching(_) => ResolvedEffectPaymentSnapshot::DiscardMatching,
+        ResolvedEffectPayment::ChosenGenericMana => {
+            ResolvedEffectPaymentSnapshot::ChosenGenericMana
+        }
+        ResolvedEffectPayment::ReturnPermanentMatching(_) => {
+            ResolvedEffectPaymentSnapshot::ReturnPermanentMatching
+        }
+        ResolvedEffectPayment::SacrificeCreaturesWithTotalPower(total) => {
+            ResolvedEffectPaymentSnapshot::SacrificeCreaturesWithTotalPower(total)
+        }
+        ResolvedEffectPayment::SacrificePermanentMatching(_) => {
+            ResolvedEffectPaymentSnapshot::SacrificePermanentMatching
+        }
+    }
 }
 
 pub(super) const fn cause_snapshot(cause: ZoneMoveCause) -> ZoneMoveCauseSnapshot {
@@ -613,24 +787,6 @@ pub(super) fn parse_cause(cause: ZoneMoveCauseSnapshot) -> Result<ZoneMoveCause,
         ZoneMoveCauseSnapshot::Effect { controller } => Ok(ZoneMoveCause::Effect {
             controller: player(controller)?,
         }),
-    }
-}
-
-pub(super) const fn countered_spell_zone_snapshot(
-    zone: CounteredSpellZone,
-) -> CounteredSpellZoneSnapshot {
-    match zone {
-        CounteredSpellZone::Graveyard => CounteredSpellZoneSnapshot::Graveyard,
-        CounteredSpellZone::Exile => CounteredSpellZoneSnapshot::Exile,
-    }
-}
-
-pub(super) const fn parse_countered_spell_zone(
-    zone: CounteredSpellZoneSnapshot,
-) -> CounteredSpellZone {
-    match zone {
-        CounteredSpellZoneSnapshot::Graveyard => CounteredSpellZone::Graveyard,
-        CounteredSpellZoneSnapshot::Exile => CounteredSpellZone::Exile,
     }
 }
 
@@ -694,5 +850,32 @@ pub(super) fn player(index: usize) -> Result<PlayerId, String> {
         0 => Ok(PlayerId::One),
         1 => Ok(PlayerId::Two),
         _ => Err("seat index must be 0 or 1".into()),
+    }
+}
+
+include!("trigger_support.rs");
+
+#[cfg(test)]
+mod tests {
+    use super::mana_cost_snapshot;
+    use crate::{FlexibleManaSymbol, ManaCost};
+
+    #[test]
+    fn additive_flexible_mana_snapshot_stays_sparse() {
+        assert!(
+            mana_cost_snapshot(ManaCost::new(2, 0))
+                .additional_flexible
+                .is_empty(),
+            "an older ordinary-mana checkpoint defaults to this same shape",
+        );
+
+        let phyrexian =
+            ManaCost::new(0, 0).with_flexible_symbol(FlexibleManaSymbol::RedPhyrexian, 1);
+        let snapshot = mana_cost_snapshot(phyrexian);
+        assert_eq!(
+            snapshot.additional_flexible.last(),
+            Some(&1),
+            "only storage through the last present flexible symbol is retained",
+        );
     }
 }

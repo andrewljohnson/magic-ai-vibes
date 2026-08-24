@@ -1,46 +1,56 @@
 use serde_json::Value;
 
 use crate::card::{
-    CardType, CardTypeSet, EffectDef, ReplacementEventDef, TurnKindDef, ZonePlacement,
+    AlternativeCastKindDef, CardType, CardTypeSet, EffectDef, EffectPaymentCostDef,
+    EffectPaymentDef, ReplacementChoiceDef, ReplacementEventDef, TurnKindDef, ZonePlacement,
 };
-use crate::{CardDefinitionId, ChoiceIndex, GameObjectId, ManaCost, PlayerId};
+use crate::{
+    CardCatalog, CardDefinitionId, CardPartId, GameObjectId, ManaCost, ObjectCharacteristics,
+    PlayerId,
+};
 
+use super::super::decision_offers::effect_choice_visibility;
 use super::super::{
     AbilitySourceRef, ApplicableBeginTurnReplacement, BalanceAction, BalancePhase, BalanceTask,
-    CounteredSpellZone, DecisionContinuation, DecisionKind, DecisionObservation, DecisionOption,
-    DecisionOrderSemantics, DecisionPreference, DecisionVisibility, DecisionZone,
-    DeferredBeginTurnEffect, PendingDecision, PendingTrigger, PileSplit, SacrificeFollowup,
-    ScopedEffect, TriggerPlacementBatch,
+    CastOffer, CastOfferCost, CastSourceZone, DecisionContinuation, DecisionKind,
+    DecisionObservation, DecisionOption, DecisionOrderSemantics, DecisionPreference,
+    DecisionVisibility, DecisionZone, DeferredBeginTurnEffect, PendingDecision, PendingTrigger,
+    PileSplit, SacrificeFollowup, ScopedEffect, Target, TriggerPlacementBatch,
 };
 use super::model::{
-    AbilitySourceSnapshot, ApplicableBeginTurnReplacementSnapshot, BalanceActionSnapshot,
-    BalancePhaseSnapshot, BalanceTaskSnapshot, CounteredSpellZoneSnapshot, DecisionCardSnapshot,
-    DecisionContinuationSnapshot, DecisionOptionSnapshot, DecisionPreferenceSnapshot,
-    DecisionStateSnapshot, DecisionZoneSnapshot, DeferredBeginTurnEffectSnapshot,
-    DetachedCardSnapshot, DiscardChoiceSnapshot, EffectContinuationSnapshot, ManaCostSnapshot,
-    PendingTriggerSnapshot, PileSplitSnapshot, ReplacementEffectContextSnapshot,
-    ReplacementEffectLocator, TriggerPlacementBatchSnapshot, TurnKindSnapshot,
-    ZoneMoveCauseSnapshot, ZonePlacementSnapshot,
+    AbilityLocator, AbilitySourceSnapshot, ApplicableBeginTurnReplacementSnapshot,
+    BalanceActionSnapshot, BalancePhaseSnapshot, BalanceTaskSnapshot, DecisionCardOriginSnapshot,
+    DecisionCardSnapshot, DecisionContinuationSnapshot, DecisionOptionSnapshot,
+    DecisionPreferenceSnapshot, DecisionStateSnapshot, DecisionZoneSnapshot,
+    DeferredBeginTurnEffectSnapshot, DetachedCardSnapshot, DiscardChoiceSnapshot,
+    EffectContinuationSnapshot, PendingTriggerSnapshot, PileSplitSnapshot,
+    ReplacementEffectContextSnapshot, ReplacementEffectLocator, TriggerPlacementBatchSnapshot,
+    TurnKindSnapshot, ZoneMoveCauseSnapshot, ZonePlacementSnapshot,
 };
 mod option;
 use option::parse_option;
 
-use super::event::parse_replacement_context_snapshot;
-use super::procedure::{draw_replacement_snapshot, parse_draw_replacement};
+use super::procedure::{draw_replacement_snapshot_allowing, parse_draw_replacement};
 use super::semantics::{
-    ability_locator, catalog_ability, catalog_replacement_effect, catalog_scoped_effect,
-    replacement_effect_locator, replacement_effects, scoped_effect_snapshot,
+    ability_locator, ability_locator_for_origin, ability_target_defs, catalog_ability,
+    catalog_replacement_effect, catalog_scoped_effect, replacement_effect_locator_matches_source,
+    replacement_effects, resolved_replacement_effect_locator, scoped_effect_snapshot,
 };
 use super::stack::{
-    detached_stack_snapshot, parse_detached_stack, parse_target, parse_target_selection,
-    parse_trigger_context, referenced_object_ids, stack_ability_snapshot,
-    target_selection_snapshot, target_snapshot, trigger_context_snapshot,
+    detached_stack_snapshot_allowing, effect_resolution_context_snapshot,
+    object_reference_requires_hidden_rebinding, parse_detached_stack,
+    parse_effect_resolution_context, parse_target, parse_target_selection, referenced_object_ids,
+    resolution_context_referenced_object_ids, stack_ability_snapshot_allowing,
+    target_selection_snapshot, target_selections_referenced_object_ids, target_snapshot,
+    trigger_capture_has_unrebindable_hidden_reference,
+    trigger_capture_has_unrebindable_hidden_reference_except,
 };
 use super::{
     DeclarativeAbilityDef, Game, ReplacementEffectContext, ReplacementEffectDef, ZoneMoveCause,
     ability_origin_from_snapshot, ability_origin_snapshot, applicable_replacement_snapshot, array,
-    bool_field, card, field, parse_applicable_replacement, parse_zone_kind, seat_value, str_field,
-    u32_field, usize_field, zone_kind_snapshot,
+    bool_field, card, copiable_ability_snapshot, field, object_characteristics_from_snapshot,
+    object_characteristics_snapshot, parse_applicable_replacement, parse_copiable_ability,
+    parse_zone_kind, seat_value, str_field, u32_field, usize_field, zone_kind_snapshot,
 };
 
 pub(super) fn decision_snapshot(
@@ -48,10 +58,104 @@ pub(super) fn decision_snapshot(
     viewer: PlayerId,
     pending: &PendingDecision,
 ) -> Option<DecisionStateSnapshot> {
+    // A private decision is absent from this viewer's ordinary observation.
+    // Serializing its continuation anyway would expose raw candidate ids and
+    // effect-local bindings through the checkpoint, so fail reconstruction
+    // closed for the non-choosing seat instead.
+    if pending.observation.visibility == DecisionVisibility::Private
+        && pending.observation.player != viewer
+    {
+        return None;
+    }
+    let card_origins = visible_decision_card_origins(game, viewer, pending);
+    if decision_referenced_object_ids(&pending.continuation)
+        .into_iter()
+        .any(|object| {
+            object_reference_requires_hidden_rebinding(game, viewer, object)
+                && !card_origins
+                    .iter()
+                    .any(|origin| origin.object_id == object.0)
+        })
+    {
+        return None;
+    }
+    let visible_rebindings = card_origins
+        .iter()
+        .map(|origin| GameObjectId(origin.object_id))
+        .collect::<Vec<_>>();
+    let options = pending
+        .observation
+        .options
+        .iter()
+        .map(|option| decision_option_snapshot(&game.catalog, option))
+        .collect::<Option<Vec<_>>>()?;
     Some(DecisionStateSnapshot {
         preference: preference_snapshot(pending.observation.preference),
-        continuation: continuation_snapshot(game, viewer, &pending.continuation)?,
+        options,
+        card_origins,
+        continuation: continuation_snapshot(
+            game,
+            viewer,
+            &pending.continuation,
+            &visible_rebindings,
+        )?,
     })
+}
+
+fn visible_decision_card_origins(
+    game: &Game,
+    viewer: PlayerId,
+    pending: &PendingDecision,
+) -> Vec<DecisionCardOriginSnapshot> {
+    if pending.observation.visibility != DecisionVisibility::Public
+        && pending.observation.player != viewer
+    {
+        return Vec::new();
+    }
+
+    let mut origins = Vec::new();
+    for object in pending
+        .observation
+        .options
+        .iter()
+        .flat_map(|option| option.card.iter().chain(option.members.iter()))
+        .map(|(object, _)| *object)
+    {
+        if origins
+            .iter()
+            .any(|origin: &DecisionCardOriginSnapshot| origin.object_id == object.0)
+        {
+            continue;
+        }
+        if let Some((seat, zone, index)) = hidden_card_origin(game, object) {
+            origins.push(DecisionCardOriginSnapshot {
+                object_id: object.0,
+                seat: seat.index(),
+                zone,
+                index,
+            });
+        }
+    }
+    origins
+}
+
+pub(super) fn hidden_card_origin(
+    game: &Game,
+    object: GameObjectId,
+) -> Option<(PlayerId, DecisionZoneSnapshot, usize)> {
+    for seat in [PlayerId::One, PlayerId::Two] {
+        let player = &game.players[seat.index()];
+        for (zone, cards) in [
+            (DecisionZoneSnapshot::Hand, &player.hand),
+            (DecisionZoneSnapshot::Library, &player.library),
+            (DecisionZoneSnapshot::OutsideGame, &player.outside_game),
+        ] {
+            if let Some(index) = cards.iter().position(|card| card.id == object) {
+                return Some((seat, zone, index));
+            }
+        }
+    }
+    None
 }
 
 #[allow(clippy::too_many_lines)]
@@ -59,6 +163,7 @@ fn continuation_snapshot(
     game: &Game,
     viewer: PlayerId,
     continuation: &DecisionContinuation,
+    visible_rebindings: &[GameObjectId],
 ) -> Option<DecisionContinuationSnapshot> {
     let value = match continuation {
         DecisionContinuation::BeginTurn {
@@ -77,11 +182,11 @@ fn continuation_snapshot(
                 .collect(),
             replacements: replacements
                 .iter()
-                .map(|replacement| begin_turn_replacement_snapshot(game, *replacement))
+                .map(|replacement| begin_turn_replacement_snapshot(game, replacement))
                 .collect::<Option<Vec<_>>>()?,
             deferred: deferred
                 .iter()
-                .map(|effect| deferred_begin_turn_effect_snapshot(game, *effect))
+                .map(|effect| deferred_begin_turn_effect_snapshot(game, effect))
                 .collect::<Option<Vec<_>>>()?,
         },
         DecisionContinuation::SearchZone {
@@ -92,6 +197,8 @@ fn continuation_snapshot(
             reveal,
             shuffle,
             enters_tapped,
+            binding,
+            follow_up,
         } => DecisionContinuationSnapshot::SearchZone {
             controller: controller.index(),
             source: zone_kind_snapshot(*source),
@@ -100,17 +207,47 @@ fn continuation_snapshot(
             reveal: *reveal,
             shuffle: *shuffle,
             enters_tapped: *enters_tapped,
+            binding: binding.map(crate::ids::ObjectSetBindingIndex::index),
+            follow_up: match follow_up {
+                // A search whose follow-up cannot be relocated is one this
+                // format cannot carry, rather than one written down without
+                // the half that matters.
+                Some(follow_up) => Some(effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    &follow_up.object,
+                    &follow_up.context,
+                    follow_up.effect,
+                    visible_rebindings,
+                )?),
+                None => None,
+            },
         },
         DecisionContinuation::ChooseCards {
             controller,
             destination,
             placement,
             reveal,
+            arrival,
         } => DecisionContinuationSnapshot::ChooseCards {
             controller: controller.index(),
             destination: zone_kind_snapshot(*destination),
             placement: zone_placement_snapshot(*placement),
             reveal: *reveal,
+            arrival: match arrival {
+                // As with a search's follow-up: a resolution this format
+                // cannot relocate makes the whole choice uncarryable, rather
+                // than one written down without the half that matters.
+                Some(arrival) => Some(effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    &arrival.object,
+                    &arrival.context,
+                    arrival.effect,
+                    visible_rebindings,
+                )?),
+                None => None,
+            },
         },
         DecisionContinuation::DrawReplacement {
             player,
@@ -119,7 +256,14 @@ fn continuation_snapshot(
             player: player.index(),
             replacements: replacements
                 .iter()
-                .map(|replacement| draw_replacement_snapshot(game, replacement))
+                .map(|replacement| {
+                    draw_replacement_snapshot_allowing(
+                        game,
+                        viewer,
+                        replacement,
+                        visible_rebindings,
+                    )
+                })
                 .collect::<Option<Vec<_>>>()?,
         },
         DecisionContinuation::DiscardForEffect {
@@ -147,11 +291,6 @@ fn continuation_snapshot(
                 target: target_snapshot(*target),
             }
         }
-        DecisionContinuation::ExileFromHand { victim } => {
-            DecisionContinuationSnapshot::ExileFromHand {
-                victim: victim.index(),
-            }
-        }
         DecisionContinuation::GrislySalvage { player, revealed } => {
             DecisionContinuationSnapshot::GrislySalvage {
                 player: player.index(),
@@ -167,86 +306,69 @@ fn continuation_snapshot(
         DecisionContinuation::TopCardSelection {
             player,
             revealed,
-            selected_zone,
-            selected_placement,
-            rest_zone,
-            rest_placement,
-            followup,
+            object,
+            context,
+            effect,
+            ..
         } => DecisionContinuationSnapshot::TopCardSelection {
             player: player.index(),
             revealed: revealed.iter().map(detached_card_snapshot).collect(),
-            selected_zone: zone_kind_snapshot(*selected_zone),
-            selected_placement: zone_placement_snapshot(*selected_placement),
-            rest_zone: zone_kind_snapshot(*rest_zone),
-            rest_placement: zone_placement_snapshot(*rest_placement),
-            followup: match followup {
-                Some((object, context, effect)) => Some(effect_continuation_snapshot(
-                    game, object, *context, *effect,
-                )?),
-                None => None,
-            },
+            continuation: effect_continuation_snapshot(
+                game,
+                viewer,
+                object,
+                context,
+                *effect,
+                visible_rebindings,
+            )?,
         },
-        DecisionContinuation::OptionalManaPayment {
-            player,
-            cost,
-            object,
-            context,
-            effect,
-        } => {
-            let continuation = effect_continuation_snapshot(game, object, *context, *effect)?;
-            DecisionContinuationSnapshot::OptionalManaPayment {
-                player: player.index(),
-                cost: mana_cost_snapshot(*cost),
-                object: continuation.object,
-                ability: continuation.ability,
-                context: continuation.context,
-                effect: continuation.effect,
-            }
-        }
-        DecisionContinuation::ManaPaymentOrElse {
-            player,
-            cost,
-            object,
-            context,
-            effect,
-        } => {
-            let continuation = effect_continuation_snapshot(game, object, *context, *effect)?;
-            DecisionContinuationSnapshot::ManaPaymentOrElse {
-                player: player.index(),
-                cost: mana_cost_snapshot(*cost),
-                object: continuation.object,
-                ability: continuation.ability,
-                context: continuation.context,
-                effect: continuation.effect,
-            }
-        }
         DecisionContinuation::ChainLightning {
             player,
             spell,
             targets,
         } => DecisionContinuationSnapshot::ChainLightning {
             player: player.index(),
-            spell: detached_stack_snapshot(game, spell)?,
+            spell: detached_stack_snapshot_allowing(game, viewer, spell, visible_rebindings)?,
             targets: targets.iter().copied().map(target_snapshot).collect(),
         },
         DecisionContinuation::Fork {
+            colors,
+            remaining,
             player,
             spell,
             target_lists,
         } => DecisionContinuationSnapshot::Fork {
+            repainted: colors.is_some(),
+            remaining: *remaining,
             player: player.index(),
-            spell: detached_stack_snapshot(game, spell)?,
+            spell: detached_stack_snapshot_allowing(game, viewer, spell, visible_rebindings)?,
             target_lists: target_lists
                 .iter()
                 .map(|targets| targets.iter().map(target_selection_snapshot).collect())
                 .collect(),
+        },
+        DecisionContinuation::Endure {
+            player,
+            permanent,
+            amount,
+        } => DecisionContinuationSnapshot::Endure {
+            player: player.index(),
+            permanent: permanent.0,
+            amount: *amount,
         },
         DecisionContinuation::OptionalEffect {
             object,
             context,
             effect,
         } => {
-            let continuation = effect_continuation_snapshot(game, object, *context, *effect)?;
+            let continuation = effect_continuation_snapshot(
+                game,
+                viewer,
+                object,
+                context,
+                *effect,
+                visible_rebindings,
+            )?;
             DecisionContinuationSnapshot::OptionalEffect {
                 object: continuation.object,
                 ability: continuation.ability,
@@ -254,29 +376,163 @@ fn continuation_snapshot(
                 effect: continuation.effect,
             }
         }
-        DecisionContinuation::ChoosePermanentForEffect {
-            choice,
+        DecisionContinuation::MayCastExiled {
+            player,
+            card,
             object,
             context,
-            effect,
-        } => DecisionContinuationSnapshot::ChoosePermanentForEffect {
-            choice: u8::try_from(choice.index()).ok()?,
-            continuation: effect_continuation_snapshot(game, object, *context, *effect)?,
-        },
+            definition,
+        } => {
+            let continuation = effect_continuation_snapshot(
+                game,
+                viewer,
+                object,
+                context,
+                *definition,
+                visible_rebindings,
+            )?;
+            DecisionContinuationSnapshot::MayCastExiled {
+                player: player.index(),
+                card: card.0,
+                object: continuation.object,
+                ability: continuation.ability,
+                context: continuation.context,
+                definition: continuation.effect,
+            }
+        }
+        DecisionContinuation::ChooseForEffect {
+            definition,
+            object,
+            context,
+            ..
+        } => {
+            if !matches!(definition.effect, EffectDef::Choose(_)) {
+                return None;
+            }
+            DecisionContinuationSnapshot::ChooseForEffect {
+                continuation: effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    object,
+                    context,
+                    *definition,
+                    visible_rebindings,
+                )?,
+            }
+        }
+        DecisionContinuation::SimultaneousChoose {
+            definition,
+            task,
+            players,
+            chosen,
+            object,
+            context,
+            ..
+        } => {
+            if !matches!(definition.effect, EffectDef::SimultaneousChoose(_)) {
+                return None;
+            }
+            DecisionContinuationSnapshot::SimultaneousChoose {
+                continuation: effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    object,
+                    context,
+                    *definition,
+                    visible_rebindings,
+                )?,
+                task: *task,
+                players: players.iter().map(|player| player.index()).collect(),
+                chosen: chosen.iter().map(|id| id.0).collect(),
+            }
+        }
+        DecisionContinuation::PayOr {
+            player,
+            payment,
+            definition: scoped,
+            object,
+            context,
+            ..
+        } => {
+            if trigger_capture_has_unrebindable_hidden_reference_except(
+                game,
+                viewer,
+                &[],
+                context,
+                visible_rebindings,
+            ) {
+                return None;
+            }
+            let ability =
+                stack_ability_snapshot_allowing(game, viewer, object, visible_rebindings)?
+                    .ability_locator?;
+            let definition = catalog_ability(&game.catalog, &ability)?;
+            DecisionContinuationSnapshot::PayOr {
+                player: player.index(),
+                payment: resolved_effect_payment_snapshot(*payment),
+                object: detached_stack_snapshot_allowing(game, viewer, object, visible_rebindings)?,
+                ability,
+                context: effect_resolution_context_snapshot(context),
+                definition: scoped_effect_snapshot(&definition, *scoped)?,
+            }
+        }
+        DecisionContinuation::SplitForEffect {
+            definition,
+            object,
+            context,
+            ..
+        } => {
+            if !matches!(definition.effect, EffectDef::SplitIntoPiles(_)) {
+                return None;
+            }
+            DecisionContinuationSnapshot::SplitForEffect {
+                continuation: effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    object,
+                    context,
+                    *definition,
+                    visible_rebindings,
+                )?,
+            }
+        }
+        DecisionContinuation::ChoosePileForEffect {
+            definition,
+            first,
+            second,
+            object,
+            context,
+            ..
+        } => {
+            if !matches!(definition.effect, EffectDef::SplitIntoPiles(_)) {
+                return None;
+            }
+            DecisionContinuationSnapshot::ChoosePileForEffect {
+                first: first.iter().copied().map(target_snapshot).collect(),
+                second: second.iter().copied().map(target_snapshot).collect(),
+                continuation: effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    object,
+                    context,
+                    *definition,
+                    visible_rebindings,
+                )?,
+            }
+        }
         DecisionContinuation::BattlefieldEntryPayment {
             context,
+            player,
             payment,
-            if_paid,
-            if_declined,
+            definition,
         } => DecisionContinuationSnapshot::BattlefieldEntryPayment {
             context: replacement_context_snapshot(*context),
-            effect: replacement_effect_locator(
+            player: player.index(),
+            payment: resolved_effect_payment_snapshot(*payment),
+            effect: resolved_replacement_effect_locator(
                 &game.catalog,
-                ReplacementEffectDef::OptionalPayment {
-                    payment: *payment,
-                    if_paid,
-                    if_declined,
-                },
+                context.source,
+                *definition,
             )?,
         },
         DecisionContinuation::BattlefieldEntryReplacement { candidates } => {
@@ -287,34 +543,49 @@ fn continuation_snapshot(
                     .collect::<Option<Vec<_>>>()?,
             }
         }
-        DecisionContinuation::BattlefieldEntryCardName { choices } => {
-            DecisionContinuationSnapshot::BattlefieldEntryCardName {
-                choices: choices.clone(),
-            }
-        }
-        DecisionContinuation::BattlefieldEntryCreatureType { choices } => {
-            DecisionContinuationSnapshot::BattlefieldEntryCreatureType {
-                choices: choices.clone(),
-            }
-        }
-        DecisionContinuation::BattlefieldEntryOptional { context } => {
+        DecisionContinuation::BattlefieldEntryOptional { context, effect } => {
             DecisionContinuationSnapshot::BattlefieldEntryOptional {
                 context: replacement_context_snapshot(*context),
+                effect: resolved_replacement_effect_locator(
+                    &game.catalog,
+                    context.source,
+                    *effect,
+                )?,
             }
         }
+        DecisionContinuation::BattlefieldEntryScalarChoice {
+            context,
+            choice,
+            choices,
+        } => DecisionContinuationSnapshot::BattlefieldEntryScalarChoice {
+            context: replacement_context_snapshot(*context),
+            effect: resolved_replacement_effect_locator(
+                &game.catalog,
+                context.source,
+                ReplacementEffectDef::Choose(ReplacementChoiceDef::Scalar(*choice)),
+            )?,
+            choices: choices.clone(),
+        },
         DecisionContinuation::BattlefieldEntryCopy {
             choices,
             added_types,
+            retain_printed_subtypes,
+            added_abilities,
         } => DecisionContinuationSnapshot::BattlefieldEntryCopy {
             choices: ids(choices),
             added_types: CardType::ALL.map(|card_type| added_types.contains(card_type)),
+            retain_printed_subtypes: *retain_printed_subtypes,
+            added_abilities: added_abilities
+                .iter()
+                .map(|ability| copiable_ability_snapshot(&game.catalog, ability))
+                .collect::<Option<Vec<_>>>()?,
         },
         DecisionContinuation::TriggerOrder { batch, remaining } => {
             DecisionContinuationSnapshot::TriggerOrder {
-                batch: trigger_batch_snapshot(game, batch)?,
+                batch: trigger_batch_snapshot(game, viewer, batch)?,
                 remaining: remaining
                     .iter()
-                    .map(|batch| trigger_batch_snapshot(game, batch))
+                    .map(|batch| trigger_batch_snapshot(game, viewer, batch))
                     .collect::<Option<Vec<_>>>()?,
             }
         }
@@ -324,51 +595,102 @@ fn continuation_snapshot(
             remaining,
             candidates,
         } => DecisionContinuationSnapshot::TriggerPlacement {
-            trigger: pending_trigger_snapshot(game, trigger)?,
+            trigger: pending_trigger_snapshot(game, viewer, trigger)?,
             pending: pending
                 .iter()
-                .map(|trigger| pending_trigger_snapshot(game, trigger))
+                .map(|trigger| pending_trigger_snapshot(game, viewer, trigger))
                 .collect::<Option<Vec<_>>>()?,
             remaining: remaining
                 .iter()
-                .map(|batch| trigger_batch_snapshot(game, batch))
+                .map(|batch| trigger_batch_snapshot(game, viewer, batch))
                 .collect::<Option<Vec<_>>>()?,
             candidates: candidates.iter().copied().map(target_snapshot).collect(),
         },
-        DecisionContinuation::MiracleReveal { card } => {
-            DecisionContinuationSnapshot::MiracleReveal { card: card.0 }
+        DecisionContinuation::TriggerMode {
+            trigger,
+            pending,
+            remaining,
+            ..
+        } => DecisionContinuationSnapshot::TriggerMode {
+            trigger: pending_trigger_snapshot(game, viewer, trigger)?,
+            pending: pending
+                .iter()
+                .map(|trigger| pending_trigger_snapshot(game, viewer, trigger))
+                .collect::<Option<Vec<_>>>()?,
+            remaining: remaining
+                .iter()
+                .map(|batch| trigger_batch_snapshot(game, viewer, batch))
+                .collect::<Option<Vec<_>>>()?,
+        },
+        DecisionContinuation::TriggerDivision {
+            trigger,
+            pending,
+            remaining,
+            targets,
+            divisions,
+        } => DecisionContinuationSnapshot::TriggerDivision {
+            trigger: pending_trigger_snapshot(game, viewer, trigger)?,
+            pending: pending
+                .iter()
+                .map(|trigger| pending_trigger_snapshot(game, viewer, trigger))
+                .collect::<Option<Vec<_>>>()?,
+            remaining: remaining
+                .iter()
+                .map(|batch| trigger_batch_snapshot(game, viewer, batch))
+                .collect::<Option<Vec<_>>>()?,
+            targets: targets.iter().copied().map(target_snapshot).collect(),
+            divisions: divisions.clone(),
+        },
+        DecisionContinuation::DrawActionWindow { card } => {
+            DecisionContinuationSnapshot::DrawActionWindow { card: card.0 }
         }
-        DecisionContinuation::PileSplit { owner } => DecisionContinuationSnapshot::PileSplit {
-            owner: owner.index(),
-        },
-        DecisionContinuation::RevealedPileSplit {
+        DecisionContinuation::ExploredCardPlacement { player, revealed } => {
+            DecisionContinuationSnapshot::ExploredCardPlacement {
+                player: player.index(),
+                revealed: revealed.0,
+            }
+        }
+        DecisionContinuation::Proliferate { candidates } => {
+            DecisionContinuationSnapshot::Proliferate {
+                candidates: candidates.iter().copied().map(target_snapshot).collect(),
+            }
+        }
+        DecisionContinuation::MayCastGranted {
             player,
-            revealed,
-            rest,
-            placement,
-        } => DecisionContinuationSnapshot::RevealedPileSplit {
+            card,
+            ability,
+            grant,
+            // Recomputed on restore from where the card is, which is where
+            // it came from.
+            source_zone: _,
+        } => DecisionContinuationSnapshot::MayCastGranted {
             player: player.index(),
-            revealed: revealed.iter().map(detached_card_snapshot).collect(),
-            rest: zone_kind_snapshot(*rest),
-            placement: zone_placement_snapshot(*placement),
+            card: card.0,
+            ability: ability_locator(&game.catalog, |candidate| candidate == ability)?,
+            grant: *grant,
         },
-        DecisionContinuation::RevealedPileChoice {
+        DecisionContinuation::MayCastAlternative {
             player,
-            first,
-            second,
-            rest,
-            placement,
-        } => DecisionContinuationSnapshot::RevealedPileChoice {
+            card,
+            ability,
+        } => DecisionContinuationSnapshot::MayCastAlternative {
             player: player.index(),
-            first: first.iter().map(detached_card_snapshot).collect(),
-            second: second.iter().map(detached_card_snapshot).collect(),
-            rest: zone_kind_snapshot(*rest),
-            placement: zone_placement_snapshot(*placement),
+            card: card.0,
+            ability: ability_origin_snapshot(*ability),
         },
-        DecisionContinuation::PileChoice { first, second } => {
-            DecisionContinuationSnapshot::PileChoice {
-                first: ids(first),
-                second: ids(second),
+        DecisionContinuation::CascadeCast {
+            player,
+            card,
+            exiled,
+        } => DecisionContinuationSnapshot::CascadeCast {
+            player: player.index(),
+            card: card.0,
+            exiled: exiled.iter().map(|card| card.0).collect(),
+        },
+        DecisionContinuation::SpellLibraryEnd { owner, spell } => {
+            DecisionContinuationSnapshot::SpellLibraryEnd {
+                owner: owner.index(),
+                spell: spell.0,
             }
         }
         DecisionContinuation::SeparateIntoPiles {
@@ -379,45 +701,85 @@ fn continuation_snapshot(
         } => DecisionContinuationSnapshot::SeparateIntoPiles {
             resolving_controller: resolving_controller.index(),
             subject: subject.index(),
-            items: items.iter().map(decision_option_snapshot).collect(),
+            items: items
+                .iter()
+                .map(|option| decision_option_snapshot(&game.catalog, option))
+                .collect::<Option<Vec<_>>>()?,
             on_complete: on_complete.key().to_owned(),
         },
         DecisionContinuation::ChoosePile { piles, on_complete } => {
             DecisionContinuationSnapshot::ChoosePile {
-                piles: pile_split_snapshot(piles),
+                piles: pile_split_snapshot(&game.catalog, piles)?,
                 on_complete: on_complete.key().to_owned(),
             }
         }
-        DecisionContinuation::SacrificeOfChoice { followup, optional } => {
+        DecisionContinuation::ChooseColor {
+            object,
+            context,
+            scoped,
+            targets,
+            ..
+        } => DecisionContinuationSnapshot::ChooseColor {
+            continuation: Box::new(effect_continuation_snapshot(
+                game,
+                viewer,
+                object,
+                context,
+                *scoped,
+                visible_rebindings,
+            )?),
+            targets: targets.iter().copied().map(target_snapshot).collect(),
+        },
+        DecisionContinuation::ChosenColorMana {
+            controller,
+            prototype,
+            remaining,
+            choosable,
+        } => DecisionContinuationSnapshot::ChosenColorMana {
+            controller: controller.index(),
+            prototype: super::mana_snapshot(&game.catalog, *prototype),
+            remaining: *remaining,
+            choosable: choosable.to_flags(),
+        },
+        DecisionContinuation::SacrificeOfChoice {
+            followup,
+            declined,
+            optional,
+        } => {
             DecisionContinuationSnapshot::SacrificeOfChoice {
                 followup: match followup {
-                    Some(followup) => Some(effect_continuation_snapshot(
+                    Some(followup) => {
+                        let mut snapshot = effect_continuation_snapshot(
+                            game,
+                            viewer,
+                            &followup.object,
+                            &followup.context,
+                            followup.effect,
+                            visible_rebindings,
+                        )?;
+                        // The only continuation that reads a characteristic
+                        // off what was sacrificed, so the only one that has
+                        // to say which.
+                        snapshot.reads_toughness =
+                            followup.amount == crate::card::SacrificedAmountDef::Toughness;
+                        Some(Box::new(snapshot))
+                    }
+                    None => None,
+                },
+                declined: match declined {
+                    Some(declined) => Some(Box::new(effect_continuation_snapshot(
                         game,
-                        &followup.object,
-                        followup.context,
-                        followup.effect,
-                    )?),
+                        viewer,
+                        &declined.object,
+                        &declined.context,
+                        declined.effect,
+                        visible_rebindings,
+                    )?)),
                     None => None,
                 },
                 optional: *optional,
             }
         }
-        DecisionContinuation::DestroyOfChoice { can_regenerate } => {
-            DecisionContinuationSnapshot::DestroyOfChoice {
-                can_regenerate: *can_regenerate,
-            }
-        }
-        DecisionContinuation::CounterUnlessPaid {
-            spell,
-            player,
-            cost,
-            zone,
-        } => DecisionContinuationSnapshot::CounterUnlessPaid {
-            spell: spell.0,
-            player: player.index(),
-            cost: mana_cost_snapshot(*cost),
-            zone: countered_spell_zone_snapshot(*zone),
-        },
         DecisionContinuation::RecallDiscard { player } => {
             DecisionContinuationSnapshot::RecallDiscard {
                 player: player.index(),
@@ -428,10 +790,6 @@ fn continuation_snapshot(
                 player: player.index(),
             }
         }
-        DecisionContinuation::Duress { victim, cause } => DecisionContinuationSnapshot::Duress {
-            victim: victim.index(),
-            cause: cause_snapshot(*cause),
-        },
         DecisionContinuation::Balance {
             controller,
             phase,
@@ -440,34 +798,29 @@ fn continuation_snapshot(
         } => DecisionContinuationSnapshot::Balance {
             controller: controller.index(),
             phase: balance_phase_snapshot(*phase),
-            task: balance_task_snapshot(viewer, task),
+            task: balance_task_snapshot(&game.catalog, viewer, task)?,
             remaining: remaining
                 .iter()
-                .map(|task| balance_task_snapshot(viewer, task))
-                .collect(),
+                .map(|task| balance_task_snapshot(&game.catalog, viewer, task))
+                .collect::<Option<Vec<_>>>()?,
         },
-        DecisionContinuation::SylvanOffer { player } => DecisionContinuationSnapshot::SylvanOffer {
-            player: player.index(),
-        },
-        DecisionContinuation::SylvanSelect {
+        DecisionContinuation::SearchZonesAndExileRest {
             player,
-            candidates,
-            choices_left,
-        } => DecisionContinuationSnapshot::SylvanSelect {
+            zones,
+            searched,
+        } => DecisionContinuationSnapshot::SearchZonesAndExileRest {
             player: player.index(),
-            candidates: ids(candidates),
-            choices_left: *choices_left,
+            zones: zones.iter().copied().map(zone_kind_snapshot).collect(),
+            searched: ids(searched),
         },
-        DecisionContinuation::SylvanMode {
-            player,
-            card,
+        DecisionContinuation::Vote {
             candidates,
-            choices_left,
-        } => DecisionContinuationSnapshot::SylvanMode {
-            player: player.index(),
-            card: card.0,
+            remaining,
+            votes,
+        } => DecisionContinuationSnapshot::Vote {
             candidates: ids(candidates),
-            choices_left: *choices_left,
+            remaining: remaining.iter().map(|player| player.index()).collect(),
+            votes: ids(votes),
         },
         DecisionContinuation::TetravusDetach { source } => {
             DecisionContinuationSnapshot::TetravusDetach { source: source.0 }
@@ -475,7 +828,71 @@ fn continuation_snapshot(
         DecisionContinuation::TetravusAssemble { source } => {
             DecisionContinuationSnapshot::TetravusAssemble { source: source.0 }
         }
-        DecisionContinuation::BattlefieldExitReplacement { .. } => return None,
+        DecisionContinuation::CardNameChoice {
+            choices,
+            searched,
+            zone,
+            binding,
+            object,
+            context,
+            effect,
+        } => DecisionContinuationSnapshot::CardNameChoice {
+            choices: choices.clone(),
+            searched: searched.index(),
+            zone: zone_kind_snapshot(*zone),
+            binding: binding.index(),
+            continuation: effect_continuation_snapshot(
+                game,
+                viewer,
+                object,
+                context,
+                *effect,
+                visible_rebindings,
+            )?,
+        },
+        // A run of sacrifices is one resolution answered a creature at a
+        // time, so what it carries is the resolution plus how much is still
+        // owed.
+        DecisionContinuation::SacrificeToTotalPower {
+            player,
+            remaining,
+            object,
+            context,
+            if_paid,
+        } => DecisionContinuationSnapshot::SacrificeToTotalPower {
+            player: player.index(),
+            remaining: *remaining,
+            object: Box::new(detached_stack_snapshot_allowing(
+                game,
+                viewer,
+                object,
+                visible_rebindings,
+            )?),
+            context: effect_resolution_context_snapshot(context),
+            if_paid: match if_paid {
+                Some(effect) => Some(Box::new(effect_continuation_snapshot(
+                    game,
+                    viewer,
+                    object,
+                    context,
+                    *effect,
+                    visible_rebindings,
+                )?)),
+                None => None,
+            },
+        },
+        // The pair is not yet chosen, so what a land substitution would do
+        // to the board is not writable down either.
+        DecisionContinuation::BasicLandTypeSubstitution { .. }
+        // An entry paused mid-flight carries a prospective permanent that
+        // this format has no place for yet.
+        | DecisionContinuation::BattlefieldEntryExile { .. }
+        | DecisionContinuation::BattlefieldExitReplacement { .. }
+        // An activation paused mid-payment carries the whole of what it
+        // chose -- its frozen ability text, targets, and modes -- which this
+        // format has no place for yet.
+        | DecisionContinuation::ActivationCostSacrifice { .. }
+        | DecisionContinuation::ActivationCostTap { .. } => return None,
     };
     Some(value)
 }
@@ -492,17 +909,27 @@ pub(super) fn parse_pending_decision(
         }
         return Ok(None);
     };
-    let state = state.ok_or("decision continuation lacks a semantic checkpoint encoding")?;
+    let state = state
+        .ok_or("invalid game snapshot: decisionState is absent for the visible pending decision")?;
+    let observation =
+        parse_decision_observation(visible, &state.preference, &state.options, &game.catalog)?;
+    let continuation = parse_continuation(&state.continuation, &observation, hidden, game)?;
     Ok(Some(PendingDecision {
-        observation: parse_decision_observation(visible, &state.preference)?,
-        continuation: parse_continuation(&state.continuation, hidden, game)?,
+        observation,
+        continuation,
     }))
 }
 
 fn parse_decision_observation(
     value: &Value,
     preference: &DecisionPreferenceSnapshot,
+    option_snapshots: &[DecisionOptionSnapshot],
+    catalog: &CardCatalog,
 ) -> Result<DecisionObservation, String> {
+    let options = array(field(value, "options")?)?;
+    if options.len() != option_snapshots.len() {
+        return Err("checkpoint decision options do not match observation".into());
+    }
     Ok(DecisionObservation {
         id: u32_field(value, "id")?,
         player: seat_value(field(value, "seat")?)?,
@@ -520,6 +947,11 @@ fn parse_decision_observation(
                 _ => Err("unknown decision order semantics".to_owned()),
             })
             .transpose()?,
+        source: value
+            .get("sourceObjectId")
+            .filter(|source| !source.is_null())
+            .map(|_| u32_field(value, "sourceObjectId").map(GameObjectId))
+            .transpose()?,
         prompt: str_field(value, "prompt")?.to_owned(),
         visibility: match str_field(value, "visibility")? {
             "Public" => DecisionVisibility::Public,
@@ -530,451 +962,18 @@ fn parse_decision_observation(
         minimum: usize_field(value, "minimum")?,
         maximum: usize_field(value, "maximum")?,
         cancellable: bool_field(value, "cancellable")?,
-        options: array(field(value, "options")?)?
+        options: options
             .iter()
-            .map(parse_option)
+            .zip(option_snapshots)
+            .map(|(value, snapshot)| parse_option(value, snapshot, catalog))
             .collect::<Result<Vec<_>, _>>()?,
     })
 }
 
-#[allow(clippy::too_many_lines)]
-fn parse_continuation(
-    value: &DecisionContinuationSnapshot,
-    hidden: &Value,
-    game: &Game,
-) -> Result<DecisionContinuation, String> {
-    Ok(match value {
-        DecisionContinuationSnapshot::BeginTurn {
-            player: prospective_player,
-            turn_kind,
-            applied,
-            replacements,
-            deferred,
-        } => DecisionContinuation::BeginTurn {
-            player: player(*prospective_player)?,
-            kind: parse_turn_kind(*turn_kind),
-            applied: applied.iter().copied().map(parse_ability_source).collect(),
-            replacements: replacements
-                .iter()
-                .map(|replacement| parse_begin_turn_replacement(replacement, game))
-                .collect::<Result<Vec<_>, _>>()?,
-            deferred: deferred
-                .iter()
-                .map(|effect| parse_deferred_begin_turn_effect(effect, game))
-                .collect::<Result<Vec<_>, _>>()?,
-        },
-        DecisionContinuationSnapshot::SearchZone {
-            controller,
-            source,
-            destination,
-            placement,
-            reveal,
-            shuffle,
-            enters_tapped,
-        } => DecisionContinuation::SearchZone {
-            controller: player(*controller)?,
-            source: parse_zone_kind(*source),
-            destination: parse_zone_kind(*destination),
-            placement: parse_zone_placement(*placement),
-            reveal: *reveal,
-            shuffle: *shuffle,
-            enters_tapped: *enters_tapped,
-        },
-        DecisionContinuationSnapshot::ChooseCards {
-            controller,
-            destination,
-            placement,
-            reveal,
-        } => DecisionContinuation::ChooseCards {
-            controller: player(*controller)?,
-            destination: parse_zone_kind(*destination),
-            placement: parse_zone_placement(*placement),
-            reveal: *reveal,
-        },
-        DecisionContinuationSnapshot::DrawReplacement {
-            player: owner,
-            replacements,
-        } => DecisionContinuation::DrawReplacement {
-            player: player(*owner)?,
-            replacements: replacements
-                .iter()
-                .map(|replacement| parse_draw_replacement(replacement, game))
-                .collect::<Result<Vec<_>, _>>()?,
-        },
-        DecisionContinuationSnapshot::DiscardForEffect {
-            player: current,
-            amount,
-            remaining,
-            chosen,
-            cause,
-        } => DecisionContinuation::DiscardForEffect {
-            player: player(*current)?,
-            amount: *amount,
-            remaining: remaining
-                .iter()
-                .copied()
-                .map(player)
-                .collect::<Result<Vec<_>, _>>()?,
-            chosen: chosen
-                .iter()
-                .map(|choice| {
-                    let owner = player(choice.player)?;
-                    let cards = match &choice.cards {
-                        Some(cards) => game_ids(cards),
-                        None => hidden_discard_choices(hidden, owner, choice.count, game)?,
-                    };
-                    Ok((owner, cards))
-                })
-                .collect::<Result<Vec<_>, String>>()?,
-            cause: parse_cause(*cause)?,
-        },
-        DecisionContinuationSnapshot::BasicLandTypeTextChange { target } => {
-            DecisionContinuation::BasicLandTypeTextChange {
-                target: parse_target(*target),
-            }
-        }
-        DecisionContinuationSnapshot::ExileFromHand { victim } => {
-            DecisionContinuation::ExileFromHand {
-                victim: player(*victim)?,
-            }
-        }
-        DecisionContinuationSnapshot::GrislySalvage {
-            player: owner,
-            revealed,
-        } => DecisionContinuation::GrislySalvage {
-            player: player(*owner)?,
-            revealed: parse_detached_cards(revealed, game)?,
-        },
-        DecisionContinuationSnapshot::AugurOfBolas {
-            player: owner,
-            revealed,
-        } => DecisionContinuation::AugurOfBolas {
-            player: player(*owner)?,
-            revealed: parse_detached_cards(revealed, game)?,
-        },
-        DecisionContinuationSnapshot::TopCardSelection {
-            player: owner,
-            revealed,
-            selected_zone,
-            selected_placement,
-            rest_zone,
-            rest_placement,
-            followup,
-        } => DecisionContinuation::TopCardSelection {
-            player: player(*owner)?,
-            revealed: parse_detached_cards(revealed, game)?,
-            selected_zone: parse_zone_kind(*selected_zone),
-            selected_placement: parse_zone_placement(*selected_placement),
-            rest_zone: parse_zone_kind(*rest_zone),
-            rest_placement: parse_zone_placement(*rest_placement),
-            followup: followup
-                .as_ref()
-                .map(|snapshot| {
-                    let followup = parse_effect_continuation(snapshot, game)?;
-                    Ok::<_, String>((followup.object, followup.context, followup.effect))
-                })
-                .transpose()?,
-        },
-        DecisionContinuationSnapshot::OptionalManaPayment {
-            player: owner,
-            cost,
-            object,
-            ability,
-            context,
-            effect,
-        } => DecisionContinuation::OptionalManaPayment {
-            player: player(*owner)?,
-            cost: parse_mana_cost(cost)?,
-            object: Box::new(parse_detached_stack(object, game)?),
-            context: parse_trigger_context(*context)?,
-            effect: catalog_scoped_effect(&game.catalog, ability, effect)
-                .ok_or("optional mana payment effect locator is absent from this catalog")?,
-        },
-        DecisionContinuationSnapshot::ManaPaymentOrElse {
-            player: owner,
-            cost,
-            object,
-            ability,
-            context,
-            effect,
-        } => DecisionContinuation::ManaPaymentOrElse {
-            player: player(*owner)?,
-            cost: parse_mana_cost(cost)?,
-            object: Box::new(parse_detached_stack(object, game)?),
-            context: parse_trigger_context(*context)?,
-            effect: catalog_scoped_effect(&game.catalog, ability, effect)
-                .ok_or("mana-payment-or-else effect locator is absent from this catalog")?,
-        },
-        DecisionContinuationSnapshot::ChainLightning {
-            player: owner,
-            spell,
-            targets,
-        } => DecisionContinuation::ChainLightning {
-            player: player(*owner)?,
-            spell: parse_detached_stack(spell, game)?,
-            targets: targets.iter().copied().map(parse_target).collect(),
-        },
-        DecisionContinuationSnapshot::Fork {
-            player: owner,
-            spell,
-            target_lists,
-        } => DecisionContinuation::Fork {
-            player: player(*owner)?,
-            spell: parse_detached_stack(spell, game)?,
-            target_lists: target_lists
-                .iter()
-                .map(|targets| {
-                    targets
-                        .iter()
-                        .map(parse_target_selection)
-                        .collect::<Result<Vec<_>, _>>()
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        },
-        DecisionContinuationSnapshot::OptionalEffect {
-            object,
-            ability,
-            context,
-            effect,
-        } => DecisionContinuation::OptionalEffect {
-            object: Box::new(parse_detached_stack(object, game)?),
-            context: parse_trigger_context(*context)?,
-            effect: catalog_scoped_effect(&game.catalog, ability, effect)
-                .ok_or("optional effect locator is absent from this catalog")?,
-        },
-        DecisionContinuationSnapshot::ChoosePermanentForEffect {
-            choice,
-            continuation,
-        } => {
-            let continuation = parse_effect_continuation(continuation, game)?;
-            DecisionContinuation::ChoosePermanentForEffect {
-                choice: ChoiceIndex::from_index(usize::from(*choice))
-                    .ok_or("choice index is out of range")?,
-                object: continuation.object,
-                context: continuation.context,
-                effect: continuation.effect,
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryPayment { context, effect } => {
-            let ReplacementEffectDef::OptionalPayment {
-                payment,
-                if_paid,
-                if_declined,
-            } = catalog_replacement_effect(&game.catalog, effect)
-                .ok_or("battlefield entry payment locator is absent from this catalog")?
-            else {
-                return Err("battlefield entry payment locator is not an optional payment".into());
-            };
-            DecisionContinuation::BattlefieldEntryPayment {
-                context: parse_replacement_context(*context)?,
-                payment,
-                if_paid,
-                if_declined,
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryReplacement { candidates } => {
-            DecisionContinuation::BattlefieldEntryReplacement {
-                candidates: candidates
-                    .iter()
-                    .map(|candidate| parse_applicable_replacement(candidate, &game.catalog))
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryCardName { choices } => {
-            DecisionContinuation::BattlefieldEntryCardName {
-                choices: choices.clone(),
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryCreatureType { choices } => {
-            DecisionContinuation::BattlefieldEntryCreatureType {
-                choices: choices.clone(),
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryOptional { context } => {
-            DecisionContinuation::BattlefieldEntryOptional {
-                context: parse_replacement_context_snapshot(*context)?,
-            }
-        }
-        DecisionContinuationSnapshot::BattlefieldEntryCopy {
-            choices,
-            added_types,
-        } => DecisionContinuation::BattlefieldEntryCopy {
-            choices: game_ids(choices),
-            added_types: parse_card_type_set(*added_types),
-        },
-        DecisionContinuationSnapshot::TriggerOrder { batch, remaining } => {
-            DecisionContinuation::TriggerOrder {
-                batch: parse_trigger_batch(batch, game)?,
-                remaining: remaining
-                    .iter()
-                    .map(|batch| parse_trigger_batch(batch, game))
-                    .collect::<Result<Vec<_>, _>>()?,
-            }
-        }
-        DecisionContinuationSnapshot::TriggerPlacement {
-            trigger,
-            pending,
-            remaining,
-            candidates,
-        } => DecisionContinuation::TriggerPlacement {
-            trigger: parse_pending_trigger(trigger, game)?,
-            pending: pending
-                .iter()
-                .map(|trigger| parse_pending_trigger(trigger, game))
-                .collect::<Result<Vec<_>, _>>()?,
-            remaining: remaining
-                .iter()
-                .map(|batch| parse_trigger_batch(batch, game))
-                .collect::<Result<Vec<_>, _>>()?,
-            candidates: candidates.iter().copied().map(parse_target).collect(),
-        },
-        DecisionContinuationSnapshot::MiracleReveal { card } => {
-            DecisionContinuation::MiracleReveal {
-                card: GameObjectId(*card),
-            }
-        }
-        DecisionContinuationSnapshot::PileSplit { owner } => DecisionContinuation::PileSplit {
-            owner: player(*owner)?,
-        },
-        DecisionContinuationSnapshot::RevealedPileSplit {
-            player: owner,
-            revealed,
-            rest,
-            placement,
-        } => DecisionContinuation::RevealedPileSplit {
-            player: player(*owner)?,
-            revealed: parse_detached_cards(revealed, game)?,
-            rest: parse_zone_kind(*rest),
-            placement: parse_zone_placement(*placement),
-        },
-        DecisionContinuationSnapshot::RevealedPileChoice {
-            player: owner,
-            first,
-            second,
-            rest,
-            placement,
-        } => DecisionContinuation::RevealedPileChoice {
-            player: player(*owner)?,
-            first: parse_detached_cards(first, game)?,
-            second: parse_detached_cards(second, game)?,
-            rest: parse_zone_kind(*rest),
-            placement: parse_zone_placement(*placement),
-        },
-        DecisionContinuationSnapshot::PileChoice { first, second } => {
-            DecisionContinuation::PileChoice {
-                first: game_ids(first),
-                second: game_ids(second),
-            }
-        }
-        DecisionContinuationSnapshot::SeparateIntoPiles {
-            resolving_controller,
-            subject,
-            items,
-            on_complete,
-        } => DecisionContinuation::SeparateIntoPiles {
-            resolving_controller: player(*resolving_controller)?,
-            subject: player(*subject)?,
-            items: items.iter().map(parse_decision_option_snapshot).collect(),
-            on_complete: crate::card::sets::piles_separated_resolver(on_complete)
-                .ok_or("unknown piles-separated resolver")?,
-        },
-        DecisionContinuationSnapshot::ChoosePile { piles, on_complete } => {
-            DecisionContinuation::ChoosePile {
-                piles: parse_pile_split_snapshot(piles)?,
-                on_complete: crate::card::sets::pile_chosen_resolver(on_complete)
-                    .ok_or("unknown pile-chosen resolver")?,
-            }
-        }
-        DecisionContinuationSnapshot::SacrificeOfChoice { followup, optional } => {
-            DecisionContinuation::SacrificeOfChoice {
-                followup: followup
-                    .as_ref()
-                    .map(|followup| parse_effect_continuation(followup, game))
-                    .transpose()?,
-                optional: *optional,
-            }
-        }
-        DecisionContinuationSnapshot::DestroyOfChoice { can_regenerate } => {
-            DecisionContinuation::DestroyOfChoice {
-                can_regenerate: *can_regenerate,
-            }
-        }
-        DecisionContinuationSnapshot::CounterUnlessPaid {
-            spell,
-            player: owner,
-            cost,
-            zone,
-        } => DecisionContinuation::CounterUnlessPaid {
-            spell: GameObjectId(*spell),
-            player: player(*owner)?,
-            cost: parse_mana_cost(cost)?,
-            zone: parse_countered_spell_zone(*zone),
-        },
-        DecisionContinuationSnapshot::RecallDiscard { player: owner } => {
-            DecisionContinuation::RecallDiscard {
-                player: player(*owner)?,
-            }
-        }
-        DecisionContinuationSnapshot::RecallReturn { player: owner } => {
-            DecisionContinuation::RecallReturn {
-                player: player(*owner)?,
-            }
-        }
-        DecisionContinuationSnapshot::Duress { victim, cause } => DecisionContinuation::Duress {
-            victim: player(*victim)?,
-            cause: parse_cause(*cause)?,
-        },
-        DecisionContinuationSnapshot::Balance {
-            controller,
-            phase,
-            task,
-            remaining,
-        } => DecisionContinuation::Balance {
-            controller: player(*controller)?,
-            phase: parse_balance_phase(*phase),
-            task: parse_balance_task(task, game)?,
-            remaining: remaining
-                .iter()
-                .map(|task| parse_balance_task(task, game))
-                .collect::<Result<Vec<_>, _>>()?,
-        },
-        DecisionContinuationSnapshot::SylvanOffer { player: owner } => {
-            DecisionContinuation::SylvanOffer {
-                player: player(*owner)?,
-            }
-        }
-        DecisionContinuationSnapshot::SylvanSelect {
-            player: owner,
-            candidates,
-            choices_left,
-        } => DecisionContinuation::SylvanSelect {
-            player: player(*owner)?,
-            candidates: game_ids(candidates),
-            choices_left: *choices_left,
-        },
-        DecisionContinuationSnapshot::SylvanMode {
-            player: owner,
-            card,
-            candidates,
-            choices_left,
-        } => DecisionContinuation::SylvanMode {
-            player: player(*owner)?,
-            card: GameObjectId(*card),
-            candidates: game_ids(candidates),
-            choices_left: *choices_left,
-        },
-        DecisionContinuationSnapshot::TetravusDetach { source } => {
-            DecisionContinuation::TetravusDetach {
-                source: GameObjectId(*source),
-            }
-        }
-        DecisionContinuationSnapshot::TetravusAssemble { source } => {
-            DecisionContinuation::TetravusAssemble {
-                source: GameObjectId(*source),
-            }
-        }
-    })
-}
+include!("decision/continuation.rs");
+include!("decision/battlefield_entry_continuation.rs");
+
+include!("decision/validation.rs");
 
 mod begin_turn;
 mod support;
@@ -984,4 +983,6 @@ use begin_turn::*;
 pub(super) use support::decision_referenced_object_ids;
 #[allow(clippy::wildcard_imports)]
 use support::*;
-pub(super) use support::{parse_pending_trigger, pending_trigger_snapshot};
+pub(super) use support::{
+    mana_cost_from_snapshot, mana_cost_snapshot, parse_pending_trigger, pending_trigger_snapshot,
+};

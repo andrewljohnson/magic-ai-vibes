@@ -58,11 +58,15 @@ fn pumping_the_attacker_widens_the_restriction() {
     let (mut game, wolf_id, lions) = blocking_board(cards::SAVANNAH_LIONS);
     assert!(can_block(&game, lions));
 
-    game.battlefield
-        .iter_mut()
-        .find(|permanent| permanent.card.id == wolf_id)
-        .expect("there")
-        .power_bonus += 1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        wolf_id,
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(1),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
 
     assert!(
         !can_block(&game, lions),

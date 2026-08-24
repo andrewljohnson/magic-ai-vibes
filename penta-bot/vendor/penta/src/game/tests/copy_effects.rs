@@ -26,8 +26,9 @@ fn stage_copies_dryad_arbors_copiable_values_but_not_hack_or_presence() {
             source: stage_id,
             ability: copy_ability,
             targets: activated_targets(Target::Permanent(arbor_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -107,8 +108,9 @@ fn a_new_stage_can_copy_dryad_arbor_but_the_result_is_summoning_sick() {
         source: stage_id,
         ability: copy_ability,
         targets: activated_targets(Target::Permanent(arbor_id)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(
         game.legal_actions(PlayerId::One).contains(&copy),
@@ -153,8 +155,9 @@ fn stage_copying_stage_does_not_duplicate_indistinguishable_legal_actions() {
             source: copying_stage,
             ability: copy_ability,
             targets: activated_targets(Target::Permanent(copied_stage)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -181,8 +184,9 @@ fn stage_copying_stage_does_not_duplicate_indistinguishable_legal_actions() {
         source: copying_stage,
         ability: copy_ability,
         targets: activated_targets(Target::Permanent(mountain)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert_eq!(
         game.legal_actions(PlayerId::One)
@@ -215,8 +219,9 @@ fn stage_keeps_a_resolved_factory_animation_after_copying_another_land() {
             source: stage_id,
             ability: original_copy_ability,
             targets: activated_targets(Target::Permanent(factory_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -227,8 +232,9 @@ fn stage_keeps_a_resolved_factory_animation_after_copying_another_land() {
         source: stage_id,
         ability: activated_ability_for(&game, stage_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     game.players[0].mana_pool.colorless = 1;
     assert!(
@@ -237,7 +243,17 @@ fn stage_keeps_a_resolved_factory_animation_after_copying_another_land() {
     );
     game.apply(PlayerId::One, animate).unwrap();
     drain_pending(&mut game);
-    assert!(game.battlefield[0].animation.is_some());
+    let animated_stage = game.battlefield[0].clone();
+    let types = game.permanent_types(&animated_stage).expect("types");
+    for card_type in [CardType::Land, CardType::Artifact, CardType::Creature] {
+        assert!(types.contains(card_type));
+    }
+    assert_eq!(game.power(&animated_stage), Some(2));
+    assert_eq!(game.toughness(&animated_stage), Some(2));
+    assert!(
+        !animated_stage.resolved_continuous_effects.is_empty(),
+        "the animation is represented by resolved characteristic leaves"
+    );
 
     let retained_copy_ability = activated_ability_for(&game, stage_id, 2);
     game.players[0].mana_pool.colorless = 2;
@@ -247,8 +263,9 @@ fn stage_keeps_a_resolved_factory_animation_after_copying_another_land() {
             source: stage_id,
             ability: retained_copy_ability,
             targets: activated_targets(Target::Permanent(mountain_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -269,8 +286,9 @@ fn stage_keeps_a_resolved_factory_animation_after_copying_another_land() {
         source: factory_id,
         ability: activated_ability_for(&game, factory_id, 1),
         targets: activated_targets(Target::Permanent(stage_id)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(
         game.legal_actions(PlayerId::One).contains(&pump),
@@ -321,8 +339,9 @@ fn stage_does_not_copy_a_land_that_leaves_before_the_ability_resolves() {
             source: stage_id,
             ability: activated_ability_for(&game, stage_id, 0),
             targets: activated_targets(Target::Permanent(target_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -367,14 +386,17 @@ fn copy_artifact_copies_an_artifact_creature() {
         .unwrap();
     assert_eq!(
         copied.copy_effect.as_ref().map(|copy| copy.base),
-        Some((cards::TETRAVUS, CardPartId::PRIMARY))
+        Some(ObjectCharacteristics::card(
+            cards::TETRAVUS,
+            CardPartId::PRIMARY,
+        ))
     );
     assert_eq!(copied.presented, CardPartId::PRIMARY);
     assert_eq!(
         game.effective_rules(copied),
         game.catalog
             .get(cards::TETRAVUS)
-            .map(|definition| &definition.rules),
+            .map(|definition| definition.rules),
     );
     let copied_types = game.permanent_types(copied).unwrap();
     assert!(copied_types.contains(CardType::Artifact));
@@ -385,6 +407,66 @@ fn copy_artifact_copies_an_artifact_creature() {
     );
     assert_eq!(game.power(copied), Some(4));
     assert!(game.has_flying(copied));
+}
+
+#[test]
+fn token_nature_is_independent_from_the_characteristics_being_copied() {
+    let mut game = ready_game();
+    game.battlefield.clear();
+
+    game.create_token_copy(
+        PlayerId::One,
+        copied_characteristics(cards::SERRA_ANGEL),
+        None,
+        CardPartId::PRIMARY,
+    );
+    drain_pending(&mut game);
+    let card_copy_token = game
+        .battlefield
+        .iter()
+        .find(|permanent| permanent.card.definition.is_token())
+        .expect("the card-characteristics copy arrived as a token");
+    assert_eq!(
+        Game::effective_rules_source(card_copy_token),
+        ObjectCharacteristics::card(cards::SERRA_ANGEL, CardPartId::PRIMARY),
+    );
+    assert_eq!(
+        (game.power(card_copy_token), game.toughness(card_copy_token)),
+        (Some(4), Some(4))
+    );
+    let token_id = card_copy_token.card.id;
+    game.return_permanent_to_hand(token_id);
+    assert!(
+        game.players[PlayerId::One.index()].hand.is_empty(),
+        "a token copying a card still ceases instead of becoming a card in hand",
+    );
+
+    let food = token_permanent(10_100, tokens::food(), PlayerId::Two);
+    let food_id = food.card.id;
+    game.battlefield.push(food);
+    let copy = card(10_101, cards::COPY_ARTIFACT, PlayerId::One);
+    game.players[PlayerId::One.index()].hand.push(copy.clone());
+    game.players[PlayerId::One.index()].mana_pool.blue = 1;
+    game.players[PlayerId::One.index()].mana_pool.colorless = 1;
+    resolve_copy_artifact(&mut game, copy.id, food_id);
+
+    let token_characteristics_copy = game
+        .battlefield
+        .iter()
+        .find(|permanent| permanent.card.definition == cards::COPY_ARTIFACT)
+        .expect("Copy Artifact resolved as its printed card object");
+    assert!(!token_characteristics_copy.card.definition.is_token());
+    assert_eq!(
+        token_characteristics_copy
+            .copy_effect
+            .as_ref()
+            .map(|copy| copy.base),
+        Some(ObjectCharacteristics::token(
+            tokens::food(),
+            CardPartId::PRIMARY,
+        )),
+        "a card can copy inline token characteristics without becoming a token",
+    );
 }
 
 #[test]
@@ -418,20 +500,21 @@ fn copy_artifact_resolves_a_copied_icy_manipulator_ability_from_its_frozen_origi
             source: copied_id,
             ability,
             targets: activated_targets(Target::Permanent(target_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
     assert_eq!(game.stack.len(), 1);
-    assert_eq!(game.stack[0].card.definition, cards::ICY_MANIPULATOR);
+    assert_eq!(game.stack[0].card.definition, ObjectKind::Ability);
     assert_eq!(
         game.stack[0].ability_origin(),
         Some(primary_ability(cards::ICY_MANIPULATOR))
     );
     assert_eq!(
-        game.observe(PlayerId::One).stack[0].definition,
-        cards::ICY_MANIPULATOR,
+        game.observe(PlayerId::One).stack[0].characteristics,
+        ObjectCharacteristics::card(cards::ICY_MANIPULATOR, CardPartId::PRIMARY),
         "stack presentation follows the frozen copied ability definition",
     );
 
@@ -466,17 +549,16 @@ fn granted_activation_freezes_payload_before_sacrificing_grant_source() {
     );
     static GRANTOR_ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "Creatures you control have the test ability.",
-        EffectDef::Apply {
-            recipient: EffectRecipientDef::MatchingObjects {
-                object: ObjectPredicateDef::HasType(CardType::Creature),
-                zones: &[ZoneKind::Battlefield],
-                controller: PlayerRelation::You,
-            },
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+        EffectDef::StaticApply {
+            recipient: EffectRecipientDef::matching_objects(
+                ObjectPredicateDef::HasType(CardType::Creature),
+                &[ZoneKind::Battlefield],
+                PlayerRelation::You,
+            ),
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
     )];
-    let grantor_definition_id = CardDefinitionId(10_062);
+    let grantor_definition_id = CardDefinitionId::new(10_062);
     let mut grantor_definition = CardDefinition::new(
         grantor_definition_id,
         "Activated snapshot test grantor",
@@ -514,8 +596,9 @@ fn granted_activation_freezes_payload_before_sacrificing_grant_source() {
         source: receiver,
         ability: origin,
         targets: activated_targets(Target::Player(PlayerId::Two)),
-        cost_object: Some(grantor),
+        cost_objects: vec![grantor],
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&activation));
 
@@ -559,22 +642,20 @@ fn granted_activation_freezes_payload_before_sacrificing_grant_source() {
 fn separate_grant_sites_receive_distinct_structural_origins() {
     static GRANTED_ABILITY: AbilityDef = abilities::flying();
     static EFFECTS: [EffectDef; 2] = [
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
     ];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "This permanent has flying.\nThis permanent has flying.",
         EffectDef::Sequence(&EFFECTS),
     )];
-    let definition_id = CardDefinitionId(10_063);
+    let definition_id = CardDefinitionId::new(10_063);
     let mut definition = CardDefinition::new(
         definition_id,
         "Grant identity test card",
@@ -603,7 +684,15 @@ fn separate_grant_sites_receive_distinct_structural_origins() {
         .into_iter()
         .filter_map(|effective| match effective.origin {
             AbilityOrigin::Granted { .. } => Some(effective.origin),
-            AbilityOrigin::Printed { .. } | AbilityOrigin::IntrinsicBasicLand(_) => None,
+            AbilityOrigin::Printed { .. }
+            | AbilityOrigin::Token { .. }
+            | AbilityOrigin::Emblem { .. }
+            | AbilityOrigin::FaceDown { .. }
+            | AbilityOrigin::TokenGranted { .. }
+            | AbilityOrigin::EmblemGranted { .. }
+            | AbilityOrigin::FaceDownGranted { .. }
+            | AbilityOrigin::IntrinsicBasicLand(_)
+            | AbilityOrigin::IntrinsicCounter(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -632,26 +721,24 @@ fn separate_grant_sites_receive_distinct_structural_origins() {
 fn a_nonmatching_grant_site_still_advances_the_structural_origin() {
     static GRANTED_ABILITY: AbilityDef = abilities::flying();
     static EFFECTS: [EffectDef; 2] = [
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
-        EffectDef::Apply {
-            recipient: EffectRecipientDef::MatchingObjects {
-                object: ObjectPredicateDef::HasType(CardType::Creature),
-                zones: &[ZoneKind::Battlefield],
-                controller: PlayerRelation::You,
-            },
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+        EffectDef::StaticApply {
+            recipient: EffectRecipientDef::matching_objects(
+                ObjectPredicateDef::HasType(CardType::Creature),
+                &[ZoneKind::Battlefield],
+                PlayerRelation::You,
+            ),
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
     ];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "This permanent has flying. Creatures you control have flying.",
         EffectDef::Sequence(&EFFECTS),
     )];
-    let definition_id = CardDefinitionId(10_080);
+    let definition_id = CardDefinitionId::new(10_080);
     let mut definition = CardDefinition::new(
         definition_id,
         "Nonmatching grant identity test card",
@@ -683,7 +770,15 @@ fn a_nonmatching_grant_site_still_advances_the_structural_origin() {
         .into_iter()
         .filter_map(|effective| match effective.origin {
             AbilityOrigin::Granted { .. } => Some(effective.origin),
-            AbilityOrigin::Printed { .. } | AbilityOrigin::IntrinsicBasicLand(_) => None,
+            AbilityOrigin::Printed { .. }
+            | AbilityOrigin::Token { .. }
+            | AbilityOrigin::Emblem { .. }
+            | AbilityOrigin::FaceDown { .. }
+            | AbilityOrigin::TokenGranted { .. }
+            | AbilityOrigin::EmblemGranted { .. }
+            | AbilityOrigin::FaceDownGranted { .. }
+            | AbilityOrigin::IntrinsicBasicLand(_)
+            | AbilityOrigin::IntrinsicCounter(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -703,24 +798,22 @@ fn a_nonmatching_grant_site_still_advances_the_structural_origin() {
 fn nonmatching_composite_grant_sites_still_advance_structural_origins() {
     static GRANTED_ABILITY: AbilityDef = abilities::flying();
     static MISSED_COMPONENTS: [AppliedEffectDef; 1] =
-        [AppliedEffectDef::GrantAbility(&GRANTED_ABILITY)];
+        [AppliedEffectDef::add_ability(&GRANTED_ABILITY)];
     static EFFECTS: [EffectDef; 2] = [
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::AttachedPermanent,
             effect: AppliedEffectDef::Composite(&MISSED_COMPONENTS),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
         },
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::GrantAbility(&GRANTED_ABILITY),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&GRANTED_ABILITY),
         },
     ];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "The attached permanent has flying.\nThis permanent has flying.",
         EffectDef::Sequence(&EFFECTS),
     )];
-    let definition_id = CardDefinitionId(10_064);
+    let definition_id = CardDefinitionId::new(10_064);
     let mut definition = CardDefinition::new(
         definition_id,
         "Conditional composite grant identity test card",
@@ -749,7 +842,15 @@ fn nonmatching_composite_grant_sites_still_advance_structural_origins() {
         .into_iter()
         .filter_map(|effective| match effective.origin {
             AbilityOrigin::Granted { .. } => Some(effective.origin),
-            AbilityOrigin::Printed { .. } | AbilityOrigin::IntrinsicBasicLand(_) => None,
+            AbilityOrigin::Printed { .. }
+            | AbilityOrigin::Token { .. }
+            | AbilityOrigin::Emblem { .. }
+            | AbilityOrigin::FaceDown { .. }
+            | AbilityOrigin::TokenGranted { .. }
+            | AbilityOrigin::EmblemGranted { .. }
+            | AbilityOrigin::FaceDownGranted { .. }
+            | AbilityOrigin::IntrinsicBasicLand(_)
+            | AbilityOrigin::IntrinsicCounter(_) => None,
         })
         .collect::<Vec<_>>();
 
@@ -783,26 +884,24 @@ static COPY_GRANT_B: AbilityDef = AbilityDef::activated(
 );
 static COPY_GRANT_SOURCE_A_ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
     "Creatures you control have the first test ability.",
-    EffectDef::Apply {
-        recipient: EffectRecipientDef::MatchingObjects {
-            object: ObjectPredicateDef::HasType(CardType::Creature),
-            zones: &[ZoneKind::Battlefield],
-            controller: PlayerRelation::You,
-        },
-        effect: AppliedEffectDef::GrantAbility(&COPY_GRANT_A),
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
+    EffectDef::StaticApply {
+        recipient: EffectRecipientDef::matching_objects(
+            ObjectPredicateDef::HasType(CardType::Creature),
+            &[ZoneKind::Battlefield],
+            PlayerRelation::You,
+        ),
+        effect: AppliedEffectDef::add_ability(&COPY_GRANT_A),
     },
 )];
 static COPY_GRANT_SOURCE_B_ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
     "Creatures you control have the second test ability.",
-    EffectDef::Apply {
-        recipient: EffectRecipientDef::MatchingObjects {
-            object: ObjectPredicateDef::HasType(CardType::Creature),
-            zones: &[ZoneKind::Battlefield],
-            controller: PlayerRelation::You,
-        },
-        effect: AppliedEffectDef::GrantAbility(&COPY_GRANT_B),
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
+    EffectDef::StaticApply {
+        recipient: EffectRecipientDef::matching_objects(
+            ObjectPredicateDef::HasType(CardType::Creature),
+            &[ZoneKind::Battlefield],
+            PlayerRelation::You,
+        ),
+        effect: AppliedEffectDef::add_ability(&COPY_GRANT_B),
     },
 )];
 
@@ -830,8 +929,8 @@ pub(super) fn copied_grant_source_game() -> (
     CardDefinitionId,
     CardDefinitionId,
 ) {
-    let definition_a = CardDefinitionId(10_064);
-    let definition_b = CardDefinitionId(10_065);
+    let definition_a = CardDefinitionId::new(10_064);
+    let definition_b = CardDefinitionId::new(10_065);
     let source_a = copy_grant_source_definition(
         definition_a,
         "First grant source",
@@ -872,7 +971,15 @@ pub(super) fn sole_granted_origin(game: &Game, receiver: CardInstanceId) -> Abil
         .into_iter()
         .find_map(|effective| match effective.origin {
             AbilityOrigin::Granted { .. } => Some(effective.origin),
-            AbilityOrigin::Printed { .. } | AbilityOrigin::IntrinsicBasicLand(_) => None,
+            AbilityOrigin::Printed { .. }
+            | AbilityOrigin::Token { .. }
+            | AbilityOrigin::Emblem { .. }
+            | AbilityOrigin::FaceDown { .. }
+            | AbilityOrigin::TokenGranted { .. }
+            | AbilityOrigin::EmblemGranted { .. }
+            | AbilityOrigin::FaceDownGranted { .. }
+            | AbilityOrigin::IntrinsicBasicLand(_)
+            | AbilityOrigin::IntrinsicCounter(_) => None,
         })
         .expect("the copied source grants an ability")
 }

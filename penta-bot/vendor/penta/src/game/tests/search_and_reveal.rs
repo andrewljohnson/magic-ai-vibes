@@ -48,7 +48,11 @@ fn augur_of_bolas_digs_three_deep_when_it_enters() {
     let offered: Vec<_> = decision
         .options
         .iter()
-        .filter_map(|option| option.card.map(|(_, definition)| definition))
+        .filter_map(|option| {
+            option
+                .card
+                .and_then(|(_, characteristics)| characteristics.card_definition())
+        })
         .collect();
     assert_eq!(offered, vec![cards::LIGHTNING_BOLT]);
 
@@ -86,7 +90,7 @@ fn augur_of_bolas_digs_three_deep_when_it_enters() {
 
 #[test]
 fn any_target_damage_can_remove_a_planeswalker() {
-    let definition_id = CardDefinitionId(10_075);
+    let definition_id = CardDefinitionId::new(10_075);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test Planeswalker",
@@ -260,25 +264,36 @@ fn sin_collector_exiles_an_instant_or_sorcery_from_the_revealed_hand() {
     let mut game = ready_game();
     let lions = card(12_000, cards::SAVANNAH_LIONS, PlayerId::Two);
     let bolt = card(12_001, cards::LIGHTNING_BOLT, PlayerId::Two);
-    game.players[1].hand.extend([lions.clone(), bolt.clone()]);
+    let sinkhole = card(12_002, cards::SINKHOLE, PlayerId::Two);
+    game.players[1]
+        .hand
+        .extend([lions.clone(), bolt.clone(), sinkhole.clone()]);
     cast_and_place_reveal_trigger(&mut game, 12_100, cards::SIN_COLLECTOR);
 
     pass_priority_pair(&mut game);
 
-    // Only the Bolt qualifies; the creature is not offered.
+    // The instant and sorcery qualify; the creature is not offered.
     let decision = game.observe(PlayerId::One).decision.unwrap();
     assert_eq!(decision.visibility, DecisionVisibility::Public);
     let offered: Vec<_> = decision
         .options
         .iter()
-        .filter_map(|option| option.card.map(|(_, definition)| definition))
+        .filter_map(|option| {
+            option
+                .card
+                .and_then(|(_, characteristics)| characteristics.card_definition())
+        })
         .collect();
-    assert_eq!(offered, vec![cards::LIGHTNING_BOLT]);
+    assert_eq!(offered, vec![cards::LIGHTNING_BOLT, cards::SINKHOLE]);
     assert_eq!(
         game.observe(PlayerId::One).last_seen_hand,
         Some((
             PlayerId::Two,
-            vec![(lions.id, lions.definition), (bolt.id, bolt.definition)],
+            vec![
+                (lions.id, lions.definition),
+                (bolt.id, bolt.definition),
+                (sinkhole.id, sinkhole.definition),
+            ],
         )),
         "revealing the hand exposes ineligible cards too",
     );
@@ -287,13 +302,24 @@ fn sin_collector_exiles_an_instant_or_sorcery_from_the_revealed_hand() {
         PlayerId::One,
         Action::ChooseDecision {
             decision: decision.id,
-            options: vec![decision.options[0].id],
+            options: vec![
+                decision
+                    .options
+                    .iter()
+                    .find(|option| {
+                        option.card.is_some_and(|(_, characteristics)| {
+                            characteristics.card_definition() == Some(cards::LIGHTNING_BOLT)
+                        })
+                    })
+                    .expect("the Bolt is a legal choice")
+                    .id,
+            ],
         },
     )
     .unwrap();
 
     assert_eq!(game.players[1].exile[0].definition, cards::LIGHTNING_BOLT);
-    assert_eq!(game.players[1].hand.len(), 1, "the creature stays");
+    assert_eq!(game.players[1].hand.len(), 2, "the other cards stay");
     assert!(
         game.players[1].graveyard.is_empty(),
         "exiled, not discarded"
@@ -359,7 +385,11 @@ fn lifebane_zombie_only_takes_green_or_white_creatures() {
     let offered: Vec<_> = decision
         .options
         .iter()
-        .filter_map(|option| option.card.map(|(_, definition)| definition))
+        .filter_map(|option| {
+            option
+                .card
+                .and_then(|(_, characteristics)| characteristics.card_definition())
+        })
         .collect();
     assert_eq!(offered, vec![cards::SAVANNAH_LIONS, cards::ARBOR_ELF]);
 
@@ -367,9 +397,9 @@ fn lifebane_zombie_only_takes_green_or_white_creatures() {
         .options
         .iter()
         .find(|option| {
-            option
-                .card
-                .is_some_and(|(_, card)| card == cards::ARBOR_ELF)
+            option.card.is_some_and(|(_, characteristics)| {
+                characteristics.card_definition() == Some(cards::ARBOR_ELF)
+            })
         })
         .expect("the green creature is eligible");
     game.apply(
@@ -463,8 +493,9 @@ fn sage_and_relic_barrier_use_the_shared_activated_ability_stack() {
             source: sage_id,
             ability: activated_ability_for(&game, sage_id, 0),
             targets: Vec::new(),
-            cost_object: Some(ring_id),
+            cost_objects: vec![ring_id],
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -490,8 +521,9 @@ fn sage_and_relic_barrier_use_the_shared_activated_ability_stack() {
             source: barrier_id,
             ability: activated_ability_for(&game, barrier_id, 0),
             targets: activated_targets(Target::Permanent(ring_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -538,7 +570,7 @@ fn migrated_upkeep_and_death_triggers_resolve_from_the_stack() {
         .iter()
         .find(|permanent| permanent.card.id == vampire_id)
         .unwrap();
-    assert_eq!(vampire.counters[CounterKind::PlusOnePlusOne.index()], 1);
+    assert_eq!(vampire.counters.count(CounterKind::PlusOnePlusOne), 1);
     assert_eq!(game.power(vampire), Some(5));
 }
 
@@ -563,17 +595,17 @@ fn state_based_actions_repeat_after_static_toughness_bonuses_disappear() {
 fn simultaneous_deaths_use_the_pre_exit_trigger_listener_snapshot() {
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::triggered(
         "Whenever a creature dies, you gain 1 life.",
-        TriggerEventDef::ZoneChanged {
-            object: ObjectPredicateDef::HasType(CardType::Creature),
-            from: Some(ZoneKind::Battlefield),
-            to: Some(ZoneKind::Graveyard),
-        },
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::HasType(CardType::Creature),
+            Some(ZoneKind::Battlefield),
+            Some(ZoneKind::Graveyard),
+        ),
         EffectDef::GainLife {
             recipient: EffectRecipientDef::Controller,
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_080);
+    let definition_id = CardDefinitionId::new(10_080);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test death listener",
@@ -610,17 +642,17 @@ fn simultaneous_deaths_use_the_pre_exit_trigger_listener_snapshot() {
 fn simultaneous_exits_keep_pre_exit_characteristics_for_trigger_matching() {
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::triggered(
         "Whenever a Mountain leaves the battlefield, you gain 1 life.",
-        TriggerEventDef::ZoneChanged {
-            object: ObjectPredicateDef::Subtype("Mountain"),
-            from: Some(ZoneKind::Battlefield),
-            to: Some(ZoneKind::Graveyard),
-        },
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::Subtype("Mountain"),
+            Some(ZoneKind::Battlefield),
+            Some(ZoneKind::Graveyard),
+        ),
         EffectDef::GainLife {
             recipient: EffectRecipientDef::Controller,
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_081);
+    let definition_id = CardDefinitionId::new(10_081);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test Mountain exit listener",
@@ -650,5 +682,8 @@ fn simultaneous_exits_keep_pre_exit_characteristics_for_trigger_matching() {
     game.move_permanents_to_graveyard(&[moon_id, taiga_id]);
 
     assert_eq!(game.pending_triggers.len(), 1);
-    assert_eq!(game.pending_triggers[0].context.object, Some(taiga_id));
+    assert_eq!(
+        game.pending_triggers[0].context.trigger.object,
+        Some(taiga_id)
+    );
 }

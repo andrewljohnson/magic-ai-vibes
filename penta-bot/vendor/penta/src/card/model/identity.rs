@@ -16,35 +16,160 @@ pub enum CardSet {
     TheDark,
     FallenEmpires,
     Promo1994,
+    FourthEdition,
     IceAge,
+    Chronicles,
+    Homelands,
+    Alliances,
     Mirage,
     Visions,
+    FifthEdition,
+    Weatherlight,
     Tempest,
     Stronghold,
+    Exodus,
     PortalSecondAge,
     UrzasSaga,
+    UrzasLegacy,
+    ClassicSixthEdition,
+    UrzasDestiny,
     MercadianMasques,
     Nemesis,
+    Prophecy,
     Invasion,
     Planeshift,
+    SeventhEdition,
     Apocalypse,
     Odyssey,
+    Torment,
     Judgment,
     Onslaught,
+    Legions,
+    Scourge,
+    Mirrodin,
     Darksteel,
+    FifthDawn,
+    ChampionsOfKamigawa,
+    BetrayersOfKamigawa,
+    MirrodinBesieged,
+    NewPhyrexia,
     PlanarChaos,
     FutureSight,
+    Lorwyn,
+    Conflux,
+    Zendikar,
+    Worldwake,
+    WarOfTheSpark,
+    ThroneOfEldraine,
+    TherosBeyondDeath,
+    ZendikarRising,
+    Shadowmoor,
+    Eventide,
+    ShardsOfAlara,
+    Ixalan,
+    Battlebond,
+    ScarsOfMirrodin,
+    Magic2011,
+    RiseOfTheEldrazi,
     Innistrad,
     DarkAscension,
     AvacynRestored,
+    Magic2012,
     Magic2013,
     ReturnToRavnica,
     Gatecrash,
     DragonsMaze,
     Magic2014,
+    Magic2020,
     Theros,
+    Planechase2012,
+    Commander2013,
+    JourneyIntoNyx,
+    Conspiracy,
+    Magic2015,
+    Commander2014,
     KhansOfTarkir,
+    DragonsOfTarkir,
+    Commander2015,
+    ModernHorizons1,
+    Kaldheim,
+    Commander2021,
+    StrixhavenSchoolOfMages,
     ModernHorizons2,
+    AdventuresInTheForgottenRealms,
+    InnistradMidnightHunt,
+    InnistradCrimsonVow,
+    InnistradCrimsonVowCommander,
+    Ikoria,
+    KamigawaNeonDynasty,
+    KamigawaNeonDynastyCommander,
+    StreetsOfNewCapenna,
+    StreetsOfNewCapennaCommander,
+    CommanderLegendsBattleForBaldursGate,
+    Dominaria,
+    DominariaUnited,
+    TheBrothersWar,
+    EternalMasters,
+    EldritchMoon,
+    ConspiracyTakeTheCrown,
+    Kaladesh,
+    AetherRevolt,
+    Amonkhet,
+    PhyrexiaAllWillBeOne,
+    PhyrexiaAllWillBeOneCommander,
+    MarchOfTheMachine,
+    LordOfTheRings,
+    LordOfTheRingsCommander,
+    WildsOfEldraine,
+    LostCavernsOfIxalan,
+    MurdersAtKarlovManor,
+    RavnicaClueEdition,
+    Fallout,
+    ModernHorizons3,
+    OutlawsOfThunderJunction,
+    TheBigScore,
+    ModernHorizons3Commander,
+    Bloomburrow,
+    BloomburrowCommander,
+    DuskmournHouseOfHorror,
+    DuskmournHouseOfHorrorCommander,
+    FoundationsJumpstart,
+    TarkirDragonstorm,
+    Aetherdrift,
+    FinalFantasy,
+    FinalFantasyCommander,
+    ThroughTheOmenpaths,
+    SaviorsOfKamigawa,
+    RavnicaCityOfGuilds,
+    Guildpact,
+    Dissension,
+    TimeSpiral,
+    AlaraReborn,
+    FateReforged,
+    BattleForZendikar,
+    MagicOrigins,
+    ShadowsOverInnistrad,
+    HourOfDevastation,
+    CoreSet2019,
+    RavnicaAllegiance,
+    Commander2020,
+    MagicFoundations,
+    AvatarTheLastAirbender,
+    EdgeOfEternities,
+    EdgeOfEternitiesCommander,
+    LorwynEclipsed,
+    SecretsOfStrixhaven,
+    TeenageMutantNinjaTurtles,
+    PortalThreeKingdoms,
+    Coldsnap,
+    BornOfTheGods,
+    Commander2017,
+    Commander2018,
+    CommanderLegends,
+    DominariaUnitedCommander,
+    MarchOfTheMachineCommander,
+    LostCavernsOfIxalanCommander,
+    GuildsOfRavnica,
     /// Tokens are game objects rather than printed cards. They live in the
     /// catalog so a client can look one up by definition, and belong to no
     /// set a format allows, so they are never deck-legal.
@@ -195,6 +320,20 @@ pub enum CardStructure {
         /// The play option that combines the parts, if the card has one.
         fused: Option<PlayOptionId>,
     },
+    /// A Room (CR 714): a split enchantment whose halves are doors that
+    /// unlock one at a time and stay on the same permanent.
+    ///
+    /// The doors are the halves as printed, and the other two parts are the
+    /// states the permanent can be in that no single door describes. A Room
+    /// on the battlefield has the characteristics of its unlocked doors
+    /// combined, so `combined` is that combination rather than a third
+    /// printed face, and `locked` is the enchantment with neither door open
+    /// -- which is what a Room that entered from anywhere but the stack is.
+    Room {
+        doors: Vec<CardPartId>,
+        combined: CardPartId,
+        locked: CardPartId,
+    },
     Flip {
         normal: CardPartId,
         flipped: CardPartId,
@@ -274,6 +413,22 @@ pub enum PlayRestriction {
     /// damage is about to be dealt, which is what makes Berserk a decision the
     /// defender can play around rather than a guaranteed blowout.
     BeforeCombatDamage,
+    /// "Cast this spell only during combat before blockers are declared." A
+    /// narrower window than [`Self::BeforeCombatDamage`]: it opens when combat
+    /// begins and shuts the moment blockers are on the table, which is what
+    /// makes pulling an attacker out of combat worth doing.
+    BeforeBlockersDeclared,
+    /// "Cast this spell only during an opponent's upkeep." Their turn, their
+    /// first step, before they have drawn or done anything with it.
+    OpponentsUpkeep,
+    /// "Cast this spell only during the declare attackers step." Either
+    /// player's, and open for the whole step -- before the attack is declared
+    /// and after, which is what makes it usable once the attackers are known.
+    DeclareAttackersStep,
+    /// "Cast this spell only during an opponent's turn after their upkeep
+    /// step." Their turn, and past the step where they would have untapped
+    /// and paid upkeeps -- so what it refills is spent on their turn.
+    OpponentsTurnAfterUpkeep,
 }
 
 /// A catalog-level description of what can occupy one target slot.
@@ -318,6 +473,11 @@ pub enum PlayerRelation {
     /// The player identified directly by the event, such as the player whose
     /// upkeep began or who cast a spell.
     EventPlayer,
+    /// Any player the event does not name. "More creatures than they do" is
+    /// asked about the player whose upkeep began, so the other side of the
+    /// comparison is everybody else -- which in a two-player game is their
+    /// opponent.
+    NotEventPlayer,
     /// The player the ability's own source chose as it entered. Only a
     /// permanent that made such a choice matches anyone at all.
     ChosenPlayer,
@@ -325,4 +485,7 @@ pub enum PlayerRelation {
     /// An Aura's own upkeep trigger fires on its host's turn, not its
     /// controller's, and the two differ the moment a host changes hands.
     ControllerOfAttachedPermanent,
+    /// The player the ability's source Aura is attached to. Unlike a chosen
+    /// player, this is a live attachment relation and can move.
+    EnchantedPlayer,
 }

@@ -1,4 +1,4 @@
-use super::tests::{creature, ready_game};
+use super::tests::{assassin_token, creature, is_token_with, ready_game};
 use super::*;
 use crate::card::cards;
 use crate::{CardInstanceId, HandcraftedPolicy, Policy};
@@ -10,6 +10,7 @@ fn card(id: u32, definition: CardDefinitionId, owner: PlayerId) -> CardInstance 
         owner,
         backing: ObjectBacking::Cards(vec![PhysicalCardId(id)]),
         characteristics: CharacteristicSource::Card(definition),
+        counters: crate::game::counters::Counters::new(),
     }
 }
 
@@ -50,8 +51,9 @@ fn loyalty_action(
         source,
         ability: loyalty_origin(definition, ability),
         targets,
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     }
 }
 
@@ -224,7 +226,7 @@ fn loyalty_activations_require_sorcery_timing_sufficient_loyalty_and_once_per_tu
     game.stack.push(StackObject {
         id: CardInstanceId(12_000),
         kind: StackObjectKind::Spell,
-        card: card(12_000, cards::MOUNTAIN, PlayerId::Two),
+        card: card(12_000, cards::MOUNTAIN, PlayerId::Two).into(),
         source: None,
         ability: None,
         controller: PlayerId::Two,
@@ -232,9 +234,14 @@ fn loyalty_activations_require_sorcery_timing_sufficient_loyalty_and_once_per_tu
         colors: None,
         chosen_permanents: Vec::new(),
         applied_effects: Vec::new(),
+        colors_of_mana_spent: ColorSet::empty(),
+        phyrexian_symbols_paid_with_life: 0,
         is_copy: false,
         text_changes: Vec::new(),
         cast_via_flashback: false,
+        cast_at_instant_speed: false,
+        cast_from_zone: None,
+        face_down: None,
     });
     assert!(!has_loyalty_action(&game, walker_id, 0));
     game.stack.clear();
@@ -386,13 +393,28 @@ fn domri_plus_one_reveals_a_top_creature_but_not_a_noncreature() {
 
     activate_loyalty(&mut game, walker_id, cards::DOMRI_RADE, 0, Vec::new());
     pass_priority_pair(&mut game);
-    assert!(game.pending_decisions.is_empty());
+    let decision = game
+        .pending_decisions
+        .first()
+        .expect("the private inspection remains visible to Domri's controller");
+    assert_eq!(
+        (decision.observation.minimum, decision.observation.maximum),
+        (0, 0)
+    );
+    assert_eq!(
+        decision.observation.options[0].members,
+        vec![(
+            GameObjectId(21_000),
+            ObjectCharacteristics::card(cards::MOUNTAIN, CardPartId::PRIMARY),
+        )],
+    );
+    choose_cards(&mut game, PlayerId::One, &[]);
     assert!(game.players[PlayerId::One.index()].hand.is_empty());
     assert_eq!(game.players[PlayerId::One.index()].library.len(), 1);
 }
 
 #[test]
-fn domri_minus_two_records_its_distinct_target_limitation() {
+fn domri_minus_two_will_not_fight_a_creature_with_itself() {
     let mut game = planeswalker_game();
     let walker = planeswalker(10_000, cards::DOMRI_RADE, PlayerId::One, 3);
     let walker_id = walker.card.id;
@@ -412,8 +434,8 @@ fn domri_minus_two_records_its_distinct_target_limitation() {
         ],
     );
     assert!(
-        game.legal_actions(PlayerId::One).contains(&same_creature),
-        "the partial target model cannot yet require another creature"
+        !game.legal_actions(PlayerId::One).contains(&same_creature),
+        "\"another target creature\" is a different creature"
     );
 
     activate_loyalty(
@@ -802,8 +824,13 @@ fn vraska_plus_one_retaliates_against_combat_damage_until_the_next_turn() {
     pass_priority_pair(&mut game);
     assert_eq!(
         permanent(&game, walker_id)
-            .temporary_granted_abilities
-            .len(),
+            .resolved_continuous_effects
+            .iter()
+            .filter(|effect| matches!(
+                effect.kind,
+                ResolvedContinuousEffectKind::Abilities(ResolvedAbilityOperation::Add { .. })
+            ))
+            .count(),
         1
     );
 
@@ -834,15 +861,24 @@ fn vraska_plus_one_retaliates_against_combat_damage_until_the_next_turn() {
     game.start_next_turn();
     assert_eq!(
         permanent(&game, walker_id)
-            .temporary_granted_abilities
-            .len(),
+            .resolved_continuous_effects
+            .iter()
+            .filter(|effect| matches!(
+                effect.kind,
+                ResolvedContinuousEffectKind::Abilities(ResolvedAbilityOperation::Add { .. })
+            ))
+            .count(),
         1
     );
     game.start_next_turn();
     assert!(
         permanent(&game, walker_id)
-            .temporary_granted_abilities
-            .is_empty()
+            .resolved_continuous_effects
+            .iter()
+            .all(|effect| !matches!(
+                effect.kind,
+                ResolvedContinuousEffectKind::Abilities(ResolvedAbilityOperation::Add { .. })
+            ))
     );
 }
 
@@ -914,16 +950,16 @@ fn vraska_ultimate_creates_assassins_whose_combat_damage_makes_a_player_lose() {
     let assassin_ids = game
         .battlefield
         .iter()
-        .filter(|permanent| permanent.card.definition == cards::ASSASSIN_TOKEN_1_1_BLACK)
+        .filter(|permanent| is_token_with(permanent, assassin_token()))
         .map(|permanent| permanent.card.id)
         .collect::<Vec<_>>();
     assert_eq!(assassin_ids.len(), 3);
     for assassin in &assassin_ids {
         let assassin = permanent(&game, *assassin);
-        assert!(game.is_token(assassin.card.definition));
+        assert!(assassin.card.definition.is_token());
         let rules = game
             .effective_rules(assassin)
-            .expect("the Assassin token has cataloged rules");
+            .expect("the Assassin token has inline rules");
         assert_eq!(rules.colors(), [false, false, true, false, false]);
         assert!(rules.has_subtype("Assassin"));
         assert_eq!(game.power(assassin), Some(1));

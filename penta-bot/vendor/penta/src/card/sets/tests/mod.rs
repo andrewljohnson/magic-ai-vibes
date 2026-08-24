@@ -1,28 +1,55 @@
 use std::collections::HashSet;
 
-use super::{CardRecord, SET_MODULES, y1993, y1994, y1996, y2002, y2004, y2011, y2012, y2013};
+use super::{
+    CardRecord, SET_MODULES, y1993, y1994, y1996, y1997, y1998, y2002, y2004, y2007, y2011, y2012,
+    y2013,
+};
 use crate::card::{
-    AbilityCostDef, AbilityDef, AbilityPredicateDef, AbilityProcedureDef, AddManaEffectDef,
-    AlternativeCastKindDef, AppliedEffectDef, BasicLandType, CardChoiceSourceDef, CardPrinting,
-    CardPrintingId, CardStructure, CardSupertype, CardType, ComparisonDef, ConditionDef,
-    DeclarativeAbilityDef, DoubleFacedKind, EffectDef, EffectDurationDef, EffectExecutionDef,
-    EffectRecipientDef, ImplementationStatus, KeywordAbility, ManaColor, ManaRestrictionDef,
-    ManaSelectionDef, ManaSpendEffectDef, ObjectPredicateDef, ObjectQueryDef, PlayActionKind,
-    PlayRestriction, PlayerRelation, ReplacementEffectDef, ReplacementEventDef, SpellForm,
-    TargetPredicate, TopCardSelectionDef, TriggerConditionDef, TriggerEventDef, TurnStepDef,
-    ValueDef, ZoneKind, ZoneMoveCauseDef, ZonePlacement, cards,
+    AbilityCostDef, AbilityDef, AbilityOperationDef, AbilityPredicateDef, AbilityProcedureDef,
+    AbilityProgramDef, AddManaEffectDef, AlternativeCastKindDef, AppliedEffectDef, BasicLandType,
+    CardChoiceSourceDef, CardDefinition, CardPrinting, CardPrintingId, CardStructure,
+    CardSupertype, CardType, CharacteristicOperationDef, ComparisonDef, ConditionDef,
+    DamagePreventionCapacityDef, DamagePreventionFollowUpDef, DamageRecipientMatcherDef,
+    DamageSourceMatcherDef, DeclarativeAbilityDef, DoubleFacedKind, EffectDef, EffectExecutionDef,
+    EffectPaymentDef, EffectRecipientDef, EffectRecipientSetDef, ImplementationStatus,
+    KeywordAbility, ManaColor, ManaRestrictionDef, ManaSelectionDef, ManaSpendEffectDef,
+    ObjectPredicateDef, ObjectQueryDef, ObjectRefDef, ObjectSetDef, PayOrDef, PlayActionKind,
+    PlayRestriction, PlayerRefDef, PlayerRelation, PlayerSetDef, PowerToughnessOperationDef,
+    ReplacementEffectDef, ReplacementEventDef, ResolvedEffectDurationDef, SetOperationDef,
+    SpellForm, TargetPredicate, TriggerConditionDef, TriggerEventDef, TurnStepDef, ValueDef,
+    ZoneKind, ZoneMoveCauseDef, ZonePlacement, cards,
 };
 use crate::{
     CardDefinitionId, CardPartId, CardSet, Format, ManaCost, ModeId, PlayOptionId, TargetSlotId,
 };
 
+fn ability_uses_custom_execution(ability: &AbilityDef) -> bool {
+    ability.effect.execution != EffectExecutionDef::Declarative
+        || ability
+            .modal()
+            .is_some_and(|modal| modal.modes.iter().any(ability_uses_custom_execution))
+}
+
+fn definition_uses_custom_execution(definition: &CardDefinition) -> bool {
+    definition.parts.iter().any(|part| {
+        part.rules
+            .ability_clauses()
+            .iter()
+            .any(ability_uses_custom_execution)
+    })
+}
+
 fn standard_records() -> Vec<&'static CardRecord> {
+    let allowed_sets = Format::IsdM14Standard
+        .set_definition()
+        .expect("Standard is set based")
+        .allowed_sets;
     let mut records = SET_MODULES
         .iter()
-        .filter(|module| Format::IsdRtrStandard.allows_set(module.set))
+        .filter(|module| allowed_sets.contains(&module.set))
         .flat_map(|module| module.cards.iter().copied())
         .collect::<Vec<_>>();
-    records.sort_unstable_by_key(|record| record.id);
+    records.sort_unstable_by_key(|record| record.id());
     records
 }
 
@@ -39,7 +66,7 @@ fn printings_for_set(set: CardSet) -> Vec<CardPrinting> {
     module
         .cards
         .iter()
-        .map(|record| CardPrinting::new(record.id, set))
+        .map(|record| CardPrinting::new(record.id(), set))
         .chain(
             module
                 .additional_printings
@@ -50,7 +77,7 @@ fn printings_for_set(set: CardSet) -> Vec<CardPrinting> {
 }
 
 mod catalog_report;
-mod isd_rtr_coverage;
+mod isd_m14_coverage;
 mod metadata_composition_mana;
 mod old_school_coverage;
 mod registry_integrity;

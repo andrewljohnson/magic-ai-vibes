@@ -183,7 +183,7 @@ fn kor_haven_prevents_damage_from_the_attacker_but_not_to_it() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_002, cards::SAVANNAH_LIONS, PlayerId::One);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     game.battlefield.extend([haven, attacker, blocker]);
     game.players[PlayerId::One.index()].mana_pool.white = 1;
@@ -195,8 +195,9 @@ fn kor_haven_prevents_damage_from_the_attacker_but_not_to_it() {
             source: haven_id,
             ability: activated_ability_for(&game, haven_id, 0),
             targets: activated_targets(Target::Permanent(attacker_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();

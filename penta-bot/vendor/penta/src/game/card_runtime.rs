@@ -246,6 +246,6 @@ impl CardRuntime<'_> {
             .copied()
             .filter(|id| self.game.permanent_controller(*id) == Some(player))
             .collect::<Vec<_>>();
-        self.game.move_permanents_to_graveyard(&controlled);
+        self.game.sacrifice_permanents(&controlled);
     }
 }

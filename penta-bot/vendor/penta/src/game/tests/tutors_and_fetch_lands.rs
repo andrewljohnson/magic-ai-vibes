@@ -41,7 +41,11 @@ fn enlightened_tutor_filters_reveals_and_puts_the_same_object_on_top() {
     let offered = decision
         .options
         .iter()
-        .filter_map(|option| option.card.map(|(_, definition)| definition))
+        .filter_map(|option| {
+            option
+                .card
+                .and_then(|(_, characteristics)| characteristics.card_definition())
+        })
         .collect::<Vec<_>>();
     assert!(offered.contains(&cards::BLACK_LOTUS));
     assert!(offered.contains(&cards::CRUSADE));
@@ -49,7 +53,13 @@ fn enlightened_tutor_filters_reveals_and_puts_the_same_object_on_top() {
     let lotus = decision
         .options
         .iter()
-        .find(|option| option.card == Some((GameObjectId(13_002), cards::BLACK_LOTUS)))
+        .find(|option| {
+            option.card
+                == Some((
+                    GameObjectId(13_002),
+                    ObjectCharacteristics::card(cards::BLACK_LOTUS, CardPartId::PRIMARY),
+                ))
+        })
         .unwrap()
         .id;
 
@@ -171,7 +181,9 @@ fn lilianas_shade_acceptance_still_allows_qualified_fail_to_find() {
     assert_eq!((search.minimum, search.maximum), (0, 1));
     assert_eq!(search.options.len(), 1);
     assert_eq!(
-        search.options[0].card.map(|(_, card)| card),
+        search.options[0]
+            .card
+            .and_then(|(_, characteristics)| characteristics.card_definition()),
         Some(cards::SWAMP)
     );
     game.apply(
@@ -338,7 +350,9 @@ fn each_onslaught_fetch_land_pays_its_cost_and_finds_the_named_land_types() {
             decision
                 .options
                 .iter()
-                .filter_map(|option| option.card.map(|(_, definition)| definition))
+                .filter_map(|option| option
+                    .card
+                    .and_then(|(_, characteristics)| characteristics.card_definition()))
                 .collect::<Vec<_>>(),
             vec![matching]
         );
@@ -348,6 +362,75 @@ fn each_onslaught_fetch_land_pays_its_cost_and_finds_the_named_land_types() {
             Action::ChooseDecision {
                 decision: decision.id,
                 options: vec![option],
+            },
+        )
+        .unwrap();
+
+        assert!(game.battlefield.iter().any(|permanent| {
+            permanent.controller == PlayerId::One && permanent.card.definition == matching
+        }));
+        assert_eq!(game.players[0].library.len(), 1);
+        assert_eq!(game.players[0].library[0].definition, off_pair);
+    }
+}
+
+#[test]
+fn each_zendikar_fetch_land_finds_its_enemy_pair_and_not_the_other_one() {
+    // The five enemy pairs, each with a dual that carries both named types
+    // and one that carries neither.
+    let cases = [
+        (cards::ARID_MESA, cards::PLATEAU, cards::TROPICAL_ISLAND),
+        (cards::MARSH_FLATS, cards::SCRUBLAND, cards::TAIGA),
+        (
+            cards::MISTY_RAINFOREST,
+            cards::TROPICAL_ISLAND,
+            cards::BADLANDS,
+        ),
+        (
+            cards::SCALDING_TARN,
+            cards::VOLCANIC_ISLAND,
+            cards::SAVANNAH,
+        ),
+        (cards::VERDANT_CATACOMBS, cards::BAYOU, cards::TUNDRA),
+    ];
+
+    for (fetch, matching, off_pair) in cases {
+        let mut game = ready_game();
+        let source = game.put_onto_battlefield(PlayerId::One, fetch).unwrap();
+        game.players[0].library.clear();
+        game.players[0].library.extend([
+            card(13_400, off_pair, PlayerId::One),
+            card(13_401, matching, PlayerId::One),
+        ]);
+        let action = game
+            .legal_actions(PlayerId::One)
+            .into_iter()
+            .find(|action| {
+                matches!(action, Action::ActivateAbility { source: actual, .. } if *actual == source)
+            })
+            .unwrap_or_else(|| panic!("fetch ability was not offered for {fetch:?}"));
+
+        game.apply(PlayerId::One, action).unwrap();
+        assert_eq!(game.players[0].life, 19, "the life is paid as a cost");
+
+        pass_priority_pair(&mut game);
+        let decision = game.observe(PlayerId::One).decision.unwrap();
+        assert_eq!(
+            decision
+                .options
+                .iter()
+                .filter_map(|option| option
+                    .card
+                    .and_then(|(_, characteristics)| characteristics.card_definition()))
+                .collect::<Vec<_>>(),
+            vec![matching],
+            "only the land carrying both named types is offered"
+        );
+        game.apply(
+            PlayerId::One,
+            Action::ChooseDecision {
+                decision: decision.id,
+                options: vec![decision.options[0].id],
             },
         )
         .unwrap();
@@ -392,7 +475,13 @@ fn a_fetch_finishes_the_lands_as_enters_choice_before_shuffling() {
     let fountain = search
         .options
         .iter()
-        .find(|option| option.card == Some((GameObjectId(13_312), cards::HALLOWED_FOUNTAIN)))
+        .find(|option| {
+            option.card
+                == Some((
+                    GameObjectId(13_312),
+                    ObjectCharacteristics::card(cards::HALLOWED_FOUNTAIN, CardPartId::PRIMARY),
+                ))
+        })
         .expect("Flooded Strand finds a Plains Island")
         .id;
     game.apply(

@@ -36,7 +36,13 @@ const ID_FIELDS: &[&str] = &[
 ];
 
 /// The same, for fields holding a list of bare object ids.
-const ID_LIST_FIELDS: &[&str] = &["cards", "chosenPermanents", "permanents", "sacrifices"];
+const ID_LIST_FIELDS: &[&str] = &[
+    "cards",
+    "chosenPermanents",
+    "costObjects",
+    "permanents",
+    "sacrifices",
+];
 
 #[test]
 #[ignore = "slow decision-boundary reconstruction audit"]
@@ -45,13 +51,21 @@ fn a_reconstructed_game_stays_in_step_with_the_host_as_both_play_forward() {
     let mut trajectories = 0_usize;
     let mut steps = 0_usize;
 
-    for format in [crate::Format::OldSchool9394, crate::Format::IsdRtrStandard] {
+    // Every format with a registered deck, so a format is not left walking
+    // only its own card pool's happy path. Premodern carries two lists today
+    // and picks up the rest as they are promoted.
+    let formats = [
+        crate::Format::OldSchool9394,
+        crate::Format::IsdM14Standard,
+        crate::Format::Premodern,
+    ];
+    for (format_index, format) in formats.into_iter().enumerate() {
         let decks = crate::protocol::deck_names_for_format(format);
         for (index, name) in decks.iter().enumerate() {
             let opposing = decks[(index * 5 + 2) % decks.len()];
             let seed = 90_000
                 + u64::try_from(index).expect("deck index fits") * 173
-                + u64::from(format != crate::Format::OldSchool9394) * 6_101;
+                + u64::try_from(format_index).expect("format index fits") * 6_101;
             steps += walk_one_trajectory(&catalog, format, [name, opposing], seed);
             trajectories += 1;
         }
@@ -216,8 +230,9 @@ fn seat_wire(game: &Game, viewer: PlayerId) -> Value {
 /// effect that discards at random -- Hymn to Tourach -- takes a different card
 /// out of a hand. Neither is a reconstruction bug; the rollout seed is
 /// deliberately not the host seed.
-fn hidden_state(game: &Game) -> Vec<Vec<u16>> {
-    let definitions = |cards: &[CardInstance]| cards.iter().map(|card| card.definition.0).collect();
+fn hidden_state(game: &Game) -> Vec<Vec<u64>> {
+    let definitions =
+        |cards: &[CardInstance]| cards.iter().map(|card| card.definition.get()).collect();
     game.players
         .iter()
         .flat_map(|player| [definitions(&player.hand), definitions(&player.library)])

@@ -1,45 +1,11 @@
 use super::{
-    CardChoiceSourceDef, CardInstance, DecisionContinuation, DecisionOption, DecisionPreference,
-    DecisionVisibility, DecisionZone, Game, GameObjectId, ObjectPredicateDef, PlayerId, ZoneKind,
-    ZonePlacement,
+    CardChoiceSourceDef, CardInstance, CardPartId, DecisionContinuation, DecisionOption,
+    DecisionPreference, DecisionVisibility, DecisionZone, EffectResolutionContext, Game,
+    GameObjectId, ObjectCharacteristics, ObjectPredicateDef, PlayerId, ScopedEffect,
+    SearchFollowUp, StackObject, ZoneKind, ZonePlacement,
 };
 
 impl Game {
-    /// Offers the top card of a library to its owner when it matches. Only a
-    /// matching card is ever shown, because a non-matching card stays secret.
-    pub(super) fn queue_top_card_offer(
-        &mut self,
-        player: PlayerId,
-        predicate: ObjectPredicateDef,
-        source: GameObjectId,
-    ) {
-        let Some(top) = self.players[player.index()].library.last() else {
-            return;
-        };
-        if !self.card_object_matches(predicate, top, ZoneKind::Library, source) {
-            return;
-        }
-        let options = self.card_decision_options(std::slice::from_ref(top), DecisionZone::Library);
-        self.queue_decision(
-            player,
-            "Reveal the top card and put it into your hand?",
-            DecisionVisibility::Private,
-            DecisionPreference::HigherCardValue,
-            0..=1,
-            false,
-            options,
-            DecisionContinuation::SearchZone {
-                controller: player,
-                source: ZoneKind::Library,
-                destination: ZoneKind::Hand,
-                placement: ZonePlacement::Top,
-                reveal: true,
-                shuffle: false,
-                enters_tapped: false,
-            },
-        );
-    }
-
     /// Offers a search over the cards a predicate admits. Hidden-zone choices
     /// stay private; graveyards and exile are already public information.
     #[allow(clippy::too_many_arguments)]
@@ -54,6 +20,8 @@ impl Game {
         destination: ZoneKind,
         placement: ZonePlacement,
         shuffle: bool,
+        binding: Option<crate::ids::ObjectSetBindingIndex>,
+        follow_up: Option<(StackObject, EffectResolutionContext, ScopedEffect)>,
         enters_tapped: bool,
         source: GameObjectId,
         controller: PlayerId,
@@ -88,7 +56,10 @@ impl Game {
                     .catalog
                     .get(card.definition)
                     .map_or_else(|| "Unknown card".into(), |card| card.name.clone()),
-                card: Some((card.id, card.definition)),
+                card: Some((
+                    card.id,
+                    ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                )),
                 members: Vec::new(),
                 ability_text: None,
                 zone: decision_zone,
@@ -122,6 +93,14 @@ impl Game {
                 reveal,
                 shuffle,
                 enters_tapped,
+                binding,
+                follow_up: follow_up.map(|(object, context, effect)| {
+                    Box::new(SearchFollowUp {
+                        object,
+                        context,
+                        effect,
+                    })
+                }),
             },
         );
     }
@@ -140,6 +119,7 @@ impl Game {
         reveal: bool,
         destination: ZoneKind,
         placement: ZonePlacement,
+        arrival: Option<(StackObject, EffectResolutionContext, ScopedEffect)>,
         source: GameObjectId,
         controller: PlayerId,
     ) {
@@ -186,7 +166,10 @@ impl Game {
                         .catalog
                         .get(card.definition)
                         .map_or_else(|| "Unknown card".into(), |card| card.name.clone()),
-                    card: Some((card.id, card.definition)),
+                    card: Some((
+                        card.id,
+                        ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                    )),
                     members: Vec::new(),
                     ability_text: None,
                     zone,
@@ -224,6 +207,13 @@ impl Game {
                 destination,
                 placement,
                 reveal,
+                arrival: arrival.map(|(object, context, effect)| {
+                    Box::new(SearchFollowUp {
+                        object,
+                        context,
+                        effect,
+                    })
+                }),
             },
         );
     }

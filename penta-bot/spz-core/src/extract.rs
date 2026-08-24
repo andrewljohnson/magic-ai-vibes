@@ -7,6 +7,27 @@
 use penta::protocol::protocol_actions;
 use penta::{Action, PlayerId, PlayerObservation};
 
+/// A permanent's printed card definition as a raw id, or None.
+///
+/// Protocol 29 replaced `PermanentObservation::definition` with
+/// `characteristics: ObjectCharacteristics`, an enum -- only its `Card`
+/// variant carries a definition, because a token, emblem or face-down
+/// object has no printed card behind it. Every read now has to decide what
+/// None means; here it means "not a card we have a feature slot for", and
+/// the caller skips it exactly as it skipped an unknown definition before.
+/// Same, but as a plain id with 0 meaning "no printed card". 0 is never a
+/// valid definition id (they are NonZeroU64), so it simply misses every
+/// lookup -- which is the old behaviour for an unknown definition.
+#[inline]
+pub fn perm_def_or(p: &penta::PermanentObservation) -> u16 {
+    perm_def(p).unwrap_or(0)
+}
+
+#[inline]
+pub fn perm_def(p: &penta::PermanentObservation) -> Option<u16> {
+    p.characteristics.card_definition().map(|d| d.get() as u16)
+}
+
 use crate::tables::{Tables, N_COST_BUCKETS};
 #[cfg(test)]
 use crate::tables::STEPS;
@@ -30,23 +51,23 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
 
     // -- v1 per-definition counts ---------------------------------------
     for (_, def) in &obs.hand {
-        if let Some(&i) = t.def_slot.get(&def.0) {
+        if let Some(&i) = t.def_slot.get(&(def.get() as u16)) {
             v[i] += 0.25;
         }
     }
     for perm in &obs.battlefield {
         let base = if perm.controller == me { c } else { 2 * c };
-        if let Some(&i) = t.def_slot.get(&perm.definition.0) {
+        if let Some(&i) = perm_def(perm).and_then(|d| t.def_slot.get(&d)) {
             v[base + i] += 0.25;
         }
     }
     for (_, def) in &obs.graveyards[mi] {
-        if let Some(&i) = t.def_slot.get(&def.0) {
+        if let Some(&i) = t.def_slot.get(&(def.get() as u16)) {
             v[3 * c + i] += 0.25;
         }
     }
     for (_, def) in &obs.graveyards[oi] {
-        if let Some(&i) = t.def_slot.get(&def.0) {
+        if let Some(&i) = t.def_slot.get(&(def.get() as u16)) {
             v[4 * c + i] += 0.25;
         }
     }
@@ -55,7 +76,8 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
     let mut agg = [[0f32; 6]; 2]; // [me,opp][creatures,power,tough,untapped,untapped_lands,attackers]
     for perm in &obs.battlefield {
         let side = if perm.controller == me { 0 } else { 1 };
-        let kind = t.kind.get(&perm.definition.0).map(String::as_str).unwrap_or("");
+        let kind = perm_def(perm).and_then(|d| t.kind.get(&d))
+            .map(String::as_str).unwrap_or("");
         let is_creature = perm.power.is_some()
             || kind == "Creature" || kind == "ArtifactCreature";
         if is_creature {
@@ -104,10 +126,10 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
     let hand_def: std::collections::HashMap<u32, u16> = obs
         .hand
         .iter()
-        .map(|(id, d)| (id.0, d.0))
+        .map(|(id, d)| (id.0, d.get() as u16))
         .collect();
     for (_, d) in &obs.hand {
-        v[base + c + t.cost_bucket(d.0)] += 0.25;
+        v[base + c + t.cost_bucket(d.get() as u16)] += 0.25;
     }
     let actions = if obs.legal_actions.is_empty() {
         Vec::new()
@@ -140,7 +162,7 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
         let side = if perm.controller == me { 0 } else { 1 };
         if let Some(p) = perm.power {
             power[side] += f32::from(p);
-            if t.flying.contains(&perm.definition.0) {
+            if t.flying.contains(&perm_def_or(perm)) {
                 flying[side] += f32::from(p);
             }
         }
@@ -178,28 +200,29 @@ pub fn features(obs: &PlayerObservation, pregame: bool, t: &Tables,
         let mut my_seen = vec![0i32; c];
         let mut opp_seen = vec![0i32; c];
         for (_, d) in &obs.hand {
-            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+            if let Some(&i) = t.def_slot.get(&(d.get() as u16)) { my_seen[i] += 1; }
         }
         for perm in &obs.battlefield {
-            if let Some(&i) = t.def_slot.get(&perm.definition.0) {
+            if let Some(&i) = perm_def(perm).and_then(|d| t.def_slot.get(&d)) {
                 if perm.controller == me { my_seen[i] += 1; }
                 else { opp_seen[i] += 1; }
             }
         }
         for (_, d) in &obs.graveyards[mi] {
-            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+            if let Some(&i) = t.def_slot.get(&(d.get() as u16)) { my_seen[i] += 1; }
         }
         for (_, d) in &obs.graveyards[oi] {
-            if let Some(&i) = t.def_slot.get(&d.0) { opp_seen[i] += 1; }
+            if let Some(&i) = t.def_slot.get(&(d.get() as u16)) { opp_seen[i] += 1; }
         }
         for (_, d) in &obs.exiles[mi] {
-            if let Some(&i) = t.def_slot.get(&d.0) { my_seen[i] += 1; }
+            if let Some(&i) = t.def_slot.get(&(d.get() as u16)) { my_seen[i] += 1; }
         }
         for (_, d) in &obs.exiles[oi] {
-            if let Some(&i) = t.def_slot.get(&d.0) { opp_seen[i] += 1; }
+            if let Some(&i) = t.def_slot.get(&(d.get() as u16)) { opp_seen[i] += 1; }
         }
         for obj in &obs.stack {
-            if let Some(&i) = t.def_slot.get(&obj.definition.0) {
+            if let Some(&i) = obj.characteristics.card_definition()
+                .and_then(|d| t.def_slot.get(&(d.get() as u16))) {
                 if obj.controller == me { my_seen[i] += 1; }
                 else { opp_seen[i] += 1; }
             }

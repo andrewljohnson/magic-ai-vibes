@@ -64,7 +64,7 @@ fn undying_returns_the_creature_once_with_a_counter() {
     );
     let returned = &game.battlefield[0];
     assert_eq!(
-        returned.counters[CounterKind::PlusOnePlusOne.index()],
+        returned.counters.count(CounterKind::PlusOnePlusOne),
         1,
         "with a +1/+1 counter"
     );
@@ -132,7 +132,10 @@ fn undying_return_finishes_entry_replacements_before_publishing_entry_triggers()
     assert!(game.events()[event_start..].iter().all(|event| !matches!(
         event,
         GameEvent::AbilityTriggered {
-            definition: cards::AUGUR_OF_BOLAS,
+            presentation: ObjectCharacteristics::Card {
+                definition: cards::AUGUR_OF_BOLAS,
+                ..
+            },
             ..
         }
     )));
@@ -157,7 +160,10 @@ fn undying_return_finishes_entry_replacements_before_publishing_entry_triggers()
     assert!(game.events()[event_start..].iter().any(|event| matches!(
         event,
         GameEvent::AbilityTriggered {
-            definition: cards::AUGUR_OF_BOLAS,
+            presentation: ObjectCharacteristics::Card {
+                definition: cards::AUGUR_OF_BOLAS,
+                ..
+            },
             ..
         }
     )));
@@ -198,7 +204,7 @@ fn a_javelin_counter_is_not_a_plus_one_counter() {
         .iter()
         .find(|permanent| permanent.card.id == id)
         .expect("the entry replacement committed");
-    assert_eq!(javelineers.counters(CounterKind::Javelin), 1);
+    assert_eq!(javelineers.counters(CounterKind::named("javelin")), 1);
     assert_eq!(
         game.power(javelineers),
         Some(1),

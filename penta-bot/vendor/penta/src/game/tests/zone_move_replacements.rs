@@ -1,4 +1,6 @@
 use super::*;
+use crate::ObjectSetBindingIndex;
+use crate::card::DestroyFollowUpDef;
 
 fn setup_nexus_and_rest_in_peace() -> (Game, GameObjectId, GameObjectId) {
     let mut game = ready_game();
@@ -123,18 +125,16 @@ fn a_simultaneously_exiting_rest_in_peace_still_competes_with_nexus() {
         .decision
         .expect("the frozen Rest in Peace still replaces the Nexus move");
     assert_eq!(decision.options.len(), 2);
-    assert!(
-        decision
-            .options
-            .iter()
-            .any(|option| option.card == Some((rest, cards::REST_IN_PEACE)))
-    );
-    assert!(
-        decision
-            .options
-            .iter()
-            .any(|option| option.card == Some((nexus, cards::UGINS_NEXUS)))
-    );
+    assert!(decision.options.iter().any(|option| option.card
+        == Some((
+            rest,
+            ObjectCharacteristics::card(cards::REST_IN_PEACE, CardPartId::PRIMARY)
+        ))));
+    assert!(decision.options.iter().any(|option| option.card
+        == Some((
+            nexus,
+            ObjectCharacteristics::card(cards::UGINS_NEXUS, CardPartId::PRIMARY)
+        ))));
 
     choose_replacement_from(&mut game, PlayerId::One, nexus);
 
@@ -234,6 +234,48 @@ fn divine_offering_waits_for_ugins_nexus_replacement_before_gaining_life() {
 }
 
 #[test]
+fn destroy_outcome_followup_waits_for_replacements_and_counts_only_graveyard_moves() {
+    static FOLLOWUP_EFFECTS: [EffectDef; 2] = [
+        EffectDef::GainLife {
+            recipient: EffectRecipientDef::Controller,
+            amount: ValueDef::Constant(1),
+        },
+        EffectDef::GainLife {
+            recipient: EffectRecipientDef::Controller,
+            amount: ValueDef::BoundObjectCount(ObjectSetBindingIndex::PRIMARY),
+        },
+    ];
+    const DESTROY_AND_COUNT: EffectDef = EffectDef::Destroy {
+        object: EffectRecipientDef::matching_objects(
+            ObjectPredicateDef::HasType(CardType::Artifact),
+            &[ZoneKind::Battlefield],
+            PlayerRelation::Any,
+        ),
+        can_regenerate: true,
+        then: Some(DestroyFollowUpDef {
+            binding: ObjectSetBindingIndex::PRIMARY,
+            effect: &EffectDef::Sequence(&FOLLOWUP_EFFECTS),
+        }),
+    };
+
+    let (mut game, _nexus, rest) = setup_nexus_and_rest_in_peace();
+    let object = spell(20_001, cards::PARASELENE, PlayerId::One, 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(DESTROY_AND_COUNT),
+        &object,
+        TriggerContext::empty(),
+    );
+
+    assert_eq!(game.players[PlayerId::One.index()].life, 20);
+    choose_replacement_from(&mut game, PlayerId::One, rest);
+    assert_eq!(
+        game.players[PlayerId::One.index()].life,
+        21,
+        "the follow-up ran, but the permanent exiled instead was not counted",
+    );
+}
+
+#[test]
 fn activated_ability_resolves_only_after_ugins_nexus_replacement_choice() {
     let (mut game, nexus, rest) = setup_nexus_and_rest_in_peace();
     let vraska = game
@@ -246,8 +288,9 @@ fn activated_ability_resolves_only_after_ugins_nexus_replacement_choice() {
             source: vraska,
             ability: activated_ability_for(&game, vraska, 1),
             targets: activated_targets(Target::Permanent(nexus)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .expect("Vraska can target Ugin's Nexus");
@@ -268,12 +311,13 @@ fn activated_ability_resolves_only_after_ugins_nexus_replacement_choice() {
 #[test]
 fn custom_spell_followup_waits_for_ugins_nexus_replacement_choice() {
     const DESTROY_ARTIFACTS: EffectDef = EffectDef::Destroy {
-        object: EffectRecipientDef::MatchingObjects {
-            object: ObjectPredicateDef::HasType(CardType::Artifact),
-            zones: &[ZoneKind::Battlefield],
-            controller: PlayerRelation::Any,
-        },
+        object: EffectRecipientDef::matching_objects(
+            ObjectPredicateDef::HasType(CardType::Artifact),
+            &[ZoneKind::Battlefield],
+            PlayerRelation::Any,
+        ),
         can_regenerate: true,
+        then: None,
     };
 
     let (mut game, nexus, rest) = setup_nexus_and_rest_in_peace();
@@ -288,20 +332,21 @@ fn custom_spell_followup_waits_for_ugins_nexus_replacement_choice() {
     object.ability = Some(StackAbilityPayload {
         origin: primary_ability(cards::CHAIN_LIGHTNING),
         definition: None,
-        presentation_definition: cards::CHAIN_LIGHTNING,
+        presentation: ObjectCharacteristics::card(cards::CHAIN_LIGHTNING, CardPartId::PRIMARY),
         text: Some("Test declarative effect with custom follow-up"),
         target_defs: Vec::new(),
         targets: vec![TargetSelection::single(
             TargetSlotId(0),
             Target::Player(PlayerId::Two),
         )],
-        context: TriggerContext::empty(),
+        context: TriggerContext::empty().into(),
         resolver: StackAbilityResolver::DeclarativeWithCustomFollowup {
             effect: ScopedEffect::primary(DESTROY_ARTIFACTS),
             behavior: CardBehavior::ChainLightning,
         },
         condition: None,
         mode_effects: Vec::new(),
+        resolution_destination: None,
         x: 0,
     });
     game.stack.push(object);
@@ -344,8 +389,9 @@ fn sacrifice_cost_finishes_only_after_ugins_nexus_replacement_choice() {
             source: claws,
             ability: activated_ability_for(&game, claws, 0),
             targets: Vec::new(),
-            cost_object: Some(nexus),
+            cost_objects: vec![nexus],
             x: 0,
+            modes: Vec::new(),
         },
     )
     .expect("Ugin's Nexus can be sacrificed to Claws of Gix");

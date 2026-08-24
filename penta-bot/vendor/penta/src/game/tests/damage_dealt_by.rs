@@ -1,9 +1,7 @@
-//! "Whenever this deals damage" — the direction the existing damage trigger
-//! did not watch.
-//!
-//! `DamageDealt` only ever matched damage arriving at the ability's own
-//! source, whatever predicate it named. These drive the other way round, and
-//! the Aura case drives it through a host rather than the source itself.
+//! "Whenever this deals damage" uses the source axis of the canonical damage
+//! event. Incoming-damage clauses use its recipient axis instead; the Aura
+//! case names an attached host on the same event rather than adding another
+//! direction-specific event kind.
 
 use super::*;
 use crate::ImplementationStatus;

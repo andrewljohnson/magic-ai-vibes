@@ -14,6 +14,9 @@ fn trigger_placement_preserves_the_nonactive_players_priority() {
             source: CardInstanceId(10_000),
             ability: mana_ability_for(&game, CardInstanceId(10_000), ManaColor::Blue),
             color: ManaColor::Blue,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -113,6 +116,9 @@ fn city_trigger_can_be_answered_when_mana_was_floated_first() {
             source: CardInstanceId(10_000),
             ability: mana_ability_for(&game, CardInstanceId(10_000), ManaColor::Red),
             color: ManaColor::Red,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -176,8 +182,9 @@ fn a_resolving_tap_effect_uses_the_same_city_trigger_path() {
         source: CardInstanceId(10_000),
         ability: activated_ability_for(&game, CardInstanceId(10_000), 0),
         targets: activated_targets(Target::Permanent(CardInstanceId(10_001))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&activation));
     game.apply(PlayerId::One, activation).unwrap();
@@ -291,11 +298,12 @@ fn targeted_trigger_chooses_public_targets_while_being_put_on_stack() {
             object: CardInstanceId(10_000),
             ability: primary_ability(cards::ANKH_OF_MISHRA),
         },
-        definition: cards::ANKH_OF_MISHRA,
+        presentation: ObjectCharacteristics::card(cards::ANKH_OF_MISHRA, CardPartId::PRIMARY),
         owner: PlayerId::One,
         controller: PlayerId::One,
         text: "Deal 2 damage to target creature an opponent controls.",
-        target_defs: &TARGETS,
+        target_defs: TARGETS.to_vec(),
+        targets: Vec::new(),
         effect: EffectDef::DealDamage {
             recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
             amount: ValueDef::Constant(2),
@@ -306,12 +314,15 @@ fn targeted_trigger_chooses_public_targets_while_being_put_on_stack() {
         })),
         context: TriggerContext {
             object: None,
-            chosen_objects: [None; 8],
             object_controller: None,
             event_player: None,
             amount: None,
-        },
+            damaged_object: None,
+        }
+        .into(),
         condition: None,
+        modes: None,
+        x: 0,
     });
     game.finish_rules_procedure();
 
@@ -401,19 +412,28 @@ fn su_chi_mana_and_source_power_use_ordinary_stack_and_lki() {
     assert_eq!(game.players[0].mana_pool.colorless, 4);
 
     let mut game = ready_game();
-    let mut source = creature(10_010, cards::SAVANNAH_LIONS, PlayerId::One);
-    source.power_bonus = 3;
+    let source = creature(10_010, cards::SAVANNAH_LIONS, PlayerId::One);
     game.battlefield.push(source);
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_010),
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(3),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
     game.capture_trigger(&TriggerCapture {
         source: AbilitySourceRef {
             object: CardInstanceId(10_010),
             ability: primary_ability(cards::SAVANNAH_LIONS),
         },
-        definition: cards::SAVANNAH_LIONS,
+        presentation: ObjectCharacteristics::card(cards::SAVANNAH_LIONS, CardPartId::PRIMARY),
         owner: PlayerId::One,
         controller: PlayerId::One,
         text: "Deal damage equal to this creature's power.",
-        target_defs: &[],
+        target_defs: Vec::new(),
+        targets: Vec::new(),
         effect: EffectDef::DealDamage {
             recipient: EffectRecipientDef::Opponent,
             amount: ValueDef::SourcePower,
@@ -424,12 +444,15 @@ fn su_chi_mana_and_source_power_use_ordinary_stack_and_lki() {
         })),
         context: TriggerContext {
             object: Some(CardInstanceId(10_010)),
-            chosen_objects: [None; 8],
             object_controller: Some(PlayerId::One),
             event_player: Some(PlayerId::One),
             amount: None,
-        },
+            damaged_object: None,
+        }
+        .into(),
         condition: None,
+        modes: None,
+        x: 0,
     });
     game.destroy_permanent(CardInstanceId(10_010));
     game.finish_rules_procedure();
@@ -449,6 +472,9 @@ fn workshop_mana_is_three_individual_values_restricted_to_artifact_spells() {
             source: CardInstanceId(10_000),
             ability,
             color: ManaColor::Colorless,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -472,11 +498,11 @@ fn workshop_mana_is_three_individual_values_restricted_to_artifact_spells() {
 #[test]
 fn explicitly_tagged_triggered_mana_ability_resolves_without_the_stack() {
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::triggered_mana(
-        "Whenever this becomes tapped, add {C}.",
-        TriggerEventDef::BecomesTapped(ObjectPredicateDef::Source),
+        "Whenever this is tapped for mana, add {C}.",
+        TriggerEventDef::tapped_for_mana(ObjectPredicateDef::Source),
         EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
     )];
-    let definition_id = CardDefinitionId(10_050);
+    let definition_id = CardDefinitionId::new(10_050);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test triggered mana source",
@@ -492,7 +518,7 @@ fn explicitly_tagged_triggered_mana_ability_resolves_without_the_stack() {
     game.battlefield
         .push(creature(10_050, definition_id, PlayerId::One));
 
-    let _ = game.tap_permanent(CardInstanceId(10_050));
+    let _ = game.tap_permanent_for_mana(CardInstanceId(10_050));
 
     assert_eq!(game.players[0].mana_pool.colorless, 1);
     assert_eq!(game.players[0].mana.len(), 1);
@@ -503,7 +529,7 @@ fn explicitly_tagged_triggered_mana_ability_resolves_without_the_stack() {
 #[test]
 fn a_mana_spend_rider_attaches_to_the_paid_spell_with_its_source() {
     static RIDERS: [ManaSpendEffectDef; 1] = [ManaSpendEffectDef::ApplyToPaidSpell(
-        crate::AppliedEffectDef::CannotBeCountered,
+        crate::AppliedEffectDef::Rule(crate::AppliedRuleDef::CannotBeCountered),
     )];
     let mut object = spell(77, cards::SAVANNAH_LIONS, PlayerId::One, 0);
     let mana = Mana::from_ability(
@@ -526,6 +552,6 @@ fn a_mana_spend_rider_attaches_to_the_paid_spell_with_its_source() {
     assert_eq!(object.applied_effects[0].source, mana.source);
     assert_eq!(
         object.applied_effects[0].effect,
-        crate::AppliedEffectDef::CannotBeCountered
+        crate::AppliedEffectDef::Rule(crate::AppliedRuleDef::CannotBeCountered)
     );
 }

@@ -48,8 +48,9 @@ fn goblin_sharpshooter_pings_a_creature_then_untaps_when_it_dies() {
             source: sharpshooter_id,
             ability: activated_ability_for(&game, sharpshooter_id, 0),
             targets: activated_targets(Target::Permanent(victim_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -112,8 +113,9 @@ fn sylvan_safekeeper_sacrifices_a_land_and_grants_true_shroud() {
             source: safekeeper_id,
             ability: activated_ability_for(&game, safekeeper_id, 0),
             targets: activated_targets(Target::Permanent(protected_id)),
-            cost_object: Some(land_id),
+            cost_objects: vec![land_id],
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -136,11 +138,11 @@ fn sylvan_safekeeper_sacrifices_a_land_and_grants_true_shroud() {
     let bolt_id = bolt.id;
     game.players[PlayerId::Two.index()].hand.push(bolt);
     assert!(
-        !game.permanent_can_be_targeted_by(protected, PlayerId::Two, bolt_id),
+        !game.permanent_can_be_targeted_by(protected, PlayerId::Two, bolt_id, true),
         "shroud prevents opponents from targeting the creature"
     );
     assert!(
-        !game.permanent_can_be_targeted_by(protected, PlayerId::One, bolt_id),
+        !game.permanent_can_be_targeted_by(protected, PlayerId::One, bolt_id, true),
         "unlike hexproof, shroud also prevents its controller from targeting it"
     );
 }
@@ -160,8 +162,9 @@ fn claws_of_gix_sacrifices_the_chosen_permanent_before_gaining_life() {
             source,
             ability: activated_ability_for(&game, source, 0),
             targets: Vec::new(),
-            cost_object: Some(fodder_id),
+            cost_objects: vec![fodder_id],
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();

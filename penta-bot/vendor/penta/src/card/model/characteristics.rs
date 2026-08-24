@@ -40,6 +40,21 @@ impl ManaColor {
         Self::Colorless,
     ];
 
+    /// This type's position in [`ManaColor::ALL`]. Unlike
+    /// [`Self::color_index`], colorless has one: it is a mana type, and a
+    /// mana pool holds it like any other.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::White => 0,
+            Self::Blue => 1,
+            Self::Black => 2,
+            Self::Red => 3,
+            Self::Green => 4,
+            Self::Colorless => 5,
+        }
+    }
+
     #[must_use]
     pub const fn color_index(self) -> Option<usize> {
         match self {
@@ -50,6 +65,55 @@ impl ManaColor {
             Self::Green => Some(4),
             Self::Colorless => None,
         }
+    }
+}
+
+/// How many mana of each type one activation produces, for the abilities
+/// whose printed amount is split across types rather than fixed to one --
+/// "add three mana in any combination of {U} and/or {R}".
+///
+/// Counts are indexed by [`ManaColor::ALL`], so the split is a plain value:
+/// a mana ability resolves without ever holding priority, so the way the
+/// amount is divided is enumerated into the activation rather than asked
+/// afterwards, exactly as a counter size or a sacrificed permanent already
+/// is.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ManaSplit([u16; ManaColor::ALL.len()]);
+
+impl ManaSplit {
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self([0; ManaColor::ALL.len()])
+    }
+
+    #[must_use]
+    pub const fn get(self, color: ManaColor) -> u16 {
+        self.0[color.index()]
+    }
+
+    pub const fn add(&mut self, color: ManaColor, amount: u16) {
+        self.0[color.index()] += amount;
+    }
+
+    #[must_use]
+    pub const fn total(self) -> u16 {
+        let mut total = 0;
+        let mut index = 0;
+        while index < self.0.len() {
+            total += self.0[index];
+            index += 1;
+        }
+        total
+    }
+
+    /// The types this split actually produces, in [`ManaColor::ALL`] order.
+    /// A type it produces none of is left out, so a split of three red mana
+    /// reads as one entry rather than six.
+    pub fn iter(self) -> impl Iterator<Item = (ManaColor, u16)> {
+        ManaColor::ALL
+            .into_iter()
+            .filter(move |color| self.get(*color) > 0)
+            .map(move |color| (color, self.get(color)))
     }
 }
 
@@ -133,14 +197,10 @@ pub enum CardType {
     Land,
     Planeswalker,
     Sorcery,
-    /// Not a card type Magic prints. An emblem is an object with abilities
-    /// and no other characteristics, and every part in this model carries at
-    /// least one type, so emblems carry this one.
-    Emblem,
 }
 
 impl CardType {
-    pub const COUNT: usize = 8;
+    pub const COUNT: usize = 7;
     pub const ALL: [Self; Self::COUNT] = [
         Self::Artifact,
         Self::Creature,
@@ -149,7 +209,6 @@ impl CardType {
         Self::Land,
         Self::Planeswalker,
         Self::Sorcery,
-        Self::Emblem,
     ];
 
     /// Conventional type-line order for the combinations the catalog can
@@ -162,7 +221,6 @@ impl CardType {
         Self::Planeswalker,
         Self::Instant,
         Self::Sorcery,
-        Self::Emblem,
     ];
 
     #[must_use]
@@ -175,7 +233,6 @@ impl CardType {
             Self::Land => 4,
             Self::Planeswalker => 5,
             Self::Sorcery => 6,
-            Self::Emblem => 7,
         }
     }
 
@@ -189,7 +246,6 @@ impl CardType {
             Self::Land => "Land",
             Self::Planeswalker => "Planeswalker",
             Self::Sorcery => "Sorcery",
-            Self::Emblem => "Emblem",
         }
     }
 }
@@ -230,6 +286,18 @@ impl CardTypeSet {
     #[must_use]
     pub const fn contains(self, card_type: CardType) -> bool {
         self.0 & (1 << card_type.index()) != 0
+    }
+
+    /// How many distinct types are in the set. "For each card type among
+    /// them" counts this rather than the cards. There are only eight of
+    /// them, so the width is never in question.
+    #[must_use]
+    pub const fn count(self) -> u16 {
+        // Eight types fit in a byte, so the count fits anywhere.
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            self.0.count_ones() as u16
+        }
     }
 
     #[must_use]

@@ -39,114 +39,7 @@ fn the_top_of_a_library_is_the_same_card_however_it_is_reached() {
 }
 
 #[test]
-fn terminus_is_castable_for_its_miracle_cost_only_on_the_turn_s_first_draw() {
-    let setup = || {
-        let mut game = ready_game();
-        game.battlefield.clear();
-        game.players[0].hand.clear();
-        game.players[0].library = vec![
-            card(20_001, cards::PLAINS, PlayerId::One),
-            card(20_000, cards::TERMINUS, PlayerId::One),
-        ];
-        // One white source, which is the miracle cost but not the printed one.
-        game.put_onto_battlefield(PlayerId::One, cards::PLAINS)
-            .expect("cataloged");
-        game.turn = 2;
-        game.step = Step::PrecombatMain;
-        game.priority = PlayerId::One;
-        game.cards_drawn_this_turn = [0; 2];
-        game
-    };
-
-    // Declining the reveal leaves an uncastable six-drop in hand.
-    let mut hidden = setup();
-    hidden.draw_card(PlayerId::One);
-    let reveal = hidden
-        .pending_decisions
-        .first()
-        .map(|pending| pending.observation.clone())
-        .expect("drawing it offers the reveal");
-    hidden
-        .apply(
-            PlayerId::One,
-            Action::ChooseDecision {
-                decision: reveal.id,
-                options: vec![0],
-            },
-        )
-        .unwrap();
-    assert!(
-        !hidden
-            .legal_actions(PlayerId::One)
-            .iter()
-            .any(|action| matches!(action, Action::CastSpell { .. })),
-        "a hidden miracle is just an expensive card"
-    );
-
-    // Drawing it second in a turn is not a miracle at all.
-    let mut second = setup();
-    second.players[0].library = vec![
-        card(20_003, cards::TERMINUS, PlayerId::One),
-        card(20_002, cards::PLAINS, PlayerId::One),
-    ];
-    second.draw_card(PlayerId::One);
-    drain_pending(&mut second);
-    second.draw_card(PlayerId::One);
-    assert!(
-        second.pending_decisions.is_empty(),
-        "only the first card drawn each turn offers a miracle"
-    );
-
-    // Revealing opens the window, and the sweep clears the board.
-    let mut revealed = setup();
-    revealed
-        .put_onto_battlefield(PlayerId::Two, cards::SERRA_ANGEL)
-        .expect("cataloged");
-    revealed
-        .put_onto_battlefield(PlayerId::One, cards::SAVANNAH_LIONS)
-        .expect("cataloged");
-    revealed.draw_card(PlayerId::One);
-    let reveal = revealed
-        .pending_decisions
-        .first()
-        .map(|pending| pending.observation.clone())
-        .expect("drawing it offers the reveal");
-    revealed
-        .apply(
-            PlayerId::One,
-            Action::ChooseDecision {
-                decision: reveal.id,
-                options: vec![1],
-            },
-        )
-        .unwrap();
-    let cast = revealed
-        .legal_actions(PlayerId::One)
-        .into_iter()
-        .find(|action| matches!(action, Action::CastSpell { .. }))
-        .expect("the miracle cost is payable from one Plains");
-    revealed.apply(PlayerId::One, cast).unwrap();
-    drain_pending(&mut revealed);
-
-    assert!(
-        !revealed
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::SERRA_ANGEL
-                || permanent.card.definition == cards::SAVANNAH_LIONS),
-        "every creature left the battlefield"
-    );
-    assert_eq!(
-        revealed.players[1]
-            .library
-            .first()
-            .map(|card| card.definition),
-        Some(cards::SERRA_ANGEL),
-        "and went to the bottom of its owner's library"
-    );
-}
-
-#[test]
+#[allow(clippy::too_many_lines)]
 fn pithing_needle_locks_the_named_card_but_not_its_mana() {
     let mut game = ready_game();
     game.battlefield.clear();
@@ -181,6 +74,27 @@ fn pithing_needle_locks_the_named_card_but_not_its_mana() {
         .first()
         .map(|pending| pending.observation.clone())
         .expect("the Needle names a card as it enters");
+    assert!(
+        choice
+            .options
+            .iter()
+            .any(|option| option.label == "Savannah Lions"),
+        "the generic card-name list includes legal names without activated abilities",
+    );
+    assert!(
+        choice
+            .options
+            .iter()
+            .any(|option| option.label == "Garruk, the Veil-Cursed"),
+        "independently nameable back faces are included",
+    );
+    assert!(
+        !choice
+            .options
+            .iter()
+            .any(|option| matches!(option.label.as_str(), "Dragon" | "Domri Rade emblem")),
+        "created-token names and emblems are not legal card-name choices",
+    );
     let factory_name = choice
         .options
         .iter()
@@ -204,6 +118,41 @@ fn pithing_needle_locks_the_named_card_but_not_its_mana() {
     assert!(
         mana_actions(&game) > 0,
         "but a mana ability is exempt from the lock"
+    );
+
+    let mut transformed = ready_game();
+    transformed.battlefield.clear();
+    let garruk = transformed
+        .put_onto_battlefield(PlayerId::One, cards::GARRUK_RELENTLESS)
+        .expect("cataloged");
+    transformed.transform_permanent(garruk);
+    transformed.turn = 2;
+    transformed.step = Step::PrecombatMain;
+    transformed.priority = PlayerId::One;
+    transformed
+        .put_onto_battlefield(PlayerId::One, cards::PITHING_NEEDLE)
+        .expect("cataloged");
+    let choice = transformed.pending_decisions[0].observation.clone();
+    let back_face = choice
+        .options
+        .iter()
+        .find(|option| option.label == "Garruk, the Veil-Cursed")
+        .expect("the transformed face can be named");
+    transformed
+        .apply(
+            PlayerId::One,
+            Action::ChooseDecision {
+                decision: choice.id,
+                options: vec![back_face.id],
+            },
+        )
+        .unwrap();
+    drain_pending(&mut transformed);
+    assert!(
+        !transformed.legal_actions(PlayerId::One).iter().any(
+            |action| matches!(action, Action::ActivateAbility { source, .. } if *source == garruk)
+        ),
+        "naming the presented back face locks its activated abilities",
     );
 }
 
@@ -259,7 +208,7 @@ fn voice_of_resurgence_makes_a_token_that_counts_the_board() {
     let token = game
         .battlefield
         .iter()
-        .find(|permanent| permanent.card.definition == cards::ELEMENTAL_TOKEN_GREEN_WHITE)
+        .find(|permanent| is_token_with(permanent, voice_elemental_token()))
         .expect("dying made a token")
         .clone();
     // The Voice is gone, so the token is the only creature: a 1/1.
@@ -274,7 +223,7 @@ fn voice_of_resurgence_makes_a_token_that_counts_the_board() {
     let token = game
         .battlefield
         .iter()
-        .find(|permanent| permanent.card.definition == cards::ELEMENTAL_TOKEN_GREEN_WHITE)
+        .find(|permanent| is_token_with(permanent, voice_elemental_token()))
         .expect("the token is still there")
         .clone();
     assert_eq!(game.power(&token), Some(3));
@@ -304,8 +253,8 @@ fn turn_strips_a_creature_and_burn_finishes_it() {
     game.resolve_effect_def(
         ScopedEffect::primary(EffectDef::Apply {
             recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
-            effect: AppliedEffectDef::Animate(&TURN_TEST_ANIMATION),
-            duration: EffectDurationDef::UntilEndOfTurn,
+            effect: AppliedEffectDef::Composite(&TURN_TEST_CHARACTERISTICS),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
         }),
         &turn,
         TriggerContext::empty(),
@@ -348,11 +297,13 @@ fn turn_strips_a_creature_and_burn_finishes_it() {
     );
 }
 
-static TURN_TEST_ANIMATION: crate::card::AnimationDef = crate::card::AnimationDef::new(0, 1)
-    .becoming(
-        &["Weird"],
-        crate::card::ColorSet::from_colors(&[crate::card::ManaColor::Red]),
-    );
+static TURN_TEST_CHARACTERISTICS: [AppliedEffectDef; 5] = [
+    AppliedEffectDef::add_card_types(CardTypeSet::single(CardType::Creature)),
+    AppliedEffectDef::set_creature_types(CreatureTypeSetDef::named(&["Weird"])),
+    AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any),
+    AppliedEffectDef::set_colors(ColorSet::from_colors(&[ManaColor::Red])),
+    AppliedEffectDef::set_base_power_toughness(ValueDef::Constant(0), ValueDef::Constant(1)),
+];
 
 #[test]
 fn flames_of_the_firebrand_splits_its_three_damage() {
@@ -507,9 +458,10 @@ fn moorland_haunt_pays_with_a_creature_card_from_its_own_graveyard() {
         "and the land stayed put"
     );
     assert!(
-        game.battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::SPIRIT_TOKEN_1_1_WHITE),
+        game.battlefield.iter().any(|permanent| is_token_with(
+            permanent,
+            token_with_flying(tokens::creature(&["Spirit"], &[ManaColor::White], 1, 1))
+        )),
         "and a Spirit arrived"
     );
 }
@@ -592,61 +544,6 @@ fn bonfire_burns_a_player_and_everything_they_control() {
 }
 
 #[test]
-fn bonfire_cast_for_its_miracle_cost_still_chooses_x() {
-    let mut game = ready_game();
-    game.battlefield.clear();
-    game.put_onto_battlefield(PlayerId::Two, cards::SAVANNAH_LIONS)
-        .expect("cataloged");
-    // Two Mountains pay {X}{R} with X of one; the printed {X}{X}{R} could not.
-    for _ in 0..2 {
-        game.put_onto_battlefield(PlayerId::One, cards::MOUNTAIN)
-            .expect("cataloged");
-    }
-    game.players[0].hand.clear();
-    game.players[0].library = vec![card(26_000, cards::BONFIRE_OF_THE_DAMNED, PlayerId::One)];
-    game.turn = 2;
-    game.step = Step::PrecombatMain;
-    game.priority = PlayerId::One;
-    game.cards_drawn_this_turn = [0; 2];
-
-    game.draw_card(PlayerId::One);
-    let reveal = game
-        .pending_decisions
-        .first()
-        .map(|pending| pending.observation.clone())
-        .expect("drawing it offers the miracle reveal");
-    game.apply(
-        PlayerId::One,
-        Action::ChooseDecision {
-            decision: reveal.id,
-            options: vec![1],
-        },
-    )
-    .unwrap();
-
-    let cast = game
-        .legal_actions(PlayerId::One)
-        .into_iter()
-        .find(|action| {
-            matches!(action, Action::CastSpell { choices, .. }
-                if choices.x() == 1
-                    && choices.iter_targets().any(|target| *target == Target::Player(PlayerId::Two)))
-        })
-        .expect("the miracle cost is payable with X of one");
-    game.apply(PlayerId::One, cast).unwrap();
-    drain_pending(&mut game);
-
-    assert_eq!(game.players[1].life, 19, "one damage reached the player");
-    assert!(
-        !game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::SAVANNAH_LIONS),
-        "and the same one killed their 2/1"
-    );
-}
-
-#[test]
 fn aurelias_fury_taps_what_it_burns_and_locks_who_it_hits() {
     let mut game = ready_game();
     game.battlefield.clear();
@@ -667,6 +564,7 @@ fn aurelias_fury_taps_what_it_burns_and_locks_who_it_hits() {
         // A creature with flash, so the only thing stopping it would be the
         // lock rather than sorcery timing.
         card(27_002, cards::RESTORATION_ANGEL, PlayerId::Two),
+        card(27_003, cards::PLAINS, PlayerId::Two),
     ];
     game.players[1].mana_pool = ManaPool {
         red: 1,
@@ -722,6 +620,20 @@ fn aurelias_fury_taps_what_it_burns_and_locks_who_it_hits() {
     assert!(
         casts.contains(&GameObjectId(27_002)),
         "but a creature spell is not"
+    );
+    let plains = game.players[1]
+        .hand
+        .iter()
+        .find(|card| card.id == GameObjectId(27_003))
+        .expect("the land remains in hand");
+    let land_option = game
+        .catalog
+        .get(cards::PLAINS)
+        .and_then(|definition| definition.play_options.first())
+        .expect("Plains has a land-play option");
+    assert!(
+        !game.play_is_prohibited(plains, PlayerId::Two, land_option),
+        "the cast-only rule leaves land plays untouched"
     );
 }
 
@@ -805,7 +717,10 @@ fn huntmaster_turns_on_a_quiet_turn_and_back_on_a_busy_one() {
     assert_eq!(
         game.battlefield
             .iter()
-            .filter(|permanent| permanent.card.definition == cards::WOLF_TOKEN_2_2_GREEN)
+            .filter(|permanent| is_token_with(
+                permanent,
+                tokens::creature(&["Wolf"], &[ManaColor::Green], 2, 2)
+            ))
             .count(),
         1
     );
@@ -843,7 +758,10 @@ fn huntmaster_turns_on_a_quiet_turn_and_back_on_a_busy_one() {
     assert_eq!(
         game.battlefield
             .iter()
-            .filter(|permanent| permanent.card.definition == cards::WOLF_TOKEN_2_2_GREEN)
+            .filter(|permanent| is_token_with(
+                permanent,
+                tokens::creature(&["Wolf"], &[ManaColor::Green], 2, 2)
+            ))
             .count(),
         1
     );
@@ -866,111 +784,13 @@ fn huntmaster_turns_on_a_quiet_turn_and_back_on_a_busy_one() {
     assert_eq!(
         game.battlefield
             .iter()
-            .filter(|permanent| permanent.card.definition == cards::WOLF_TOKEN_2_2_GREEN)
+            .filter(|permanent| is_token_with(
+                permanent,
+                tokens::creature(&["Wolf"], &[ManaColor::Green], 2, 2)
+            ))
             .count(),
         2
     );
 }
 
-#[test]
-fn domri_fights_and_hands_out_an_emblem() {
-    let mut game = ready_game();
-    game.battlefield.clear();
-    let domri = game
-        .put_onto_battlefield(PlayerId::One, cards::DOMRI_RADE)
-        .expect("cataloged");
-    let mine = game
-        .put_onto_battlefield(PlayerId::One, cards::SERRA_ANGEL)
-        .expect("cataloged");
-    let theirs = game
-        .put_onto_battlefield(PlayerId::Two, cards::SAVANNAH_LIONS)
-        .expect("cataloged");
-    game.turn = 2;
-    game.step = Step::PrecombatMain;
-    game.priority = PlayerId::One;
-
-    // A 4/4 fighting a 2/1: the Lions die and the Angel takes two.
-    let fight = game
-        .legal_actions(PlayerId::One)
-        .into_iter()
-        .find(|action| {
-            matches!(action, Action::ActivateAbility { source, ability, targets, .. }
-                if *source == domri
-                    && matches!(ability, AbilityOrigin::Printed { ability, .. } if *ability == AbilityId(1))
-                    && targets.iter().flat_map(TargetSelection::targets).any(|target| *target == Target::Permanent(mine))
-                    && targets.iter().flat_map(TargetSelection::targets).any(|target| *target == Target::Permanent(theirs)))
-        })
-        .expect("the fight is offered");
-    game.apply(PlayerId::One, fight).unwrap();
-    drain_pending(&mut game);
-
-    assert!(
-        !game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.id == theirs),
-        "the smaller creature died"
-    );
-    assert_eq!(
-        game.battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == mine)
-            .expect("the bigger one lived")
-            .damage,
-        2,
-        "and took the power of what it fought"
-    );
-
-    // The emblem grants its keywords without being a permanent.
-    if let Some(permanent) = game
-        .battlefield
-        .iter_mut()
-        .find(|permanent| permanent.card.id == domri)
-    {
-        permanent.set_counters(CounterKind::Loyalty, 7);
-        permanent.activated_loyalty_this_turn = false;
-    }
-    let ultimate = game
-        .legal_actions(PlayerId::One)
-        .into_iter()
-        .find(|action| {
-            matches!(action, Action::ActivateAbility { source, ability, .. }
-                if *source == domri
-                    && matches!(ability, AbilityOrigin::Printed { ability, .. } if *ability == AbilityId(2)))
-        })
-        .expect("the emblem ability is offered at seven loyalty");
-    game.apply(PlayerId::One, ultimate).unwrap();
-    drain_pending(&mut game);
-
-    assert!(
-        !game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::DOMRI_RADE_EMBLEM),
-        "an emblem is not a permanent"
-    );
-    assert!(
-        !game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.id == domri),
-        "and paying the last loyalty left Domri behind"
-    );
-    let angel = game
-        .battlefield
-        .iter()
-        .find(|permanent| permanent.card.id == mine)
-        .expect("still there")
-        .clone();
-    for keyword in [
-        KeywordAbility::DoubleStrike,
-        KeywordAbility::Trample,
-        KeywordAbility::Hexproof,
-        KeywordAbility::Haste,
-    ] {
-        assert!(
-            game.permanent_has_executable_keyword(&angel, keyword),
-            "the emblem granted {keyword:?}"
-        );
-    }
-}
+include!("turn_and_loyalty/domri.rs");

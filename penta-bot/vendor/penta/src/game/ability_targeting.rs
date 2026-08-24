@@ -5,17 +5,117 @@
 //! question of a single object; this asks it of every candidate.
 
 use super::{
-    AbilityTargetPredicate, CardInstance, CardType, CharacteristicContext, Game, GameObjectId,
-    ObjectPredicateDef, PlayerId, StackObjectKind, Target, TriggerContext, ZoneKind,
+    AbilityTargetDef, AbilityTargetPredicate, CardInstance, CardType, CharacteristicContext, Game,
+    GameObjectId, ObjectPredicateDef, PlayerId, PlayerRelation, StackObjectKind,
+    StackTargetKindDef, Target, TargetSelection, TriggerContext, ZoneKind,
 };
 
 impl Game {
+    pub(super) fn targets_owned_by_player_matching(
+        &self,
+        object: ObjectPredicateDef,
+        zones: &'static [ZoneKind],
+        owner: PlayerId,
+        source: GameObjectId,
+    ) -> Vec<Target> {
+        zones
+            .iter()
+            .copied()
+            .filter(|zone| {
+                matches!(
+                    zone,
+                    ZoneKind::Library | ZoneKind::Hand | ZoneKind::Graveyard | ZoneKind::Exile
+                )
+            })
+            .flat_map(|zone| {
+                self.cards_in_zone(zone).filter_map(move |card| {
+                    (card.owner == owner && self.card_object_matches(object, card, zone, source))
+                        .then_some(Target::Card(card.id))
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn targets_owned_by_target_player(
+        &self,
+        predicate: AbilityTargetPredicate,
+        selections: &[TargetSelection],
+        source: GameObjectId,
+    ) -> Option<Vec<Target>> {
+        let AbilityTargetPredicate::OwnedByTargetPlayer {
+            object,
+            zones,
+            slot,
+        } = predicate
+        else {
+            return None;
+        };
+        let owner = selections
+            .iter()
+            .find(|selection| selection.slot().index() == slot.index())
+            .and_then(|selection| selection.targets().first())
+            .and_then(|target| match target {
+                Target::Player(player) => Some(*player),
+                Target::Card(_) | Target::Permanent(_) | Target::Spell(_) => None,
+            })?;
+        Some(self.targets_owned_by_player_matching(object, zones, owner, source))
+    }
+
+    /// The same, considered at a particular X. A spell being cast has no
+    /// stack object yet, so a predicate that reads its chosen X -- "target
+    /// creature with power X or less" -- has nothing to read it from; the
+    /// enumerator already walks one X at a time, so it says which.
+    pub(super) fn ability_targets_matching_at(
+        &self,
+        predicate: AbilityTargetPredicate,
+        controller: PlayerId,
+        source: GameObjectId,
+        context: TriggerContext,
+        x: u16,
+    ) -> Vec<Target> {
+        let previous = self.prospective_x.replace(Some(x));
+        let targets =
+            self.ability_targets_matching_for(predicate, controller, source, context, true);
+        self.prospective_x.set(previous);
+        targets
+    }
+
+    /// "Any other target": the ability's own source is dropped from what a
+    /// slot may name. Applied where candidates are offered and where a
+    /// declaration is checked, so the two agree.
+    pub(super) fn without_excluded_source(
+        slot: &AbilityTargetDef,
+        source: GameObjectId,
+        mut targets: Vec<Target>,
+    ) -> Vec<Target> {
+        if slot.excludes_source {
+            targets.retain(|target| *target != Target::Permanent(source));
+        }
+        targets
+    }
+
     pub(super) fn ability_targets_matching(
         &self,
         predicate: AbilityTargetPredicate,
         controller: PlayerId,
         source: GameObjectId,
         context: TriggerContext,
+    ) -> Vec<Target> {
+        let source_is_spell = self
+            .stack
+            .iter()
+            .find(|object| object.id == source)
+            .is_some_and(|object| object.kind == StackObjectKind::Spell);
+        self.ability_targets_matching_for(predicate, controller, source, context, source_is_spell)
+    }
+
+    fn ability_targets_matching_for(
+        &self,
+        predicate: AbilityTargetPredicate,
+        controller: PlayerId,
+        source: GameObjectId,
+        context: TriggerContext,
+        source_is_spell: bool,
     ) -> Vec<Target> {
         match predicate {
             AbilityTargetPredicate::AnyTarget => {
@@ -29,44 +129,122 @@ impl Game {
                                 || self
                                     .permanent_types(permanent)
                                     .is_some_and(|types| types.contains(CardType::Planeswalker)))
-                                && self.permanent_can_be_targeted_by(permanent, controller, source)
+                                && self.permanent_can_be_targeted_by(
+                                    permanent,
+                                    controller,
+                                    source,
+                                    source_is_spell,
+                                )
                         })
                         .map(|permanent| Target::Permanent(permanent.card.id)),
                 );
                 targets
             }
-            AbilityTargetPredicate::ControlledByTargetOf { .. } => Vec::new(),
-            AbilityTargetPredicate::PlayerOrPlaneswalker(relation) => {
-                let mut targets = [PlayerId::One, PlayerId::Two]
-                    .into_iter()
-                    .filter(|player| {
-                        self.player_relation_matches(*player, relation, controller, context)
-                    })
-                    .map(Target::Player)
-                    .collect::<Vec<_>>();
-                targets.extend(
-                    self.battlefield
-                        .iter()
-                        .filter(|permanent| {
-                            self.permanent_types(permanent)
-                                .is_some_and(|types| types.contains(CardType::Planeswalker))
-                                && self.permanent_can_be_targeted_by(permanent, controller, source)
-                        })
-                        .map(|permanent| Target::Permanent(permanent.card.id)),
-                );
-                targets
-            }
+            AbilityTargetPredicate::ControlledByTargetOf { .. }
+            | AbilityTargetPredicate::OwnedByTargetPlayer { .. } => Vec::new(),
+            AbilityTargetPredicate::PlayerOrPlaneswalker(relation) => self
+                .player_or_planeswalker_targets_matching(
+                    relation,
+                    controller,
+                    source,
+                    context,
+                    source_is_spell,
+                ),
             AbilityTargetPredicate::Player(relation) => [PlayerId::One, PlayerId::Two]
                 .into_iter()
                 .filter(|player| {
-                    self.player_relation_matches(*player, relation, controller, context)
+                    self.player_relation_matches_for_source(
+                        *player, relation, controller, source, context,
+                    )
                 })
                 .map(Target::Player)
                 .collect(),
-            AbilityTargetPredicate::Object { .. } => {
-                self.ability_object_targets_matching(predicate, controller, source, context)
-            }
+            AbilityTargetPredicate::Object { .. } => self.ability_object_targets_matching(
+                predicate,
+                controller,
+                source,
+                context,
+                source_is_spell,
+            ),
+            // Spells and abilities alike, which is the whole difference from
+            // the stack-zone object slot above.
+            AbilityTargetPredicate::StackObject {
+                object,
+                controller: controller_relation,
+                kind,
+            } => self
+                .stack
+                .iter()
+                .filter_map(|stack_object| {
+                    if kind == StackTargetKindDef::AbilityOnly
+                        && stack_object.kind == StackObjectKind::Spell
+                    {
+                        return None;
+                    }
+                    let characteristics = self.stack_object_event_object(stack_object)?;
+                    (controller_relation.is_none_or(|relation| {
+                        self.player_relation_matches(
+                            stack_object.controller,
+                            relation,
+                            controller,
+                            context,
+                        )
+                    }) && self.trigger_object_matches_for_controller(
+                        object,
+                        &characteristics,
+                        source,
+                        true,
+                        // The player choosing targets, which is who "a land
+                        // you control" is measured from. A spell still in
+                        // hand has no controller to derive it from.
+                        Some(controller),
+                    ))
+                    .then_some(Target::Spell(stack_object.id))
+                })
+                .collect(),
         }
+    }
+
+    fn player_or_planeswalker_targets_matching(
+        &self,
+        relation: PlayerRelation,
+        controller: PlayerId,
+        source: GameObjectId,
+        context: TriggerContext,
+        source_is_spell: bool,
+    ) -> Vec<Target> {
+        let mut targets = [PlayerId::One, PlayerId::Two]
+            .into_iter()
+            .filter(|player| {
+                self.player_relation_matches_for_source(
+                    *player, relation, controller, source, context,
+                )
+            })
+            .map(Target::Player)
+            .collect::<Vec<_>>();
+        targets.extend(
+            self.battlefield
+                .iter()
+                .filter(|permanent| {
+                    self.permanent_types(permanent)
+                        .is_some_and(|types| types.contains(CardType::Planeswalker))
+                        && self.player_relation_matches_for_source(
+                            permanent.controller,
+                            relation,
+                            controller,
+                            source,
+                            context,
+                        )
+                        && self.permanent_can_be_targeted_by(
+                            permanent,
+                            controller,
+                            source,
+                            source_is_spell,
+                        )
+                })
+                .map(|permanent| Target::Permanent(permanent.card.id)),
+        );
+        targets
     }
 
     pub(super) fn ability_object_targets_matching(
@@ -75,6 +253,7 @@ impl Game {
         controller: PlayerId,
         source: GameObjectId,
         context: TriggerContext,
+        source_is_spell: bool,
     ) -> Vec<Target> {
         let AbilityTargetPredicate::Object {
             object,
@@ -103,8 +282,12 @@ impl Game {
                         controller,
                         context,
                     )
-                }) && self.permanent_can_be_targeted_by(permanent, controller, source)
-                    && self.trigger_object_matches(object, &characteristics, source, false))
+                }) && self.permanent_can_be_targeted_by(
+                    permanent,
+                    controller,
+                    source,
+                    source_is_spell,
+                ) && self.trigger_object_matches(object, &characteristics, source, false))
                 .then_some(Target::Permanent(permanent.card.id))
             }));
         }
@@ -180,6 +363,47 @@ impl Game {
         })
     }
 
+    /// The same, for the clauses that have to change the card rather than
+    /// read it: a counter put on a card that is not on the battlefield.
+    pub(super) fn card_in_nonbattlefield_zone_mut(
+        &mut self,
+        id: GameObjectId,
+    ) -> Option<&mut CardInstance> {
+        let located = [PlayerId::One, PlayerId::Two]
+            .into_iter()
+            .find_map(|player| {
+                let state = &self.players[player.index()];
+                [
+                    ZoneKind::Library,
+                    ZoneKind::Hand,
+                    ZoneKind::Graveyard,
+                    ZoneKind::Exile,
+                ]
+                .into_iter()
+                .find_map(|zone| {
+                    let cards = match zone {
+                        ZoneKind::Library => &state.library,
+                        ZoneKind::Hand => &state.hand,
+                        ZoneKind::Graveyard => &state.graveyard,
+                        _ => &state.exile,
+                    };
+                    cards
+                        .iter()
+                        .position(|card| card.id == id)
+                        .map(|index| (player, zone, index))
+                })
+            })?;
+        let (player, zone, index) = located;
+        let state = &mut self.players[player.index()];
+        let cards = match zone {
+            ZoneKind::Library => &mut state.library,
+            ZoneKind::Hand => &mut state.hand,
+            ZoneKind::Graveyard => &mut state.graveyard,
+            _ => &mut state.exile,
+        };
+        cards.get_mut(index)
+    }
+
     pub(super) fn card_object_matches(
         &self,
         predicate: ObjectPredicateDef,
@@ -187,6 +411,43 @@ impl Game {
         zone: ZoneKind,
         source: GameObjectId,
     ) -> bool {
+        if self
+            .catalog
+            .get(card.definition)
+            .is_some_and(|definition| definition.rules.has_metadata_only_creature_body())
+        {
+            // A catalog-only creature still exposes exact printed metadata to
+            // catalog consumers, but no gameplay effect may select it and
+            // turn that metadata into an executable vanilla permanent.
+            return false;
+        }
+        // Reveal-until removes the prospective card from the library before
+        // asking whether it is the stopping card. Name predicates therefore
+        // have to read the card being considered rather than rediscover its
+        // object ID in a zone. Recurse here as well so a named predicate
+        // remains correct when composed with another card characteristic.
+        match predicate {
+            ObjectPredicateDef::Named(name) => {
+                return self
+                    .catalog
+                    .get(card.definition)
+                    .is_some_and(|definition| definition.name == name);
+            }
+            ObjectPredicateDef::All(predicates) => {
+                return predicates
+                    .iter()
+                    .all(|predicate| self.card_object_matches(*predicate, card, zone, source));
+            }
+            ObjectPredicateDef::AnyOf(predicates) => {
+                return predicates
+                    .iter()
+                    .any(|predicate| self.card_object_matches(*predicate, card, zone, source));
+            }
+            ObjectPredicateDef::Not(predicate) => {
+                return !self.card_object_matches(*predicate, card, zone, source);
+            }
+            _ => {}
+        }
         let context = match zone {
             ZoneKind::Library => CharacteristicContext::Library,
             ZoneKind::Hand => CharacteristicContext::Hand,

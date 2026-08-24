@@ -1,7 +1,8 @@
 use super::{
-    BalanceAction, BalancePhase, BalanceTask, CardBehavior, CardInstance, CardType,
-    DecisionContinuation, DecisionPreference, DecisionVisibility, DecisionZone, Game, PlayerId,
-    StackObject, Target, ZoneKind, ZoneMoveCause, ZonePlacement,
+    BalanceAction, BalancePhase, BalanceTask, CardBehavior, CardInstance, CardPartId, CardType,
+    DecisionContinuation, DecisionPreference, DecisionVisibility, DecisionZone, Game, GameEvent,
+    GameObjectId, ObjectCharacteristics, ObjectPredicateDef, PlayerId, StackObject, Target,
+    ZoneKind, ZoneMoveCause, ZonePlacement,
 };
 
 impl Game {
@@ -10,21 +11,8 @@ impl Game {
         object: &StackObject,
         behavior: CardBehavior,
     ) {
-        match behavior {
-            CardBehavior::SedgeTroll => {
-                if let Some(permanent) = self
-                    .battlefield
-                    .iter_mut()
-                    .find(|permanent| Some(permanent.card.id) == object.source)
-                {
-                    permanent.regeneration_shields =
-                        permanent.regeneration_shields.saturating_add(1);
-                }
-            }
-            CardBehavior::LibraryOfAlexandria => {
-                self.draw_cards(object.controller, 1);
-            }
-            _ => {}
+        if behavior == CardBehavior::LibraryOfAlexandria {
+            self.draw_instruction(object.controller, 1);
         }
     }
 
@@ -34,7 +22,7 @@ impl Game {
             CardBehavior::SphinxsRevelation => {
                 let player = object.controller;
                 self.gain_life(player, object.x());
-                self.draw_cards(player, object.x());
+                self.draw_instruction(player, object.x());
             }
             CardBehavior::PillarOfFlame => {
                 self.damage_target(object.first_target(), 2);
@@ -87,40 +75,6 @@ impl Game {
                         self.stack.iter().find(|item| item.id == target).cloned()
                 {
                     self.queue_fork_decision(object.controller, original);
-                }
-            }
-            CardBehavior::Channel => self.channel_active[object.controller.index()] = true,
-            CardBehavior::Duress => {
-                if let Some(Target::Player(victim)) = object.first_target() {
-                    let eligible = self.players[victim.index()]
-                        .hand
-                        .iter()
-                        .filter(|card| {
-                            self.catalog.get(card.definition).is_some_and(|definition| {
-                                !definition.rules.has_type(CardType::Creature)
-                                    && !definition.rules.has_type(CardType::Land)
-                            })
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    let options = self.card_decision_options(&eligible, DecisionZone::Hand);
-                    // The hand is revealed, so the caster picking from it is
-                    // public information rather than a hidden choice.
-                    self.queue_decision(
-                        object.controller,
-                        "Choose a card for them to discard",
-                        DecisionVisibility::Public,
-                        DecisionPreference::HigherCardValue,
-                        1..=1,
-                        false,
-                        options,
-                        DecisionContinuation::Duress {
-                            victim,
-                            cause: ZoneMoveCause::Effect {
-                                controller: object.controller,
-                            },
-                        },
-                    );
                 }
             }
             CardBehavior::Mulch => {
@@ -234,7 +188,6 @@ impl Game {
         cards
     }
 
-    /// Sends cards to their owner's graveyard in the order given.
     /// Where the pile the controller did not take ends up. The library end
     /// that counts as the top is the back of the vector, so bottoming inserts
     /// at the front.
@@ -253,11 +206,19 @@ impl Game {
                 }
             }
             ZoneKind::Library => {
-                for card in cards {
-                    let (card, _zone_change) = self.zone_change_card(card);
-                    match placement {
-                        ZonePlacement::Top => self.players[player.index()].library.push(card),
-                        ZonePlacement::Bottom => {
+                match placement {
+                    // These arrive top-first, and the back of the vector is
+                    // the top, so they go back on in reverse -- otherwise a
+                    // group put back on top comes back inverted, which is
+                    // wrong for anything that says "in the same order" and
+                    // for a look that moved nothing at all.
+                    ZonePlacement::Top => {
+                        for card in cards.into_iter().rev() {
+                            self.players[player.index()].library.push(card);
+                        }
+                    }
+                    ZonePlacement::Bottom => {
+                        for card in cards {
                             self.players[player.index()].library.insert(0, card);
                         }
                     }
@@ -270,18 +231,110 @@ impl Game {
                 }
             }
             ZoneKind::Graveyard => self.bury_cards(player, cards),
-            ZoneKind::Battlefield | ZoneKind::Stack | ZoneKind::Command => {
+            // Under the player who looked, which is what "you may put it
+            // onto the battlefield" means -- the card is still theirs and
+            // was never cast.
+            ZoneKind::Battlefield => {
+                for card in cards {
+                    let _ = self.put_card_onto_battlefield_from(
+                        card,
+                        ZoneKind::Library,
+                        super::BattlefieldArrival::under(player),
+                        None,
+                    );
+                }
+            }
+            ZoneKind::Stack | ZoneKind::Command => {
                 debug_assert!(false, "unsupported revealed-card destination: {zone:?}");
                 self.bury_cards(player, cards);
             }
         }
     }
 
+    /// Take from the top until one matches, publicly reveal every card, and
+    /// move the passed cards plus the match to their printed destinations.
+    ///
+    /// The returned targets are the new identities of cards put into a
+    /// graveyard, in reveal order. The count includes the matching card even
+    /// when it goes somewhere else, and includes every card in a library that
+    /// contains no match.
+    pub(super) fn mill_until_matching(
+        &mut self,
+        player: PlayerId,
+        predicate: ObjectPredicateDef,
+        matched_zone: ZoneKind,
+        source: GameObjectId,
+    ) -> (Vec<Target>, u16) {
+        let mut revealed = Vec::new();
+        let mut matched_card = None;
+        while let Some(card) = self.players[player.index()].library.pop() {
+            if self.card_object_matches(predicate, &card, ZoneKind::Library, source) {
+                matched_card = Some(card);
+                break;
+            }
+            revealed.push(card);
+        }
+        let revealed_count = revealed
+            .len()
+            .saturating_add(usize::from(matched_card.is_some()));
+        self.events
+            .extend(revealed.iter().chain(matched_card.iter()).map(|card| {
+                GameEvent::CardRevealed {
+                    player,
+                    card: card.id,
+                    definition: card.definition,
+                }
+            }));
+        // The match keeps its own destination; a library with nothing
+        // matching found no match and buries everything it passed.
+        match matched_card {
+            Some(card) if matched_zone == ZoneKind::Graveyard => revealed.push(card),
+            Some(card) => {
+                self.place_revealed_remainder(player, vec![card], matched_zone, ZonePlacement::Top);
+            }
+            None => {}
+        }
+        let buried = self.bury_cards_with_ids(player, revealed);
+        (buried, u16::try_from(revealed_count).unwrap_or(u16::MAX))
+    }
+
     pub(super) fn bury_cards(&mut self, player: PlayerId, cards: Vec<CardInstance>) {
+        let _ = self.bury_cards_with_ids(player, cards);
+    }
+
+    fn bury_cards_with_ids(&mut self, player: PlayerId, cards: Vec<CardInstance>) -> Vec<Target> {
+        let mut buried = Vec::with_capacity(cards.len());
         for card in cards {
             let (card, _zone_change) = self.zone_change_card(card);
+            buried.push(Target::Card(card.id));
             self.put_card_into_graveyard(player, card);
         }
+        buried
+    }
+
+    /// Discards at random from the cards in hand that match, leaving the
+    /// rest alone. A hand with nothing matching discards nothing, which is
+    /// what "discards a creature card at random" does to a hand of lands.
+    pub(super) fn discard_random_matching(
+        &mut self,
+        player: PlayerId,
+        count: u16,
+        predicate: ObjectPredicateDef,
+        source: GameObjectId,
+        cause: ZoneMoveCause,
+    ) {
+        let mut matching: Vec<_> = self.players[player.index()]
+            .hand
+            .iter()
+            .filter(|card| self.card_object_matches(predicate, card, ZoneKind::Hand, source))
+            .map(|card| card.id)
+            .collect();
+        let mut discarded = Vec::new();
+        for _ in 0..usize::from(count).min(matching.len()) {
+            let index = self.rng.index_below(matching.len());
+            discarded.push(matching.swap_remove(index));
+        }
+        self.discard_cards_with_cause(player, &discarded, cause);
     }
 
     pub(super) fn discard_random(&mut self, player: PlayerId, count: u16, cause: ZoneMoveCause) {
@@ -329,7 +382,19 @@ impl Game {
                         player,
                         prompt: format!("Choose {count} card(s) to discard to Balance"),
                         zone: DecisionZone::Hand,
-                        cards: self.players[player.index()].hand.clone(),
+                        cards: self.players[player.index()]
+                            .hand
+                            .iter()
+                            .map(|card| {
+                                (
+                                    card.id,
+                                    ObjectCharacteristics::card(
+                                        card.definition,
+                                        CardPartId::PRIMARY,
+                                    ),
+                                )
+                            })
+                            .collect(),
                         count,
                         action: BalanceAction::Discard,
                         cause: ZoneMoveCause::Effect { controller },
@@ -372,7 +437,7 @@ impl Game {
                                 .is_some_and(|types| types.contains(CardType::Land))
                         }
                 })
-                .map(|permanent| permanent.card.clone())
+                .map(|permanent| (permanent.card.id, Self::effective_rules_source(permanent)))
                 .collect::<Vec<_>>();
             let count = cards.len().saturating_sub(keep);
             if count > 0 {

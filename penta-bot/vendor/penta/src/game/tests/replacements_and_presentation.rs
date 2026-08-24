@@ -15,6 +15,7 @@ fn deterministic_land_entry_replacements_use_object_queries() {
                 CardPartId::PRIMARY,
                 controller,
                 0,
+                0,
             ));
         }
         let retreat = card(10_000, cards::CLIFFTOP_RETREAT, PlayerId::One);
@@ -102,7 +103,7 @@ fn check_land_queries_use_land_types_added_by_static_effects() {
 
 #[test]
 fn an_entering_permanents_own_static_ability_can_grant_its_entry_replacement() {
-    let definition_id = CardDefinitionId(10_101);
+    let definition_id = CardDefinitionId::new(10_101);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test self-granted entry replacement",
@@ -138,8 +139,8 @@ fn an_entering_permanents_own_static_ability_can_grant_its_entry_replacement() {
 
 #[test]
 fn an_entering_permanents_own_static_land_types_match_external_replacements() {
-    let external_id = CardDefinitionId(10_101);
-    let land_id = CardDefinitionId(10_102);
+    let external_id = CardDefinitionId::new(10_101);
+    let land_id = CardDefinitionId::new(10_102);
     let mut external = CardDefinition::new(
         external_id,
         "Test Plains entry restriction",
@@ -189,7 +190,7 @@ fn an_entering_permanents_own_static_land_types_match_external_replacements() {
 
 #[test]
 fn an_entering_static_effect_does_not_change_existing_replacement_sources_early() {
-    let source_id = CardDefinitionId(10_101);
+    let source_id = CardDefinitionId::new(10_101);
     let mut source = CardDefinition::new(
         source_id,
         "Test nonbasic replacement source",
@@ -222,7 +223,7 @@ fn an_entering_static_effect_does_not_change_existing_replacement_sources_early(
 
 #[test]
 fn a_land_play_option_locks_the_presented_part_on_the_permanent() {
-    let definition_id = CardDefinitionId(10_100);
+    let definition_id = CardDefinitionId::new(10_100);
     let land_part = CardPartId(1);
     let land_option = PlayOptionId(1);
     let front_rules = CardRules::new_sorcery(ManaCost::new(1, 0));
@@ -281,7 +282,7 @@ fn a_land_play_option_locks_the_presented_part_on_the_permanent() {
 
 #[test]
 fn a_modal_spell_resolves_by_its_locked_part_instead_of_the_canonical_front() {
-    let definition_id = CardDefinitionId(10_150);
+    let definition_id = CardDefinitionId::new(10_150);
     let creature_part = CardPartId(1);
     let creature_option = PlayOptionId(1);
     let front_rules = CardRules::new_instant(ManaCost::new(1, 1));
@@ -351,7 +352,7 @@ fn a_modal_spell_resolves_by_its_locked_part_instead_of_the_canonical_front() {
 
 #[test]
 fn changing_a_permanents_presented_face_keeps_its_object_identity() {
-    let definition_id = CardDefinitionId(10_101);
+    let definition_id = CardDefinitionId::new(10_101);
     let back = CardPartId(1);
     let front_rules = CardRules::new_creature(ManaCost::new(2, 0), &[], 2, 2);
     let back_rules = CardRules::new_creature_without_mana_cost(&[], 4, 5)
@@ -391,7 +392,7 @@ fn changing_a_permanents_presented_face_keeps_its_object_identity() {
 
     let front = &game.observe(PlayerId::One).battlefield[0];
     assert_eq!(front.id, permanent_id);
-    assert_eq!(front.presented, CardPartId::PRIMARY);
+    assert_eq!(front.characteristics.part(), CardPartId::PRIMARY);
     assert_eq!(
         (front.power, front.toughness, front.flying),
         (Some(2), Some(2), false)
@@ -401,7 +402,7 @@ fn changing_a_permanents_presented_face_keeps_its_object_identity() {
 
     let transformed = &game.observe(PlayerId::One).battlefield[0];
     assert_eq!(transformed.id, permanent_id);
-    assert_eq!(transformed.presented, back);
+    assert_eq!(transformed.characteristics.part(), back);
     assert_eq!(
         (transformed.power, transformed.toughness, transformed.flying),
         (Some(4), Some(5), true),
@@ -468,6 +469,25 @@ fn city_in_a_bottle_stops_arabian_nights_cards_being_played() {
         )
         .is_err(),
         "and submitting the cast directly is refused too"
+    );
+
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_000),
+        &[AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any)],
+        ContinuousEffectExpiration::Never,
+    );
+    let playable = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::CastSpell { card, .. } | Action::PlayLand { card, .. } => Some(card),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert!(
+        playable.contains(&GameObjectId(10_001)),
+        "removing the source's static ability removes its live player restriction",
     );
 }
 

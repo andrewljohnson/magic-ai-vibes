@@ -1,4 +1,6 @@
 use super::*;
+use crate::card::AppliedRuleDef;
+use crate::mana_cost;
 
 #[test]
 fn standard_records_have_complete_unique_scryfall_metadata() {
@@ -138,6 +140,44 @@ fn ordinary_records_synthesize_one_primary_part_and_play_option() {
 }
 
 #[test]
+fn buyback_records_project_only_optional_additional_costs() {
+    let projected_buyback = |record: &CardRecord| {
+        let definition = record.definition();
+        assert_eq!(
+            definition.play_options.len(),
+            1,
+            "{} has one ordinary spell form",
+            record.name,
+        );
+        let option = &definition.play_options[0];
+        assert!(
+            option.alternative_costs.is_empty(),
+            "{} must not project Buyback as an alternative cost",
+            record.name,
+        );
+        assert_eq!(
+            option.additional_costs.len(),
+            1,
+            "{} projects exactly one Buyback choice",
+            record.name,
+        );
+        option.additional_costs[0].clone()
+    };
+
+    let sprout_swarm = projected_buyback(&y2007::future_sight::SPROUT_SWARM);
+    assert_eq!(sprout_swarm.label, "Buyback");
+    assert_eq!(sprout_swarm.mana_cost, Some(mana_cost!("{3}")));
+
+    let corpse_dance = projected_buyback(&y1997::tempest::CORPSE_DANCE);
+    assert_eq!(corpse_dance.label, "Buyback");
+    assert_eq!(corpse_dance.mana_cost, Some(mana_cost!("{2}")));
+
+    let constant_mists = projected_buyback(&y1998::stronghold::CONSTANT_MISTS);
+    assert_eq!(constant_mists.label, "Buyback");
+    assert_eq!(constant_mists.mana_cost, None);
+}
+
+#[test]
 fn cavern_records_both_mana_abilities_and_the_colored_mana_riders() {
     let abilities = y2012::avacyn_restored::CAVERN_OF_SOULS
         .rules
@@ -148,8 +188,8 @@ fn cavern_records_both_mana_abilities_and_the_colored_mana_riders() {
         DeclarativeAbilityDef::ActivatedMana(_)
     ));
     assert!(matches!(
-        abilities[1].effect.definition,
-        EffectDef::AddMana(mana)
+        abilities[1].declarative_effect(),
+        Some(EffectDef::AddMana(mana))
             if mana.mana == ManaSelectionDef::One(ManaColor::Colorless)
                 && mana.amount == 1
                 && mana.restrictions.is_empty()
@@ -160,15 +200,15 @@ fn cavern_records_both_mana_abilities_and_the_colored_mana_riders() {
         DeclarativeAbilityDef::ActivatedMana(_)
     ));
     assert!(matches!(
-        abilities[2].effect.definition,
-        EffectDef::AddMana(mana)
+        abilities[2].declarative_effect(),
+        Some(EffectDef::AddMana(mana))
             if mana.mana == ManaSelectionDef::Choice(&ManaColor::COLORS)
                 && mana.amount == 1
                 && mana.restrictions
                     == [ManaRestrictionDef::CastCreatureSpellOfChosenType]
                 && mana.spend_effects
                     == [ManaSpendEffectDef::ApplyToPaidSpell(
-                        AppliedEffectDef::CannotBeCountered,
+                        AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered),
                     )]
     ));
 }
@@ -196,14 +236,36 @@ fn every_builtin_land_without_mana_is_named_explicitly() {
                         && matches!(ability.definition, DeclarativeAbilityDef::Static(_))
                         && matches!(
                             ability.declarative_effect(),
-                            Some(EffectDef::Apply {
-                                effect: AppliedEffectDef::AddLandTypes(types),
-                                duration: EffectDurationDef::WhileSourceRemainsInZone,
+                            Some(EffectDef::StaticApply {
+                                effect: AppliedEffectDef::Characteristic(
+                                    CharacteristicOperationDef::BasicLandTypes(
+                                        SetOperationDef::Add(types)
+                                    )
+                                ),
                                 ..
                             }) if !types.is_empty()
                         )
                 });
-            !has_intrinsic_source && !has_printed_source && !has_static_land_type_source
+            // "This land is the chosen type" is a mana source too: which
+            // one is not knowable here, but there is always exactly one.
+            let has_chosen_land_type_source =
+                record.rules.ability_clauses().iter().any(|ability| {
+                    ability.is_executable()
+                        && matches!(ability.definition, DeclarativeAbilityDef::Static(_))
+                        && matches!(
+                            ability.declarative_effect(),
+                            Some(EffectDef::StaticApply {
+                                effect: AppliedEffectDef::Characteristic(
+                                    CharacteristicOperationDef::ChosenBasicLandType
+                                ),
+                                ..
+                            })
+                        )
+                });
+            !has_intrinsic_source
+                && !has_printed_source
+                && !has_static_land_type_source
+                && !has_chosen_land_type_source
         })
         .map(|record| record.name)
         .collect::<Vec<_>>();
@@ -211,15 +273,34 @@ fn every_builtin_land_without_mana_is_named_explicitly() {
         lands_without_mana,
         [
             "Bazaar of Baghdad",
+            // Sacrifices creatures for life and taps for nothing.
+            "Diamond Valley",
+            "Island of Wak-Wak",
             "Oasis",
+            // The five Legends band lands do nothing but hand out "bands with
+            // other legendary creatures", one color each.
+            "Adventurers' Guildhouse",
+            "Cathedral of Serra",
+            "Mountain Stronghold",
+            "Seafarer's Quay",
             "The Tabernacle at Pendrell Vale",
+            "Unholy Citadel",
             "Maze of Ith",
             "Safe Haven",
+            // Spends its own tap fetching a basic rather than making mana.
+            "Thawing Glaciers",
             "Bloodstained Mire",
             "Flooded Strand",
             "Polluted Delta",
             "Windswept Heath",
             "Wooded Foothills",
+            // The enemy-coloured fetchland cycle, printed six years after
+            // the allied one above.
+            "Arid Mesa",
+            "Marsh Flats",
+            "Misty Rainforest",
+            "Scalding Tarn",
+            "Verdant Catacombs",
             "Evolving Wilds",
         ]
     );
@@ -292,28 +373,20 @@ fn every_nonland_mana_permanent_has_an_activated_mana_clause() {
 
 #[test]
 fn migrated_activated_cards_preserve_their_derived_implementation_status() {
-    let partial = [&y1993::alpha::STONE_GIANT, &y1994::legends::PENDELHAVEN];
     let complete = [
         &y1993::alpha::CHAOS_ORB,
         &y1993::alpha::GLASSES_OF_URZA,
         &y1993::alpha::ICY_MANIPULATOR,
+        &y1993::alpha::STONE_GIANT,
         &y1994::antiquities::MISHRA_S_FACTORY,
         &y1994::antiquities::ORCISH_MECHANICS,
         &y1994::antiquities::STRIP_MINE,
         &y1994::antiquities::TRISKELION,
         &y1994::fallen_empires::ICATIAN_JAVELINEERS,
+        &y1994::legends::PENDELHAVEN,
         &y1994::legends::RELIC_BARRIER,
         &y1994::the_dark::MAZE_OF_ITH,
     ];
-
-    for record in partial {
-        assert_eq!(
-            record.rules.implementation_status(),
-            ImplementationStatus::Partial,
-            "{} should remain partially implemented",
-            record.name
-        );
-    }
 
     for record in complete {
         assert_eq!(
@@ -329,7 +402,7 @@ fn migrated_activated_cards_preserve_their_derived_implementation_status() {
 fn early_core_sets_reuse_definitions_without_duplicating_identity() {
     let all_definition_ids = SET_MODULES
         .iter()
-        .flat_map(|module| module.cards.iter().map(|record| record.id))
+        .flat_map(|module| module.cards.iter().map(|record| record.id()))
         .collect::<HashSet<_>>();
     let basics = [
         cards::PLAINS,
@@ -367,6 +440,6 @@ fn early_core_sets_reuse_definitions_without_duplicating_identity() {
         }
     }
 
-    assert_eq!(y1993::beta::VOLCANIC_ISLAND.id, cards::VOLCANIC_ISLAND);
+    assert_eq!(y1993::beta::VOLCANIC_ISLAND.id(), cards::VOLCANIC_ISLAND);
     assert_eq!(y1993::beta::VOLCANIC_ISLAND.debut_set, CardSet::Beta);
 }

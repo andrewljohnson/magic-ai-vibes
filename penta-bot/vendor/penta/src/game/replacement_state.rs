@@ -1,13 +1,11 @@
-use crate::card::{
-    CardTypeSet, EffectDef, ObjectPredicateDef, PlayerRelation, ReplacementAbilityDef,
-    ReplacementEffectDef, ZoneKind,
-};
-use crate::ids::{CardDefinitionId, GameObjectId, PlayerId};
+use crate::card::{ManaCost, ReplacementAbilityDef, ReplacementEffectDef, SpendModeDef, ZoneKind};
+use crate::ids::{CardDefinitionId, GameObjectId, ObjectSetBindingIndex, PlayerId};
 
 use super::{
-    AbilitySourceRef, BalancePhase, BalanceTask, CardInstance, FrozenActivatedAbility, Game, Mana,
-    ManaAbilityActivation, Permanent, SacrificeFollowup, ScopedEffect, StackObject, Target,
-    TargetSelection, TriggerContext,
+    AbilitySourceRef, BalancePhase, BalanceTask, EffectResolutionContext, FrozenActivatedAbility,
+    Game, Mana, ManaAbilityActivation, ManaPaymentPurpose, ObjectCharacteristics, ObjectInstance,
+    Permanent, PlannedManaActivation, SacrificeFollowup, ScopedEffect, StackObject, Target,
+    TargetSelection,
 };
 
 /// One replacement effect that currently applies to a prospective event.
@@ -21,35 +19,19 @@ pub(super) struct ReplacementEffectContext {
     pub(super) controller: PlayerId,
 }
 
-/// The procedures the battlefield-entry engine can order and apply. Most are
-/// declarative modifications; choosing a creature type is still a dedicated
-/// decision procedure, but participates in the same replacement ordering.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum BattlefieldEntryReplacementEffect {
-    Declarative(ReplacementEffectDef),
-    /// The same, from an ability its controller may decline.
-    OptionalDeclarative(ReplacementEffectDef),
-    ChooseCreatureType,
-    ChooseCardName,
-    ChoosePlayer(PlayerRelation),
-    CopyAsItEnters {
-        object: ObjectPredicateDef,
-        added_types: CardTypeSet,
-    },
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct ApplicableReplacement {
     pub(super) context: ReplacementEffectContext,
-    pub(super) definition: CardDefinitionId,
+    pub(super) presentation: ObjectCharacteristics,
     pub(super) text: &'static str,
-    pub(super) effect: BattlefieldEntryReplacementEffect,
+    pub(super) optional: bool,
+    pub(super) effect: ReplacementEffectDef,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct PendingReplacementEffect {
     pub(super) context: ReplacementEffectContext,
-    pub(super) effect: BattlefieldEntryReplacementEffect,
+    pub(super) effect: ReplacementEffectDef,
 }
 
 /// One replacement that currently applies to one member of a simultaneous
@@ -59,9 +41,9 @@ pub(super) struct PendingReplacementEffect {
 pub(super) struct ApplicableZoneMoveReplacement {
     pub(super) move_index: usize,
     pub(super) context: ReplacementEffectContext,
-    pub(super) definition: CardDefinitionId,
+    pub(super) presentation: ObjectCharacteristics,
     pub(super) text: &'static str,
-    pub(super) effect: EffectDef,
+    pub(super) effect: ReplacementEffectDef,
 }
 
 /// Event-local state accumulated while replacement effects change one
@@ -84,10 +66,10 @@ pub(super) struct PendingBattlefieldExitMove {
 pub(super) struct FrozenZoneMoveReplacement {
     pub(super) source: AbilitySourceRef,
     pub(super) controller: PlayerId,
-    pub(super) definition: CardDefinitionId,
+    pub(super) presentation: ObjectCharacteristics,
     pub(super) text: &'static str,
     pub(super) replacement: ReplacementAbilityDef,
-    pub(super) effect: EffectDef,
+    pub(super) effect: ReplacementEffectDef,
 }
 
 #[derive(Clone, Debug)]
@@ -110,8 +92,15 @@ pub(super) enum BattlefieldExitCompletion {
     Completions(Vec<BattlefieldExitCompletion>),
     ResolveEffects {
         object: Box<StackObject>,
-        context: TriggerContext,
+        context: EffectResolutionContext,
         effects: Vec<ScopedEffect>,
+    },
+    DestroyFollowup {
+        candidates: Vec<GameObjectId>,
+        binding: ObjectSetBindingIndex,
+        object: Box<StackObject>,
+        context: EffectResolutionContext,
+        effect: ScopedEffect,
     },
     FinishStackResolution {
         object: Box<StackObject>,
@@ -129,11 +118,11 @@ pub(super) enum BattlefieldExitCompletion {
     CompleteSpellCast {
         object: Box<StackObject>,
         targets: Vec<Target>,
-        remaining_sacrifices: Vec<GameObjectId>,
+        remaining_sacrifices: Vec<(GameObjectId, SpendModeDef)>,
     },
     CompleteActivatedAbility {
         source: GameObjectId,
-        source_card: CardInstance,
+        source_card: ObjectInstance,
         controller: PlayerId,
         frozen: FrozenActivatedAbility,
         targets: Vec<TargetSelection>,
@@ -145,6 +134,16 @@ pub(super) enum BattlefieldExitCompletion {
         activation: ManaAbilityActivation,
         produced_mana: Vec<Mana>,
     },
+    ContinueSpellManaPayment {
+        object: Box<StackObject>,
+        targets: Vec<Target>,
+        object_payments: Vec<(GameObjectId, SpendModeDef)>,
+        cost: ManaCost,
+        x: u16,
+        purpose: ManaPaymentPurpose,
+        plan: Vec<PlannedManaActivation>,
+        next_activation: usize,
+    },
 }
 
 impl Game {
@@ -154,19 +153,19 @@ impl Game {
         &mut self,
         effects: Vec<ScopedEffect>,
         object: &StackObject,
-        context: TriggerContext,
+        context: &EffectResolutionContext,
     ) {
         let mut effects = effects.into_iter();
         while let Some(effect) = effects.next() {
             let pending_before = self.pending_decisions.len();
-            self.resolve_effect_def(effect, object, context);
+            self.resolve_effect_def(effect, object, context.clone());
             let remaining = effects.as_slice();
             if !remaining.is_empty()
                 && self.defer_after_battlefield_exit(
                     pending_before,
                     BattlefieldExitCompletion::ResolveEffects {
                         object: Box::new(object.clone()),
-                        context,
+                        context: context.clone(),
                         effects: remaining.to_vec(),
                     },
                 )
@@ -186,6 +185,22 @@ pub(super) enum EntryCompletion {
         card: GameObjectId,
         definition: CardDefinitionId,
     },
+    AttachSource {
+        source: GameObjectId,
+    },
+    /// The mirror of the above: what arrives attaches to a permanent that is
+    /// already there. "Return this card from your graveyard to the
+    /// battlefield, then attach it to that creature" moves the Equipment, so
+    /// the host is the one thing that keeps its identity through the entry.
+    AttachToHost {
+        host: GameObjectId,
+    },
+    /// "Create a token that's tapped and attacking." The attack is declared
+    /// as the token enters rather than afterwards, because what enters is a
+    /// new object and the declaration step is long over.
+    Attacking {
+        defender: crate::AttackDefender,
+    },
     /// The development setup surface minted this object's battlefield
     /// identity directly, so committing it must not reincarnate it again.
     Setup,
@@ -200,6 +215,10 @@ pub(super) struct PendingBattlefieldEntry {
     pub(super) permanent: Permanent,
     pub(super) from: ZoneKind,
     pub(super) completion: EntryCompletion,
+    /// Where this goes instead of the battlefield. Mox Diamond's unpaid entry
+    /// is the case: the permanent never arrives, so nothing about it enters,
+    /// and the card is put where the replacement sent it.
+    pub(super) redirected_to: Option<ZoneKind>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

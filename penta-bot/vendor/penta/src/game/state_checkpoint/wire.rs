@@ -2,6 +2,14 @@
 
 use super::*;
 
+impl Game {
+    /// Projection for the current checkpoint format. The checkpoint has one typed schema
+    /// internally; only this boundary turns it into JSON.
+    pub(in crate::game) fn checkpoint_json(&self, viewer: PlayerId) -> Value {
+        serde_json::to_value(self.snapshot(viewer)).expect("GameSnapshot is serializable")
+    }
+}
+
 pub(super) fn field<'a>(value: &'a Value, name: &str) -> Result<&'a Value, String> {
     value
         .get(name)
@@ -35,6 +43,25 @@ pub(super) fn u32_field(value: &Value, name: &str) -> Result<u32, String> {
     usize_field(value, name)
         .and_then(|v| u32::try_from(v).map_err(|_| format!("field {name} is too large")))
 }
+
+pub(super) fn card_definition_id(value: &Value) -> Result<CardDefinitionId, String> {
+    value
+        .as_u64()
+        .and_then(CardDefinitionId::try_new)
+        .ok_or_else(|| {
+            format!(
+                "card definition must be an integer from 1 through {}",
+                CardDefinitionId::MAX
+            )
+        })
+}
+
+pub(super) fn card_definition_id_field(
+    value: &Value,
+    name: &str,
+) -> Result<CardDefinitionId, String> {
+    card_definition_id(field(value, name)?).map_err(|error| format!("field {name}: {error}"))
+}
 pub(super) fn u8_field(value: &Value, name: &str) -> Result<u8, String> {
     usize_field(value, name)
         .and_then(|v| u8::try_from(v).map_err(|_| format!("field {name} is too large")))
@@ -51,15 +78,7 @@ pub(super) fn seat_value(value: &Value) -> Result<PlayerId, String> {
     }
 }
 pub(super) fn definitions(value: &Value) -> Result<Vec<CardDefinitionId>, String> {
-    array(value)?
-        .iter()
-        .map(|v| {
-            v.as_u64()
-                .and_then(|n| u16::try_from(n).ok())
-                .map(CardDefinitionId)
-                .ok_or_else(|| "card definitions must be u16 integers".into())
-        })
-        .collect()
+    array(value)?.iter().map(card_definition_id).collect()
 }
 pub(super) fn hidden_definitions(
     hidden: &Value,
@@ -76,7 +95,7 @@ pub(super) fn card(
     catalog: &CardCatalog,
 ) -> Result<CardInstance, String> {
     if catalog.get(definition).is_none() {
-        return Err(format!("unknown card definition {}", definition.0));
+        return Err(format!("unknown card definition {definition}"));
     }
     Ok(CardInstance {
         id,
@@ -84,6 +103,7 @@ pub(super) fn card(
         owner,
         backing: ObjectBacking::None,
         characteristics: CharacteristicSource::Card(definition),
+        counters: crate::game::counters::Counters::new(),
     })
 }
 
@@ -96,10 +116,7 @@ pub(super) fn parse_cards(
         .iter()
         .map(|value| {
             let id = GameObjectId(u32_field(value, "objectId")?);
-            let definition = CardDefinitionId(
-                u16::try_from(usize_field(value, "definition")?)
-                    .map_err(|_| "definition is too large")?,
-            );
+            let definition = card_definition_id_field(value, "definition")?;
             card(id, definition, owner, catalog)
         })
         .collect()
@@ -196,38 +213,32 @@ pub(super) fn i16_pair(value: &Value) -> Result<[i16; 2], String> {
     Ok([read_i16(&values[0])?, read_i16(&values[1])?])
 }
 
-fn color_set_from_flags(flags: [bool; 5]) -> ColorSet {
-    let mut colors = ColorSet::empty();
-    for (present, color) in flags.into_iter().zip([
-        ManaColor::White,
-        ManaColor::Blue,
-        ManaColor::Black,
-        ManaColor::Red,
-        ManaColor::Green,
-    ]) {
-        if present {
-            colors = colors.with(color);
-        }
-    }
-    colors
-}
-
 /// Poison counters, which are additive on the wire: an observation written
 /// before poison existed simply has none, and reconstructs with none.
 pub(super) fn poison_pair(observation: &Value) -> Result<[u16; 2], String> {
-    let Some(value) = observation.get("poison") else {
+    counter_pair(observation, "poison")
+}
+
+pub(super) fn energy_pair(observation: &Value) -> Result<[u16; 2], String> {
+    counter_pair(observation, "energy")
+}
+
+/// One per-seat counter total off the wire. Absent means none: a payload
+/// written before that counter existed describes a game with none of it.
+fn counter_pair(observation: &Value, key: &str) -> Result<[u16; 2], String> {
+    let Some(value) = observation.get(key) else {
         return Ok([0, 0]);
     };
     let values = array(value)?;
     if values.len() != 2 {
-        return Err("poison must contain p1 and p2 values".into());
+        return Err(format!("{key} must contain p1 and p2 values"));
     }
     let mut counters = [0_u16; 2];
     for (slot, value) in counters.iter_mut().zip(values) {
         *slot = value
             .as_u64()
             .and_then(|counters| u16::try_from(counters).ok())
-            .ok_or("poison counters must be unsigned integers")?;
+            .ok_or_else(|| format!("{key} counters must be unsigned integers"))?;
     }
     Ok(counters)
 }
@@ -266,7 +277,11 @@ pub(super) fn parse_mana(
                 .transpose()?;
             if payload.is_some_and(|payload| match payload.mana {
                 crate::card::ManaSelectionDef::One(expected) => expected != color,
-                crate::card::ManaSelectionDef::Choice(colors) => !colors.contains(&color),
+                crate::card::ManaSelectionDef::Choice(colors)
+                | crate::card::ManaSelectionDef::Combination(colors) => !colors.contains(&color),
+                // The same: an imprint's colours are read off the permanent,
+                // which this restore has not rebuilt yet.
+                crate::card::ManaSelectionDef::ColorsOfLinkedExiles => false,
             }) {
                 return Err("mana payload cannot produce its checkpoint color".into());
             }
@@ -333,28 +348,22 @@ pub(super) fn hidden_hand_indices(
         .collect()
 }
 
-pub(super) fn parse_miracle_window(
-    checkpoint: &GameSnapshot,
-    hidden: &Value,
-    viewer: PlayerId,
-    hands: &[Vec<CardInstance>; 2],
-) -> Result<Option<GameObjectId>, String> {
-    if let Some(object) = checkpoint.miracle_window {
-        return Ok(Some(GameObjectId(object)));
-    }
-    let Some(window) = hidden.get("miracleWindow").filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-    let player = seat_value(field(window, "seat")?)?;
-    if player != viewer.opponent() {
-        return Err("hidden miracleWindow must belong to the opposing seat".into());
-    }
-    let index = usize_field(window, "handIndex")?;
-    hands[player.index()]
-        .get(index)
-        .map(|card| Some(card.id))
-        .ok_or_else(|| format!("hidden miracle hand index {index} is out of range"))
+/// Object ids from a JSON array, ignoring anything that is not one. An
+/// absent or non-array value is no ids rather than an error, which is what a
+/// permanent blocking nothing looks like on the wire.
+pub(super) fn object_id_list(value: Option<&Value>) -> Vec<GameObjectId> {
+    value
+        .and_then(Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(Value::as_u64)
+                .filter_map(|id| u32::try_from(id).ok())
+                .map(GameObjectId)
+                .collect()
+        })
+        .unwrap_or_default()
 }
+
 pub(super) fn optional_id(value: Option<&Value>) -> Option<GameObjectId> {
     value
         .and_then(Value::as_u64)
@@ -373,10 +382,7 @@ pub(super) fn parse_last_seen_hand(
         .map(|card| {
             Ok((
                 GameObjectId(u32_field(card, "objectId")?),
-                CardDefinitionId(
-                    u16::try_from(usize_field(card, "definition")?)
-                        .map_err(|_| "last-seen definition is too large")?,
-                ),
+                card_definition_id_field(card, "definition")?,
             ))
         })
         .collect::<Result<Vec<_>, String>>()?;
@@ -421,11 +427,15 @@ pub(super) fn parse_combat_stage(value: &CombatDamageStageSnapshot) -> CombatDam
     }
 }
 
+/// Rebuilds the battlefield, and the permanents that are phased out beside
+/// it. Both come from the observation's battlefield list, which carries the
+/// phased-out ones last behind a flag: they are public information, so they
+/// are shown rather than hidden, and only the rules treat them as absent.
 pub(super) fn parse_battlefield(
     observation: &Value,
     snapshots: &[PermanentSnapshot],
     catalog: &CardCatalog,
-) -> Result<Vec<Permanent>, String> {
+) -> Result<(Vec<Permanent>, Vec<Permanent>), String> {
     let visible = array(field(observation, "battlefield")?)?;
     if visible.len() != snapshots.len() {
         return Err("checkpoint battlefield does not match observation".into());
@@ -441,14 +451,6 @@ pub(super) fn parse_battlefield(
             parse_permanent(
                 state,
                 PermanentPresentation {
-                    definition: CardDefinitionId(
-                        u16::try_from(usize_field(shown, "definition")?)
-                            .map_err(|_| "definition too large")?,
-                    ),
-                    presented: CardPartId(
-                        u8::try_from(usize_field(shown, "presentedPartId")?)
-                            .map_err(|_| "part id too large")?,
-                    ),
                     controller: seat_value(field(shown, "controller")?)?,
                     tapped: bool_field(shown, "tapped")?,
                     damage: u16::try_from(usize_field(shown, "damage")?)
@@ -460,12 +462,28 @@ pub(super) fn parse_battlefield(
                         .map(parse_attack_defender)
                         .transpose()?,
                     blocked: bool_field(shown, "blockedThisCombat")?,
-                    blocking: optional_id(shown.get("blocking")),
+                    blocking: object_id_list(shown.get("blocking")),
+                    // Absent from an observation written before blocker status
+                    // outlived the relationship. `blocking` is still read
+                    // above, and a live block answers on its own, so such a
+                    // payload loses nothing it was able to record.
+                    blocking_this_combat: shown
+                        .get("blockingThisCombat")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    attacking_band: shown
+                        .get("attackingBand")
+                        .and_then(Value::as_u64)
+                        .and_then(|band| u8::try_from(band).ok()),
                     activated_loyalty_this_turn: bool_field(shown, "loyaltyAbilityUsedThisTurn")?,
                     chosen_creature_type: shown
                         .get("chosenCreatureType")
                         .and_then(Value::as_str)
                         .map(str::to_owned),
+                    chosen_basic_land_type: shown
+                        .get("chosenBasicLandType")
+                        .and_then(Value::as_str)
+                        .and_then(BasicLandType::from_subtype),
                     chosen_card_name: shown
                         .get("chosenCardName")
                         .and_then(Value::as_str)
@@ -473,23 +491,37 @@ pub(super) fn parse_battlefield(
                 },
                 catalog,
             )
+            .map(|permanent| (bool_field(shown, "phasedOut").unwrap_or(false), permanent))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()
+        .map(|permanents| {
+            let mut battlefield = Vec::new();
+            let mut phased_out = Vec::new();
+            for (phased, permanent) in permanents {
+                if phased {
+                    phased_out.push(permanent);
+                } else {
+                    battlefield.push(permanent);
+                }
+            }
+            (battlefield, phased_out)
+        })
 }
 
 #[allow(clippy::struct_excessive_bools)]
 struct PermanentPresentation {
-    definition: CardDefinitionId,
-    presented: CardPartId,
     controller: PlayerId,
     tapped: bool,
     damage: u16,
     attacking: bool,
     attack_defender: Option<AttackDefender>,
     blocked: bool,
-    blocking: Option<GameObjectId>,
+    blocking: Vec<GameObjectId>,
+    blocking_this_combat: bool,
+    attacking_band: Option<u8>,
     activated_loyalty_this_turn: bool,
     chosen_creature_type: Option<String>,
+    chosen_basic_land_type: Option<BasicLandType>,
     chosen_card_name: Option<String>,
 }
 
@@ -505,74 +537,155 @@ fn parse_permanent(
                 .into(),
         );
     }
-    // Counter kinds are appended rather than inserted, so a checkpoint
-    // written before a kind existed simply carries none of it.
-    if state.counters.len() > CounterKind::COUNT {
-        return Err("counter vector has the wrong length".into());
+    let mut counters = crate::game::counters::Counters::new();
+    for counter in &state.counters {
+        let kind = CounterKind::from_name(&counter.name)
+            .ok_or_else(|| format!("unknown counter name {}", counter.name))?;
+        if counter.count == 0 || counters.count(kind) != 0 {
+            return Err("checkpoint counter entries must be unique and nonzero".into());
+        }
+        counters.set(kind, counter.count);
     }
-    let mut counters = [0; CounterKind::COUNT];
-    counters[..state.counters.len()].copy_from_slice(&state.counters);
     let owner = player_from_index(state.owner)?;
+    let copy_effect = state
+        .copy_effect
+        .as_ref()
+        .map(|copy| parse_copiable_characteristics(copy, catalog))
+        .transpose()?;
+    let double_faced_token_copy = state
+        .double_faced_token_copy
+        .as_ref()
+        .map(|faces| parse_double_faced_copiable_characteristics(faces, catalog))
+        .transpose()?;
+    let token_characteristics = state
+        .token_characteristics
+        .as_ref()
+        .map(|token| {
+            catalog_token_characteristics(catalog, token)
+                .ok_or_else(|| "checkpoint token locator is absent from this catalog".to_owned())
+        })
+        .transpose()?;
+    let object_kind = object_kind_from_snapshot(state.object_kind, catalog)?;
+    let characteristics = match object_kind {
+        ObjectKind::Card(definition) => {
+            if double_faced_token_copy.is_some() {
+                return Err(
+                    "checkpoint card permanent carries double-faced token-copy values".into(),
+                );
+            }
+            CharacteristicSource::Card(definition)
+        }
+        ObjectKind::Token => {
+            if token_characteristics.is_some() && double_faced_token_copy.is_some() {
+                return Err(
+                    "checkpoint token has both authored and copied double-faced values".into(),
+                );
+            }
+            let presented = CardPartId(state.presented_part_id);
+            if double_faced_token_copy
+                .as_ref()
+                .is_some_and(|faces| presented != faces.front_part && presented != faces.back_part)
+            {
+                return Err(
+                    "checkpoint double-faced token presents neither of its physical faces".into(),
+                );
+            }
+            let copied_base = copy_effect.as_ref().map(|copy| copy.base).or_else(|| {
+                double_faced_token_copy
+                    .as_ref()
+                    .and_then(|faces| faces.face(presented))
+                    .map(|copy| copy.base)
+            });
+            match (token_characteristics, copied_base) {
+                (Some(token), _) => CharacteristicSource::Token(token),
+                (None, Some(ObjectCharacteristics::Card { definition, .. })) => {
+                    CharacteristicSource::Copy(definition)
+                }
+                (None, Some(ObjectCharacteristics::Token { token, .. })) => {
+                    CharacteristicSource::Token(token)
+                }
+                (None, Some(ObjectCharacteristics::FaceDown { face_down })) => {
+                    CharacteristicSource::FaceDown(face_down)
+                }
+                (None, Some(ObjectCharacteristics::Emblem { .. })) => {
+                    return Err("an emblem cannot supply copied permanent values".into());
+                }
+                (None, None) => {
+                    return Err(
+                        "checkpoint token has neither authored nor copied characteristics".into(),
+                    );
+                }
+            }
+        }
+        ObjectKind::Emblem => {
+            return Err("an emblem cannot appear in the battlefield snapshot".into());
+        }
+        ObjectKind::Ability => {
+            if double_faced_token_copy.is_some() {
+                return Err(
+                    "checkpoint ability permanent carries double-faced token-copy values".into(),
+                );
+            }
+            return Err("a permanent cannot have ability object kind".into());
+        }
+    };
+    let object = ObjectInstance {
+        id: GameObjectId(state.object_id),
+        definition: object_kind,
+        owner,
+        backing: ObjectBacking::None,
+        characteristics,
+        counters: crate::game::counters::Counters::new(),
+    };
     let mut permanent = Permanent::entering(
-        card(
-            GameObjectId(state.object_id),
-            shown.definition,
-            owner,
-            catalog,
-        )?,
-        shown.presented,
+        object,
+        CardPartId(state.presented_part_id),
         shown.controller,
         state.entered_controller_turn,
+        state.entered_turn,
     );
+    permanent.token_characteristics = token_characteristics;
+    permanent.double_faced_token_copy = double_faced_token_copy;
     permanent.timestamp = ContinuousEffectTimestamp(state.timestamp);
     permanent.tapped = shown.tapped;
     permanent.damage = shown.damage;
-    permanent.power_bonus = state.power_bonus;
-    permanent.toughness_bonus = state.toughness_bonus;
-    permanent.while_source_tapped = state
-        .while_source_tapped
-        .iter()
-        .map(|(source, power, toughness)| TappedSourceStatBonus {
-            source: GameObjectId(*source),
-            power: *power,
-            toughness: *toughness,
-        })
-        .collect();
     permanent.attacking = shown.attacking;
     permanent.attack_defender = shown.attack_defender;
     permanent.blocked = shown.blocked;
-    permanent.blocking = shown.blocking;
+    permanent.blocking.clone_from(&shown.blocking);
+    permanent.blocking_this_combat = shown.blocking_this_combat;
+    permanent.attacking_band = shown.attacking_band;
     permanent.activated_loyalty_this_turn = shown.activated_loyalty_this_turn;
-    permanent.unblockable_this_turn = state.unblockable_this_turn;
-    permanent.cannot_block_this_turn = state.cannot_block_this_turn;
     permanent.detained_until_turn_of = state
         .detained_until_turn_of
         .map(|(player, turns)| player_from_index(player).map(|player| (player, turns)))
         .transpose()?;
-    permanent.destroy_at_end_of_combat = state.destroy_at_end_of_combat;
     permanent.skipped_untap_steps = state.skipped_untap_steps;
-    permanent.color_override = state.color_override.map(color_set_from_flags);
-    permanent.combat_damage_prevented = state.combat_damage_prevented;
-    permanent.combat_damage_dealt_by_prevented = state.combat_damage_dealt_by_prevented;
-    permanent.damage_dealt_by_prevented = state.damage_dealt_by_prevented;
     permanent.control_reverts_to = state
         .control_reverts_to
         .map(player_from_index)
         .transpose()?;
-    permanent.cannot_regenerate_this_turn = state.cannot_regenerate_this_turn;
     permanent.control_source = state.control_source.map(GameObjectId);
     permanent.control_requires_source_tapped = state.control_requires_source_tapped;
+    permanent.control_requires_source_attached = state.control_requires_source_attached;
+    permanent.reconfigured_timestamp = state
+        .reconfigured_timestamp
+        .map(super::super::ContinuousEffectTimestamp);
     permanent.chosen_player = state.chosen_player.map(player_from_index).transpose()?;
+    permanent.cast_x = state.cast_x;
+    permanent.cast_from_zone = state
+        .cast_from_zone
+        .as_deref()
+        .and_then(cast_source_zone_from_label);
+    permanent.cast_alternative = state
+        .cast_alternative
+        .as_deref()
+        .and_then(crate::card::AlternativeCastKindDef::from_label);
     permanent.chosen_creature_type = shown.chosen_creature_type;
+    permanent.chosen_basic_land_type = shown.chosen_basic_land_type;
     permanent.chosen_card_name = shown.chosen_card_name;
-    permanent.animation = state
-        .animation
-        .as_ref()
-        .map(|value| {
-            catalog_animation(catalog, value)
-                .ok_or_else(|| "checkpoint animation is absent from this catalog".to_owned())
-        })
-        .transpose()?;
+    permanent.face_down = state.face_down.map(face_down_characteristics_from_snapshot);
+    permanent.turn_up_for_mana_cost = state.turn_up_for_mana_cost;
     permanent.temporary_keywords = state
         .temporary_keywords
         .iter()
@@ -584,45 +697,10 @@ fn parse_permanent(
         .iter()
         .map(|entry| Ok((player_from_index(entry.seat)?, parse_keyword(entry.keyword))))
         .collect::<Result<Vec<_>, String>>()?;
-    permanent.temporary_granted_abilities = state
-        .temporary_granted_abilities
+    permanent.resolved_continuous_effects = state
+        .resolved_continuous_effects
         .iter()
-        .map(|grant| {
-            Ok(TemporaryGrantedAbility {
-                ability: catalog_ability(catalog, &grant.ability).ok_or_else(|| {
-                    "checkpoint granted ability locator is absent from this catalog".to_owned()
-                })?,
-                source: GameObjectId(grant.source),
-                source_definition: CardDefinitionId(grant.source_definition),
-                source_part: CardPartId(grant.source_part_id),
-                source_ability: AbilityId(grant.source_ability_id),
-                grant: GrantId(grant.grant_id),
-                timestamp: ContinuousEffectTimestamp(grant.timestamp),
-                order: grant.order,
-                expiration: parse_expiration(grant.expiration)?,
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    permanent.temporary_removed_abilities = state
-        .temporary_removed_abilities
-        .iter()
-        .map(|removal| {
-            let AppliedEffectDef::RemoveAbilities(predicate) =
-                catalog_applied_effect(catalog, &removal.effect).ok_or_else(|| {
-                    "checkpoint removed-ability locator is absent from this catalog".to_owned()
-                })?
-            else {
-                return Err(
-                    "checkpoint removed-ability locator is not a remove-abilities effect".into(),
-                );
-            };
-            Ok(TemporaryRemovedAbilities {
-                predicate,
-                timestamp: ContinuousEffectTimestamp(removal.timestamp),
-                order: removal.order,
-                expiration: parse_expiration(removal.expiration)?,
-            })
-        })
+        .map(|effect| parse_resolved_continuous_effect(effect, catalog))
         .collect::<Result<Vec<_>, String>>()?;
     permanent.activations_this_turn = state
         .activations_this_turn
@@ -634,21 +712,37 @@ fn parse_permanent(
             )
         })
         .collect();
-    permanent.copy_effect = state
-        .copy_effect
-        .as_ref()
-        .map(|copy| parse_copiable_characteristics(copy, catalog))
-        .transpose()?;
+    permanent.triggers_this_turn = state
+        .triggers_this_turn
+        .iter()
+        .map(|triggered| {
+            (
+                ability_origin_from_snapshot(triggered.origin),
+                triggered.count,
+            )
+        })
+        .collect();
+    permanent.resolutions_this_turn = state
+        .resolutions_this_turn
+        .iter()
+        .map(|resolved| {
+            (
+                ability_origin_from_snapshot(resolved.origin),
+                resolved.count,
+            )
+        })
+        .collect();
+    permanent.cast_at_instant_speed = state.cast_at_instant_speed;
+    permanent.became_aura = state.became_aura;
+    permanent.copy_effect = copy_effect;
+    permanent.copy_expiration = state.copy_expiration.map(parse_expiration).transpose()?;
     permanent.copied_from = state
         .copied_from
+        .as_ref()
         .map(|copy| {
-            let definition = CardDefinitionId(copy.definition);
-            let part = CardPartId(copy.part_id);
-            catalog
-                .get(definition)
-                .and_then(|card| card.part(part))
-                .ok_or("checkpoint copied-from card part is absent from this catalog")?;
-            Ok::<_, String>((definition, part))
+            object_characteristics_from_snapshot(catalog, &copy.characteristics).ok_or_else(|| {
+                "checkpoint copied-from characteristics are absent from this catalog".to_owned()
+            })
         })
         .transpose()?;
     permanent.text_changes = state
@@ -662,11 +756,27 @@ fn parse_permanent(
     permanent.destroy_at_end = state.destroy_at_end;
     permanent.counters = counters;
     permanent.attached_to = state.attached_to.map(GameObjectId);
+    permanent.attached_player = state.attached_player.map(player_from_index).transpose()?;
     permanent.exile_instead_of_dying = state.exile_instead_of_dying;
     permanent.regeneration_shields = state.regeneration_shields;
     permanent.attacked_this_turn = state.attacked_this_turn;
+    permanent.exerted = state.exerted;
+    permanent.saddled = state.saddled;
+    permanent.exhausted = state
+        .exhausted
+        .iter()
+        .copied()
+        .map(super::ability_origin_from_snapshot)
+        .collect();
+    permanent.last_attacked_turn = state
+        .last_attacked_turn
+        .map(|(player, turns)| player_from_index(player).map(|player| (player, turns)))
+        .transpose()?;
     permanent.attacks_this_turn = state.attacks_this_turn;
     permanent.damage_sources = ids(&state.damage_sources);
+    permanent.was_dealt_damage_this_turn = state.was_dealt_damage_this_turn;
+    permanent.dealt_damage_this_turn = state.dealt_damage_this_turn;
+    permanent.paired_with = state.paired_with.map(GameObjectId);
     permanent.dealt_damage_to_opponent_this_turn = state.dealt_damage_to_opponent_this_turn;
     permanent.deathtouch_damage = state.deathtouch_damage;
     permanent.created_by = state.created_by.map(GameObjectId);
@@ -681,40 +791,6 @@ fn parse_permanent(
     Ok(permanent)
 }
 
-pub(super) fn parse_copiable_characteristics(
-    snapshot: &CopiableCharacteristicsSnapshot,
-    catalog: &CardCatalog,
-) -> Result<CopiableCharacteristics, String> {
-    let definition = CardDefinitionId(snapshot.definition);
-    let part = CardPartId(snapshot.part_id);
-    catalog
-        .get(definition)
-        .and_then(|card| card.part(part))
-        .ok_or("checkpoint copy-effect card part is absent from this catalog")?;
-    let mut added_types = CardTypeSet::empty();
-    for (card_type, present) in CardType::ALL.into_iter().zip(snapshot.added_types) {
-        if present {
-            added_types = added_types.with(card_type);
-        }
-    }
-    Ok(CopiableCharacteristics {
-        base: (definition, part),
-        added_types,
-        added_abilities: snapshot
-            .added_abilities
-            .iter()
-            .map(|ability| {
-                Ok(CopiableAbility {
-                    origin: ability_origin_from_snapshot(ability.origin),
-                    definition: catalog_ability(catalog, &ability.ability).ok_or_else(|| {
-                        "checkpoint copied ability locator is absent from this catalog".to_owned()
-                    })?,
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?,
-    })
-}
-
 pub(super) fn parse_retired_objects(
     snapshots: &[RetiredObjectSnapshot],
     game: &Game,
@@ -725,7 +801,7 @@ pub(super) fn parse_retired_objects(
             RetiredObjectSnapshot::Card { card: snapshot } => {
                 let parsed = card(
                     GameObjectId(snapshot.object_id),
-                    CardDefinitionId(snapshot.definition),
+                    snapshot.definition,
                     player_from_index(snapshot.owner)?,
                     &game.catalog,
                 )?;
@@ -770,6 +846,7 @@ pub(super) fn parse_pending_events(
                     permanent: parse_detached_permanent(&snapshot.entry.permanent, catalog)?,
                     from: parse_zone_kind(snapshot.entry.from),
                     completion: parse_completion(snapshot.entry.completion)?,
+                    redirected_to: None,
                 }),
                 applied: snapshot
                     .applied
@@ -784,8 +861,18 @@ pub(super) fn parse_pending_events(
                     .effects
                     .iter()
                     .map(|effect| {
+                        let context = parse_replacement_context_snapshot(effect.context)?;
+                        if !replacement_effect_locator_matches_source(
+                            &effect.effect,
+                            context.source,
+                        ) {
+                            return Err(
+                                "pending entry replacement locator disagrees with its source"
+                                    .into(),
+                            );
+                        }
                         Ok(PendingReplacementEffect {
-                            context: parse_replacement_context_snapshot(effect.context)?,
+                            context,
                             effect: catalog_entry_replacement_effect(catalog, &effect.effect)?,
                         })
                     })
@@ -793,16 +880,6 @@ pub(super) fn parse_pending_events(
             })
         })
         .collect()
-}
-
-pub(super) fn catalog_entry_replacement_effect(
-    catalog: &CardCatalog,
-    locator: &EntryReplacementLocator,
-) -> Result<BattlefieldEntryReplacementEffect, String> {
-    let ability = catalog_ability(catalog, &locator.ability)
-        .ok_or("entry replacement ability locator is absent from this catalog")?;
-    entry_replacement_effect(&ability)
-        .ok_or_else(|| "locator does not identify an entry replacement effect".into())
 }
 
 pub(super) const fn parse_zone_kind(zone: ZoneKindSnapshot) -> ZoneKind {
@@ -827,9 +904,25 @@ pub(super) fn parse_completion(
         EntryCompletionSnapshot::SpellResolved { card, definition } => {
             Ok(EntryCompletion::SpellResolved {
                 card: GameObjectId(card),
-                definition: CardDefinitionId(definition),
+                definition,
             })
         }
+        EntryCompletionSnapshot::AttachSource { source } => Ok(EntryCompletion::AttachSource {
+            source: GameObjectId(source),
+        }),
+        EntryCompletionSnapshot::AttachToHost { host } => Ok(EntryCompletion::AttachToHost {
+            host: GameObjectId(host),
+        }),
+        EntryCompletionSnapshot::Attacking { defender } => Ok(EntryCompletion::Attacking {
+            defender: match defender {
+                AttackDefenderSnapshot::Player { seat } => {
+                    AttackDefender::Player(player_from_index(seat)?)
+                }
+                AttackDefenderSnapshot::Planeswalker { object_id } => {
+                    AttackDefender::Planeswalker(GameObjectId(object_id))
+                }
+            },
+        }),
         EntryCompletionSnapshot::Setup => Ok(EntryCompletion::Setup),
         EntryCompletionSnapshot::None => Ok(EntryCompletion::None),
     }
@@ -853,17 +946,23 @@ pub(super) fn parse_detached_permanent(
     parse_permanent(
         &snapshot.state,
         PermanentPresentation {
-            definition: CardDefinitionId(snapshot.definition),
-            presented: CardPartId(snapshot.presented_part_id),
             controller: player_from_index(snapshot.controller)?,
             tapped: snapshot.tapped,
             damage: snapshot.damage,
             attacking: snapshot.attacking,
             attack_defender,
             blocked: snapshot.blocked,
-            blocking: snapshot.blocking.map(GameObjectId),
+            blocking: snapshot
+                .blocking
+                .iter()
+                .copied()
+                .map(GameObjectId)
+                .collect(),
+            blocking_this_combat: snapshot.blocking_this_combat.unwrap_or(false),
+            attacking_band: snapshot.attacking_band,
             activated_loyalty_this_turn: snapshot.activated_loyalty_this_turn,
             chosen_creature_type: snapshot.chosen_creature_type.clone(),
+            chosen_basic_land_type: snapshot.chosen_basic_land_type.map(parse_basic_land_type),
             chosen_card_name: snapshot.chosen_card_name.clone(),
         },
         catalog,
@@ -888,80 +987,6 @@ pub(super) fn parse_attack_defender(value: &Value) -> Result<AttackDefender, Str
     }
 }
 
-pub(super) fn parse_cast_signature(value: &Value) -> Result<CastSignature, String> {
-    let form_value = field(value, "form")?;
-    let form = match str_field(form_value, "kind")? {
-        "part" => SpellForm::Part(CardPartId(
-            u8::try_from(usize_field(form_value, "partId")?).map_err(|_| "part id too large")?,
-        )),
-        "combined" => SpellForm::Combined(
-            array(field(form_value, "partIds")?)?
-                .iter()
-                .map(|part| read_u8(part).map(CardPartId))
-                .collect::<Result<Vec<_>, _>>()?,
-        ),
-        other => return Err(format!("unknown spell form {other}")),
-    };
-    let alternative = value
-        .get("alternativeCostId")
-        .filter(|v| !v.is_null())
-        .map(|v| read_u8(v).map(AlternativeCostId))
-        .transpose()?;
-    let additional = array(field(value, "additionalCostIds")?)?
-        .iter()
-        .map(|v| read_u8(v).map(AdditionalCostId))
-        .collect::<Result<Vec<_>, _>>()?;
-    let modes = array(field(value, "modeIds")?)?
-        .iter()
-        .map(|v| read_u8(v).map(ModeId))
-        .collect::<Result<Vec<_>, _>>()?;
-    let selections = array(field(value, "targetSelections")?)?
-        .iter()
-        .map(parse_target_selection)
-        .collect::<Result<Vec<_>, _>>()?;
-    let choices = CastChoices::new(PlayOptionId(
-        u8::try_from(usize_field(value, "playOptionId")?).map_err(|_| "play option too large")?,
-    ))
-    .with_modes(modes)
-    .with_costs(CostConfiguration::new(alternative, additional))
-    .with_x(u16::try_from(usize_field(value, "x")?).map_err(|_| "x too large")?)
-    .with_targets(selections);
-    Ok(CastSignature::from_validated_choices(form, choices))
-}
-
-pub(super) fn parse_target_selection(value: &Value) -> Result<TargetSelection, String> {
-    let slot = TargetSlotId(
-        u8::try_from(usize_field(value, "slotId")?).map_err(|_| "target slot too large")?,
-    );
-    let targets = array(field(value, "targets")?)?
-        .iter()
-        .map(parse_target)
-        .collect::<Result<Vec<_>, _>>()?;
-    let amounts = array(field(value, "amounts")?)?
-        .iter()
-        .map(read_u16)
-        .collect::<Result<Vec<_>, _>>()?;
-    if amounts.is_empty() {
-        Ok(TargetSelection::new(slot, targets))
-    } else if amounts.len() == targets.len() {
-        Ok(TargetSelection::divided(slot, targets, amounts))
-    } else {
-        Err("divided target amounts do not match targets".into())
-    }
-}
-
-pub(super) fn parse_target(value: &Value) -> Result<Target, String> {
-    match str_field(value, "type")? {
-        "player" => Ok(Target::Player(seat_value(field(value, "seat")?)?)),
-        "card" => Ok(Target::Card(PublicGameObjectId(u32_field(
-            value, "objectId",
-        )?))),
-        "permanent" => Ok(Target::Permanent(PublicGameObjectId(u32_field(
-            value, "objectId",
-        )?))),
-        "spell" => Ok(Target::Spell(PublicGameObjectId(u32_field(
-            value, "objectId",
-        )?))),
-        other => Err(format!("unknown target type {other}")),
-    }
-}
+include!("wire_continuous.rs");
+include!("wire_cast.rs");
+include!("wire_copy.rs");

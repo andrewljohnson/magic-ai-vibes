@@ -19,7 +19,10 @@ pub(super) fn drain_pending(game: &mut Game) {
                 .options
                 .iter()
                 .map(|option| option.id)
-                .take(decision.minimum.max(1))
+                // At least one where anything may be taken, but never more
+                // than the decision allows: a pure look permits nothing at
+                // all, and offers its one option only to show what was seen.
+                .take(decision.minimum.max(1).min(decision.maximum))
                 .collect::<Vec<_>>();
             game.apply(
                 decision.player,
@@ -102,151 +105,279 @@ fn an_intervening_if_is_checked_when_it_triggers_and_again_when_it_resolves() {
     );
 }
 
+pub(super) fn installing_object(
+    id: u32,
+    controller: PlayerId,
+    target_defs: Vec<AbilityTargetDef>,
+    targets: Vec<TargetSelection>,
+    x: u16,
+) -> StackObject {
+    let mut object = spell(id, cards::LIGHTNING_BOLT, controller, x);
+    object.kind = StackObjectKind::ActivatedAbility;
+    object.source = Some(GameObjectId(id.saturating_add(10_000)));
+    object.signature = None;
+    object.ability = Some(StackAbilityPayload {
+        origin: primary_ability(cards::LIGHTNING_BOLT),
+        definition: None,
+        presentation: ObjectCharacteristics::card(cards::LIGHTNING_BOLT, CardPartId::PRIMARY),
+        text: Some("Install a triggered ability."),
+        target_defs,
+        targets,
+        context: EffectResolutionContext::empty(),
+        resolver: StackAbilityResolver::Declarative(ScopedEffect::primary(EffectDef::None)),
+        condition: None,
+        mode_effects: Vec::new(),
+        resolution_destination: None,
+        x,
+    });
+    object
+}
+
 #[test]
-fn delayed_trigger_partition_preserves_order_and_waiting_capacity() {
+fn one_shot_installed_triggers_use_apnap_and_the_stack_and_are_consumed_on_match() {
     const LOSE_ONE: EffectDef = EffectDef::LoseLife {
         recipient: EffectRecipientDef::Controller,
         amount: ValueDef::Constant(1),
     };
-    const LOSE_TWO: EffectDef = EffectDef::LoseLife {
-        recipient: EffectRecipientDef::Controller,
-        amount: ValueDef::Constant(2),
-    };
-    const LOSE_THREE: EffectDef = EffectDef::LoseLife {
-        recipient: EffectRecipientDef::Controller,
-        amount: ValueDef::Constant(3),
-    };
-    const LOSE_FOUR: EffectDef = EffectDef::LoseLife {
-        recipient: EffectRecipientDef::Controller,
-        amount: ValueDef::Constant(4),
-    };
-    let delayed = |id: u32, step: TurnStepDef, effect: EffectDef| DelayedTrigger {
-        object: Box::new(spell(id, cards::LIGHTNING_BOLT, PlayerId::One, 0)),
-        context: TriggerContext::empty(),
-        step,
-        player: PlayerRelation::Any,
-        effect: ScopedEffect::primary(effect),
-    };
+    static END_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of the end step, you lose 1 life.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::End,
+            player: PlayerRelation::Any,
+        },
+        LOSE_ONE,
+    );
+    const INSTALL: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::once(&END_TRIGGER));
 
     let mut game = ready_game();
-    game.delayed_triggers = Vec::with_capacity(8);
-    game.delayed_triggers.extend([
-        delayed(10_000, TurnStepDef::End, LOSE_ONE),
-        delayed(10_001, TurnStepDef::Draw, LOSE_THREE),
-        delayed(10_002, TurnStepDef::End, LOSE_TWO),
-        delayed(10_003, TurnStepDef::Draw, LOSE_FOUR),
-    ]);
-    let waiting_capacity = game.delayed_triggers.capacity();
-    let event_start = game.events.len();
+    let first = installing_object(10_000, PlayerId::One, Vec::new(), Vec::new(), 0);
+    let second = installing_object(10_001, PlayerId::Two, Vec::new(), Vec::new(), 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(INSTALL),
+        &first,
+        TriggerContext::empty(),
+    );
+    game.resolve_effect_def(
+        ScopedEffect::primary(INSTALL),
+        &second,
+        TriggerContext::empty(),
+    );
 
-    game.fire_delayed_triggers(TurnStepDef::End);
+    game.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::One,
+    });
+    assert!(game.installed_triggers.is_empty(), "matching consumes Once");
+    assert_eq!(game.pending_triggers.len(), 2);
+    assert_eq!(game.players[0].life, 20, "nothing resolves at the boundary");
+    game.finish_rules_procedure();
 
-    let lost = game.events[event_start..]
-        .iter()
-        .filter_map(|event| match event {
-            GameEvent::LifeLost {
-                player: PlayerId::One,
-                amount,
-            } => Some(*amount),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(lost, vec![1, 2], "due effects keep their queued order");
+    assert_eq!(game.stack.len(), 2);
     assert_eq!(
-        game.delayed_triggers
+        game.stack
             .iter()
-            .map(|delayed| delayed.object.id.0)
+            .map(|object| object.controller)
             .collect::<Vec<_>>(),
-        vec![10_001, 10_003],
-        "waiting effects keep their queued order"
+        vec![PlayerId::One, PlayerId::Two],
+        "the active player's trigger is below the nonactive player's trigger",
+    );
+    let countered = game
+        .stack
+        .iter()
+        .map(|object| object.id)
+        .collect::<Vec<_>>();
+    for object in countered {
+        game.counter_spell(object);
+    }
+    game.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::One,
+    });
+    game.finish_rules_procedure();
+    assert!(
+        game.stack.is_empty(),
+        "countering does not restore the listener"
+    );
+    assert_eq!(game.players[0].life, 20);
+    assert_eq!(game.players[1].life, 20);
+}
+
+#[test]
+fn an_installed_trigger_cannot_observe_the_event_whose_listener_snapshot_predates_it() {
+    const LOSE_ONE: EffectDef = EffectDef::LoseLife {
+        recipient: EffectRecipientDef::Controller,
+        amount: ValueDef::Constant(1),
+    };
+    static END_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of the end step, you lose 1 life.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::End,
+            player: PlayerRelation::Any,
+        },
+        LOSE_ONE,
+    );
+    const INSTALL: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::once(&END_TRIGGER));
+
+    let mut game = ready_game();
+    let listeners = game.battlefield_trigger_listeners();
+    let object = installing_object(10_000, PlayerId::One, Vec::new(), Vec::new(), 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(INSTALL),
+        &object,
+        TriggerContext::empty(),
+    );
+    let event = CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::One,
+    };
+    game.capture_battlefield_triggers_from_snapshot(&listeners, &event);
+    assert!(game.pending_triggers.is_empty());
+    assert_eq!(game.installed_triggers.len(), 1);
+
+    game.capture_battlefield_triggers(&event);
+    assert_eq!(game.pending_triggers.len(), 1);
+    assert!(game.installed_triggers.is_empty());
+}
+
+#[test]
+fn installed_trigger_retains_lexical_bindings_targets_and_target_scope() {
+    static TARGETS: [AbilityTargetDef; 2] = [
+        AbilityTargetDef::exactly_one(AbilityTargetPredicate::Player(PlayerRelation::Any)),
+        AbilityTargetDef::exactly_one(AbilityTargetPredicate::Player(PlayerRelation::Any)),
+    ];
+    const TAP_BOUND: EffectDef = EffectDef::Tap {
+        object: EffectRecipientDef::object(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY)),
+    };
+    const LOSE_TARGET_TWO: EffectDef = EffectDef::LoseLife {
+        recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+        amount: ValueDef::Constant(2),
+    };
+    const LOSE_EVENT_ONE: EffectDef = EffectDef::LoseLife {
+        recipient: EffectRecipientDef::EventPlayer,
+        amount: ValueDef::Constant(1),
+    };
+    static EFFECTS: [EffectDef; 3] = [TAP_BOUND, LOSE_TARGET_TWO, LOSE_EVENT_ONE];
+    static END_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of the end step, use the installing effect's context.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::End,
+            player: PlayerRelation::Any,
+        },
+        EffectDef::Sequence(&EFFECTS),
+    );
+    const INSTALL: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::once(&END_TRIGGER));
+
+    let mut game = ready_game();
+    let bound = creature(10_000, cards::SAVANNAH_LIONS, PlayerId::One);
+    let bound_id = bound.card.id;
+    game.battlefield.push(bound);
+    let object = installing_object(
+        10_001,
+        PlayerId::One,
+        TARGETS.to_vec(),
+        vec![
+            TargetSelection::single(TargetSlotId(0), Target::Player(PlayerId::One)),
+            TargetSelection::single(TargetSlotId(1), Target::Player(PlayerId::Two)),
+        ],
+        7,
+    );
+    let mut context = EffectResolutionContext::new(TriggerContext {
+        object: None,
+        object_controller: None,
+        event_player: Some(PlayerId::One),
+        amount: Some(99),
+        damaged_object: None,
+    });
+    context.bind_single_object(
+        ObjectBindingIndex::PRIMARY,
+        Some(Target::Permanent(bound_id)),
+    );
+    game.resolve_effect_def(
+        ScopedEffect {
+            effect: INSTALL,
+            target_base: 1,
+        },
+        &object,
+        context,
+    );
+
+    game.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::Two,
+    });
+    game.finish_rules_procedure();
+    let payload = game.stack[0].ability.as_ref().expect("trigger payload");
+    assert!(
+        payload.target_defs.is_empty(),
+        "installer selections are lexical references, not the delayed ability's targets",
+    );
+    assert_eq!(payload.targets.len(), 2);
+    assert_eq!(payload.x, 7);
+    drain_pending(&mut game);
+
+    assert!(
+        game.battlefield[0].tapped,
+        "the object binding was retained"
     );
     assert_eq!(
-        game.delayed_triggers.capacity(),
-        waiting_capacity,
-        "partitioning reuses the waiting queue allocation"
+        game.players[0].life, 20,
+        "the old event player was replaced"
+    );
+    assert_eq!(
+        game.players[1].life, 17,
+        "target base 1 and the matching event player were both retained",
     );
 }
 
 #[test]
-fn delayed_effect_preserves_its_trigger_context() {
-    static TAP_TRIGGERING_OBJECT: EffectDef = EffectDef::Tap {
-        object: EffectRecipientDef::TriggeringObject,
-    };
-    static LOSE_TRIGGER_AMOUNT: EffectDef = EffectDef::LoseLife {
+fn until_next_turn_listener_survives_an_extra_turn_and_expires_for_jaces_controller() {
+    const LOSE_ONE: EffectDef = EffectDef::LoseLife {
         recipient: EffectRecipientDef::EventPlayer,
-        amount: ValueDef::TriggerEventAmount,
+        amount: ValueDef::Constant(1),
     };
-    static DELAYED_EFFECTS: [EffectDef; 2] = [TAP_TRIGGERING_OBJECT, LOSE_TRIGGER_AMOUNT];
-    static DELAYED: EffectDef = EffectDef::AtNextStep {
-        step: TurnStepDef::End,
-        player: PlayerRelation::EventPlayer,
-        effect: &EffectDef::Sequence(&DELAYED_EFFECTS),
-    };
+    static UPKEEP_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of each opponent's upkeep, that player loses 1 life.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::Upkeep,
+            player: PlayerRelation::Opponent,
+        },
+        LOSE_ONE,
+    );
+    const INSTALL: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::until_next_turn(
+            &UPKEEP_TRIGGER,
+            PlayerRefDef::EffectController,
+        ));
 
     let mut game = ready_game();
     game.active_player = PlayerId::Two;
     game.priority = PlayerId::Two;
-    let triggering = creature(10_000, cards::SAVANNAH_LIONS, PlayerId::Two);
-    let triggering_id = triggering.card.id;
-    game.battlefield.push(triggering);
-    let source = spell(10_001, cards::LIGHTNING_BOLT, PlayerId::One, 0);
-    let context = TriggerContext {
-        object: Some(triggering_id),
-        chosen_objects: [None; 8],
-        object_controller: Some(PlayerId::Two),
-        event_player: Some(PlayerId::Two),
-        amount: Some(3),
-    };
-    let life_before = game.players[PlayerId::Two.index()].life;
+    game.next_regular_player = PlayerId::One;
+    let object = installing_object(10_000, PlayerId::One, Vec::new(), Vec::new(), 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(INSTALL),
+        &object,
+        TriggerContext::empty(),
+    );
+    game.extra_turns.push(PlayerId::Two);
 
-    game.resolve_effect_def(ScopedEffect::primary(DELAYED), &source, context);
+    game.start_next_turn();
+    assert_eq!(game.active_player, PlayerId::Two);
+    assert_eq!(game.installed_triggers.len(), 1);
+    drain_pending(&mut game);
+    assert_eq!(game.players[1].life, 19, "the extra-turn upkeep matched");
 
-    assert_eq!(game.delayed_triggers.len(), 1);
-    assert!(!game.battlefield[0].tapped);
-    assert_eq!(game.players[PlayerId::Two.index()].life, life_before);
-
-    game.fire_delayed_triggers(TurnStepDef::End);
-
-    assert!(game.delayed_triggers.is_empty());
-    assert!(game.battlefield[0].tapped);
-    assert_eq!(game.players[PlayerId::Two.index()].life, life_before - 3);
-}
-
-#[test]
-fn delayed_effect_enqueued_during_firing_waits_for_the_next_matching_step() {
-    const LOSE_ONE: EffectDef = EffectDef::LoseLife {
-        recipient: EffectRecipientDef::Controller,
-        amount: ValueDef::Constant(1),
-    };
-    const ENQUEUE_LOSS: EffectDef = EffectDef::AtNextStep {
-        step: TurnStepDef::End,
-        player: PlayerRelation::Any,
-        effect: &LOSE_ONE,
-    };
-    let mut game = ready_game();
-    game.delayed_triggers = Vec::with_capacity(4);
-    game.delayed_triggers.push(DelayedTrigger {
-        object: Box::new(spell(10_000, cards::LIGHTNING_BOLT, PlayerId::One, 0)),
-        context: TriggerContext::empty(),
-        step: TurnStepDef::End,
-        player: PlayerRelation::Any,
-        effect: ScopedEffect::primary(ENQUEUE_LOSS),
-    });
-    let waiting_capacity = game.delayed_triggers.capacity();
-    let life_before = game.players[0].life;
-
-    game.fire_delayed_triggers(TurnStepDef::End);
-
-    assert_eq!(game.players[0].life, life_before);
-    assert_eq!(game.delayed_triggers.len(), 1);
-    assert_eq!(game.delayed_triggers[0].effect.effect, LOSE_ONE);
-    assert_eq!(game.delayed_triggers.capacity(), waiting_capacity);
-
-    game.fire_delayed_triggers(TurnStepDef::End);
-
-    assert_eq!(game.players[0].life, life_before - 1);
-    assert!(game.delayed_triggers.is_empty());
-    assert_eq!(game.delayed_triggers.capacity(), waiting_capacity);
+    game.start_next_turn();
+    assert_eq!(game.active_player, PlayerId::One);
+    assert!(game.installed_triggers.is_empty());
+    drain_pending(&mut game);
+    assert_eq!(
+        game.players[0].life, 20,
+        "Jace's next turn begins after expiry"
+    );
 }
 
 #[test]
@@ -298,7 +429,7 @@ fn stacked_quickens_are_all_spent_by_the_same_next_sorcery() {
 
 #[test]
 fn quicken_consumes_its_grant_for_the_selected_sorcery_part() {
-    let definition_id = CardDefinitionId(10_068);
+    let definition_id = CardDefinitionId::new(10_068);
     let instant = CardRules::new_instant(ManaCost::default());
     let sorcery = CardRules::new_sorcery(ManaCost::default());
     let (mut game, _, _) = game_with_test_fused_split(definition_id, &instant, &sorcery);
@@ -338,7 +469,7 @@ fn quicken_consumes_its_grant_for_the_selected_sorcery_part() {
 
 #[test]
 fn quicken_preserves_its_grant_for_the_selected_instant_part() {
-    let definition_id = CardDefinitionId(10_069);
+    let definition_id = CardDefinitionId::new(10_069);
     let sorcery = CardRules::new_sorcery(ManaCost::default());
     let instant = CardRules::new_instant(ManaCost::default());
     let (mut game, _, _) = game_with_test_fused_split(definition_id, &sorcery, &instant);
@@ -523,7 +654,7 @@ fn ghost_quarter_destroys_a_land_and_lets_its_owner_replace_it() {
         .options
         .iter()
         .filter_map(|option| option.card)
-        .map(|(_, definition)| definition)
+        .filter_map(|(_, characteristics)| characteristics.card_definition())
         .collect::<Vec<_>>();
     assert_eq!(
         offered,

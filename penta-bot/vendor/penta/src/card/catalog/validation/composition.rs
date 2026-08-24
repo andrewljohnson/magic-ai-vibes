@@ -21,6 +21,16 @@ pub(super) fn structure_parts(
             }
             parts.clone()
         }
+        CardStructure::Room {
+            doors,
+            combined,
+            locked,
+        } => {
+            let mut parts = doors.clone();
+            parts.push(*combined);
+            parts.push(*locked);
+            parts
+        }
         CardStructure::Flip { normal, flipped } => vec![*normal, *flipped],
         CardStructure::DoubleFaced { front, back, .. } => vec![*front, *back],
         CardStructure::AlternateSpell {
@@ -215,11 +225,18 @@ fn validate_mode_selection_bounds(
             option: option.id,
         });
     }
-    if !mode_set.may_repeat && usize::from(mode_set.maximum) > mode_set.modes.len() {
+    // The conditional maximum is the one a "you may choose two instead"
+    // clause can actually reach, so it is what has to fit the printed modes.
+    let maximum = mode_set
+        .conditional_maximum
+        .map_or(mode_set.maximum, |conditional| {
+            mode_set.maximum.max(conditional.maximum)
+        });
+    if !mode_set.may_repeat && usize::from(maximum) > mode_set.modes.len() {
         return Err(CatalogError::TooManyModesWithoutRepetition {
             definition: definition.id,
             option: option.id,
-            maximum: mode_set.maximum,
+            maximum,
             available: mode_set.modes.len(),
         });
     }

@@ -419,9 +419,13 @@ fn mwonvuli_beast_tracker_finds_only_the_four_named_keywords() {
     let mut offered = decision
         .options
         .iter()
-        .filter_map(|option| option.card.map(|(_, definition)| definition))
+        .filter_map(|option| {
+            option
+                .card
+                .and_then(|(_, characteristics)| characteristics.card_definition())
+        })
         .collect::<Vec<_>>();
-    offered.sort_unstable_by_key(|definition| definition.0);
+    offered.sort_unstable_by_key(|definition| definition.get());
     assert_eq!(
         offered,
         vec![cards::GIANT_SPIDER, cards::DEADLY_RECLUSE],
@@ -431,7 +435,11 @@ fn mwonvuli_beast_tracker_finds_only_the_four_named_keywords() {
     let spider = decision
         .options
         .iter()
-        .find(|option| option.card.is_some_and(|(_, id)| id == cards::GIANT_SPIDER))
+        .find(|option| {
+            option.card.is_some_and(|(_, characteristics)| {
+                characteristics.card_definition() == Some(cards::GIANT_SPIDER)
+            })
+        })
         .unwrap();
     game.apply(
         PlayerId::One,
@@ -524,8 +532,9 @@ fn silklash_spider_deals_x_to_every_flier_and_never_to_itself() {
             source: spider.card.id,
             ability,
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 2,
+            modes: Vec::new(),
         },
     )
     .unwrap();

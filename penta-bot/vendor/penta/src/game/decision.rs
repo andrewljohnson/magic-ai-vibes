@@ -1,4 +1,4 @@
-use crate::{CardDefinitionId, GameObjectId, PlayerId};
+use crate::{GameObjectId, ObjectCharacteristics, PlayerId};
 
 /// The rules procedure represented by a mandatory player decision.
 ///
@@ -67,10 +67,15 @@ pub enum DecisionZone {
 pub struct DecisionOption {
     pub id: u32,
     pub label: String,
-    pub card: Option<(GameObjectId, CardDefinitionId)>,
+    /// A known object and its frozen characteristics. An option without a
+    /// disclosed object uses `None`; no characteristics value is a hidden-card
+    /// sentinel.
+    pub card: Option<(GameObjectId, ObjectCharacteristics)>,
     /// Cards represented collectively by this option, such as one pile in a
-    /// choose-a-pile decision. This remains empty for ordinary card options.
-    pub members: Vec<(GameObjectId, CardDefinitionId)>,
+    /// choose-a-pile decision, or disclosed alongside its selectable `card`
+    /// after a private inspection. When `card` is present, it remains the
+    /// object chosen by this option; `members` are auxiliary information.
+    pub members: Vec<(GameObjectId, ObjectCharacteristics)>,
     /// Frozen creating-ability text when this option represents a pending
     /// trigger. This distinguishes multiple abilities from the same source.
     pub ability_text: Option<String>,
@@ -83,6 +88,9 @@ pub struct DecisionObservation {
     pub player: PlayerId,
     pub kind: DecisionKind,
     pub order_semantics: Option<DecisionOrderSemantics>,
+    /// Battlefield object whose resolving ability created this decision.
+    /// Absent for turn procedures and spell-originated choices.
+    pub source: Option<GameObjectId>,
     pub prompt: String,
     pub visibility: DecisionVisibility,
     pub preference: DecisionPreference,

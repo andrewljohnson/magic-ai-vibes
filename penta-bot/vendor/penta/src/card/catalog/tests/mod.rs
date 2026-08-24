@@ -1,25 +1,32 @@
 use super::{
     CardCatalog, CatalogError, GrantedAbilityValidationError, validate_ability_targets,
-    validate_semantic_spell_presentation,
+    validate_replacement_ability_targets, validate_semantic_spell_presentation,
 };
 use crate::card::{
-    AbilityCostDef, AbilityCoverageDef, AbilityDef, AbilityTargetDef, AbilityTargetPredicate,
-    ActivatedAbilityDef, AdditionalCostDef, AlternateSpellKind, AlternativeCastKindDef,
-    AlternativeCostDef, AppliedEffectDef, CardBehavior, CardDefinition, CardEffectStatus, CardPart,
-    CardPrinting, CardPrintingId, CardSet, CardStructure, DeclarativeAbilityDef, DoubleFacedKind,
-    EffectDef, EffectDurationDef, EffectExecutionDef, EffectRecipientDef, ManaCost, ModeDef,
-    ModeSetDef, ObjectPredicateDef, PlayOptionDef, PlayerRelation, PrintedManaCost,
-    ReplacementEffectDef, SpellForm, TargetConditionDef, TargetPredicate, TargetSlotDef,
-    TurnStepDef, ValueDef, ZoneKind,
+    AbilityCostDef, AbilityCoverageDef, AbilityDef, AbilityEffectDef, AbilityTargetDef,
+    AbilityTargetPredicate, ActivatedAbilityDef, AdditionalCostDef, AlternateSpellKind,
+    AlternativeCastKindDef, AlternativeCostDef, AppliedEffectDef, AppliedRuleDef,
+    BattlefieldEntryModificationDef, CardBehavior, CardDefinition, CardEffectStatus, CardPart,
+    CardPrinting, CardPrintingId, CardSet, CardStructure, CardType, ChoiceVisibilityDef, ChooseDef,
+    DamageEventMatcherDef, DamageRecipientMatcherDef, DamageSourceMatcherDef,
+    DeclarativeAbilityDef, DoubleFacedKind, EffectDef, EffectExecutionDef, EffectRecipientDef,
+    InstalledTriggerDef, ManaCost, ModeDef, ModeSetDef, ObjectChoiceBindingDef, ObjectPredicateDef,
+    ObjectQueryDef, ObjectRefDef, ObjectSetDef, PartitionItemsDef, PlayActionMatcherDef,
+    PlayOptionDef, PlayRestrictionDef, PlayerRefDef, PlayerRelation, PlayerSetDef, PrintedManaCost,
+    ReplacementAbilityDef, ReplacementEffectDef, ReplacementEventDef, ResolvedEffectDurationDef,
+    SpellForm, SplitIntoPilesDef, TargetConditionDef, TargetPredicate, TargetSlotDef,
+    TokenCharacteristics, TriggerConditionDef, TriggerEventDef, TurnKindDef, TurnStepDef, ValueDef,
+    ZoneKind, ZoneMoveCauseDef,
 };
 use crate::{
-    AbilityId, AdditionalCostId, AlternativeCostId, CardDefinitionId, CardPartId, ChoiceIndex,
-    Format, GrantId, MeldRecipeId, ModeId, PlayOptionId, TargetIndex, TargetSlotId,
+    AbilityId, AdditionalCostId, AlternativeCostId, CardDefinitionId, CardPartId, Format, GrantId,
+    MeldRecipeId, ModeId, ObjectBindingIndex, ObjectSetBindingIndex, PlayOptionId, TargetIndex,
+    TargetSlotId,
 };
 
-fn definition(id: u16, name: &str, set: CardSet) -> CardDefinition {
+fn definition(id: u64, name: &str, set: CardSet) -> CardDefinition {
     CardDefinition::new(
-        CardDefinitionId(id),
+        CardDefinitionId::new(id),
         name,
         set,
         false,
@@ -53,6 +60,8 @@ fn semantic_target(minimum: u8, maximum: u8) -> AbilityTargetDef {
         minimum,
         maximum,
         divided_total: None,
+        another: false,
+        excludes_source: false,
     }
 }
 
@@ -140,10 +149,9 @@ fn definition_granting(granted: &'static AbilityDef) -> CardDefinition {
     let abilities = Box::leak(
         vec![AbilityDef::static_ability(
             "This object grants an ability.",
-            EffectDef::Apply {
+            EffectDef::StaticApply {
                 recipient: EffectRecipientDef::Source,
-                effect: AppliedEffectDef::GrantAbility(granted),
-                duration: EffectDurationDef::WhileSourceRemainsInZone,
+                effect: AppliedEffectDef::add_ability(granted),
             },
         )]
         .into_boxed_slice(),

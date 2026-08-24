@@ -1,11 +1,56 @@
-//! Fog: all combat damage this turn is prevented.
-//!
-//! The engine could already prevent combat damage per permanent, which is
-//! enough for a Maze of Ith but not for a Fog: the Fog has no permanent to
-//! attach to, and it has to cover creatures that were not on the battlefield
-//! when it resolved. So the shield is game state and lives until cleanup.
+//! Unified damage-prevention matching, spending, and expiration.
 
+use super::super::prevention_state::{
+    ResolvedDamagePrevention, ResolvedDamagePreventionCapacity, ResolvedDamagePreventionCoverage,
+    ResolvedDamageRecipientMatcher, ResolvedDamageSourceMatcher,
+};
 use super::*;
+use crate::{
+    DamageEventMatcherDef, DamagePreventionDef, DamageRecipientMatcherDef,
+    ResolvedEffectDurationDef,
+};
+
+fn install_prevention(
+    game: &mut Game,
+    source: ResolvedDamageSourceMatcher,
+    recipient: ResolvedDamageRecipientMatcher,
+    combat_only: bool,
+    capacity: ResolvedDamagePreventionCapacity,
+    coverage: ResolvedDamagePreventionCoverage,
+    gain_life: Option<PlayerId>,
+) {
+    let timestamp = game.allocate_continuous_effect_timestamp();
+    game.damage_preventions.push(ResolvedDamagePrevention {
+        source,
+        recipient,
+        combat_only,
+        capacity,
+        coverage,
+        gain_life,
+        source_ability: AbilitySourceRef {
+            object: GameObjectId(20_000),
+            ability: AbilityOrigin::Printed {
+                definition: cards::FOG,
+                part: CardPartId::PRIMARY,
+                ability: AbilityId::PRIMARY,
+            },
+        },
+        timestamp,
+        expiration: ContinuousEffectExpiration::EndOfTurn,
+    });
+}
+
+fn install_fog(game: &mut Game) {
+    install_prevention(
+        game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Any,
+        true,
+        ResolvedDamagePreventionCapacity::Unlimited,
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
+}
 
 fn fogged_combat(cast_fog: bool) -> Game {
     let mut game = ready_game();
@@ -15,10 +60,10 @@ fn fogged_combat(cast_fog: bool) -> Game {
     attacker.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
     game.battlefield.push(attacker);
     let mut blocker = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::Two);
-    blocker.blocking = Some(GameObjectId(10_000));
+    blocker.blocking = vec![GameObjectId(10_000)];
     game.battlefield.push(blocker);
     if cast_fog {
-        game.all_combat_damage_prevented = true;
+        install_fog(&mut game);
     }
     game
 }
@@ -66,7 +111,7 @@ fn a_fog_prevents_damage_to_the_defending_player() {
     attacker.attacking = true;
     attacker.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
     game.battlefield.push(attacker);
-    game.all_combat_damage_prevented = true;
+    install_fog(&mut game);
     let before = game.players[PlayerId::Two.index()].life;
 
     resolve_combat_damage(&mut game);
@@ -84,9 +129,26 @@ fn a_fog_does_not_survive_cleanup() {
     let mut game = fogged_combat(true);
     game.finish_cleanup();
     assert!(
-        !game.all_combat_damage_prevented,
-        "the shield expires with the turn"
+        game.damage_preventions.is_empty(),
+        "the rule expires with the turn"
     );
+}
+
+#[test]
+fn fog_uses_the_central_damage_pipeline_and_only_matches_combat() {
+    let mut game = ready_game();
+    install_fog(&mut game);
+    let before = game.players[PlayerId::Two.index()].life;
+
+    assert_eq!(
+        game.damage_target_from_kind(None, Some(Target::Player(PlayerId::Two)), 3, true),
+        0,
+    );
+    assert_eq!(
+        game.damage_target_from(None, Some(Target::Player(PlayerId::Two)), 2),
+        2,
+    );
+    assert_eq!(game.players[PlayerId::Two.index()].life, before - 2);
 }
 
 #[test]
@@ -116,13 +178,15 @@ fn shielded_creature(game: &mut Game) -> GameObjectId {
 fn a_shield_absorbs_up_to_its_amount_and_is_then_gone() {
     let mut game = ready_game();
     let target = shielded_creature(&mut game);
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Permanent(target),
-        remaining: Some(2),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Permanent(target)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(2),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
 
     game.damage_target(Some(Target::Permanent(target)), 1);
     let marked = |game: &Game| {
@@ -139,7 +203,10 @@ fn a_shield_absorbs_up_to_its_amount_and_is_then_gone() {
         2,
         "one point of the shield was left, so two of the three land"
     );
-    assert!(game.prevention_shields.is_empty(), "a spent shield is gone");
+    assert!(
+        game.damage_preventions.is_empty(),
+        "a spent promise is gone"
+    );
 }
 
 /// "Prevent all damage" is never spent, so it holds for the whole turn.
@@ -147,13 +214,15 @@ fn a_shield_absorbs_up_to_its_amount_and_is_then_gone() {
 fn a_prevent_all_shield_is_not_consumed() {
     let mut game = ready_game();
     let target = shielded_creature(&mut game);
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Permanent(target),
-        remaining: None,
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Permanent(target)),
+        false,
+        ResolvedDamagePreventionCapacity::Unlimited,
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
 
     for _ in 0..3 {
         game.damage_target(Some(Target::Permanent(target)), 5);
@@ -164,7 +233,7 @@ fn a_prevent_all_shield_is_not_consumed() {
         .find(|permanent| permanent.card.id == target)
         .expect("the creature survives");
     assert_eq!(permanent.damage, 0, "every point was prevented");
-    assert_eq!(game.prevention_shields.len(), 1, "the shield still holds");
+    assert_eq!(game.damage_preventions.len(), 1, "the rule still holds");
 }
 
 #[test]
@@ -174,13 +243,15 @@ fn a_shield_only_covers_the_recipient_it_names() {
     let other = creature(20_001, cards::SAVANNAH_LIONS, PlayerId::Two);
     let other_id = other.card.id;
     game.battlefield.push(other);
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Permanent(shielded),
-        remaining: Some(5),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Permanent(shielded)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(5),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
 
     game.damage_target(Some(Target::Permanent(other_id)), 1);
     let permanent = game
@@ -196,13 +267,15 @@ fn a_shield_only_covers_the_recipient_it_names() {
 fn a_shield_can_cover_a_player() {
     let mut game = ready_game();
     let before = game.players[PlayerId::Two.index()].life;
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Player(PlayerId::Two),
-        remaining: Some(3),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Player(PlayerId::Two)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(3),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
 
     game.damage_target(Some(Target::Player(PlayerId::Two)), 2);
     assert_eq!(game.players[PlayerId::Two.index()].life, before);
@@ -212,15 +285,17 @@ fn a_shield_can_cover_a_player() {
 fn shields_do_not_survive_cleanup() {
     let mut game = ready_game();
     let target = shielded_creature(&mut game);
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Permanent(target),
-        remaining: None,
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Permanent(target)),
+        false,
+        ResolvedDamagePreventionCapacity::Unlimited,
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
     game.finish_cleanup();
-    assert!(game.prevention_shields.is_empty());
+    assert!(game.damage_preventions.is_empty());
 }
 
 #[test]
@@ -266,15 +341,35 @@ fn remaining_duration_prevention_cards_report_complete_coverage() {
 }
 
 #[test]
+fn static_source_predicates_use_retired_creature_last_known_information() {
+    let mut game = ready_game();
+    let uncle = creature(10_001, cards::UNCLE_ISTVAN, PlayerId::One);
+    let uncle_id = uncle.card.id;
+    let source = creature(10_002, cards::SAVANNAH_LIONS, PlayerId::Two);
+    let source_id = source.card.id;
+    game.battlefield.extend([uncle, source]);
+    game.move_permanents_to_graveyard(&[source_id]);
+
+    assert_eq!(
+        game.damage_target_from(Some(source_id), Some(Target::Permanent(uncle_id)), 3),
+        0,
+        "the live static ability still recognizes the departed creature source",
+    );
+}
+
+#[test]
 fn safe_passage_tracks_later_controlled_creatures_but_not_planeswalkers() {
     let mut game = ready_game();
     let object = resolving_prevention_object(PlayerId::One);
     game.resolve_effect_def(
-        ScopedEffect::primary(
-            EffectDef::PreventDamageToPlayerAndControlledCreaturesThisTurn {
-                player: EffectRecipientDef::Controller,
-            },
-        ),
+        ScopedEffect::primary(EffectDef::PreventDamage {
+            prevention: DamagePreventionDef::unlimited(
+                DamageEventMatcherDef::to_player_and_creatures_controlled_by(
+                    PlayerRefDef::EffectController,
+                ),
+            ),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
+        }),
         &object,
         TriggerContext::empty(),
     );
@@ -323,8 +418,11 @@ fn terrifying_presence_preserves_only_the_chosen_sources_combat_damage() {
         cast_choices(vec![Target::Permanent(chosen_id)], 0),
     ));
     game.resolve_effect_def(
-        ScopedEffect::primary(EffectDef::PreventAllCombatDamageExceptSourceThisTurn {
-            source: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+        ScopedEffect::primary(EffectDef::PreventDamage {
+            prevention: DamagePreventionDef::unlimited(DamageEventMatcherDef::combat_except(
+                ObjectRefDef::Target(TargetIndex::PRIMARY),
+            )),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
         }),
         &object,
         TriggerContext::empty(),
@@ -354,13 +452,15 @@ fn terrifying_presence_preserves_only_the_chosen_sources_combat_damage() {
 fn drain_life_gains_only_the_damage_left_after_prevention() {
     let mut game = ready_game();
     game.players[PlayerId::One.index()].life = 10;
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Player(PlayerId::Two),
-        remaining: Some(2),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Player(PlayerId::Two)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(2),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
     let object = resolving_prevention_object(PlayerId::One);
     game.resolve_effect_def(
         ScopedEffect::primary(EffectDef::DrainLife {
@@ -381,16 +481,26 @@ fn a_life_gain_shield_precedes_overlapping_relational_prevention() {
     let source = creature(10_001, cards::DRAGON_WHELP, PlayerId::Two);
     let source_id = source.card.id;
     game.battlefield.push(source);
-    game.relational_damage_preventions.push(
-        RelationalDamagePrevention::ToPlayerAndControlledCreatures(PlayerId::One),
+    // Install the unlimited rule first to prove consumable prevention still
+    // receives the event before it.
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::PlayerAndCreaturesControlledBy(PlayerId::One),
+        false,
+        ResolvedDamagePreventionCapacity::Unlimited,
+        ResolvedDamagePreventionCoverage::All,
+        None,
     );
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Player(PlayerId::One),
-        remaining: None,
-        source: Some(source_id),
-        coverage: ShieldCoverageDef::All,
-        gain_life: true,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Exact(source_id),
+        ResolvedDamageRecipientMatcher::Exact(Target::Player(PlayerId::One)),
+        false,
+        ResolvedDamagePreventionCapacity::Events(1),
+        ResolvedDamagePreventionCoverage::All,
+        Some(PlayerId::One),
+    );
     let starting_life = game.players[PlayerId::One.index()].life;
 
     assert_eq!(
@@ -402,7 +512,11 @@ fn a_life_gain_shield_precedes_overlapping_relational_prevention() {
         starting_life + 3,
         "the existing Reverse Damage-style shield keeps its prevention rider",
     );
-    assert!(game.prevention_shields.is_empty());
+    assert_eq!(
+        game.damage_preventions.len(),
+        1,
+        "only the unlimited Safe Passage-style rule remains",
+    );
 }
 
 #[test]
@@ -413,13 +527,15 @@ fn combat_player_trigger_uses_only_damage_left_after_prevention() {
     game.battlefield.push(courier);
     let starting_life = game.players[PlayerId::Two.index()].life;
 
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Player(PlayerId::Two),
-        remaining: Some(2),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Player(PlayerId::Two)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(2),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
     game.deal_combat_damage_to_player(courier_id, PlayerId::Two, 2);
     assert!(
         game.pending_triggers.is_empty(),
@@ -427,20 +543,22 @@ fn combat_player_trigger_uses_only_damage_left_after_prevention() {
     );
     assert_eq!(game.players[PlayerId::Two.index()].life, starting_life);
 
-    game.prevention_shields.push(PreventionShield {
-        recipient: Target::Player(PlayerId::Two),
-        remaining: Some(1),
-        source: None,
-        coverage: ShieldCoverageDef::All,
-        gain_life: false,
-    });
+    install_prevention(
+        &mut game,
+        ResolvedDamageSourceMatcher::Any,
+        ResolvedDamageRecipientMatcher::Exact(Target::Player(PlayerId::Two)),
+        false,
+        ResolvedDamagePreventionCapacity::Amount(1),
+        ResolvedDamagePreventionCoverage::All,
+        None,
+    );
     game.deal_combat_damage_to_player(courier_id, PlayerId::Two, 2);
     let trigger = game
         .pending_triggers
         .iter()
         .find(|trigger| trigger.source.object == courier_id)
         .expect("the Courier sees the one point actually dealt");
-    assert_eq!(trigger.context.amount, Some(1));
+    assert_eq!(trigger.context.trigger.amount, Some(1));
     assert_eq!(game.players[PlayerId::Two.index()].life, starting_life - 1);
 }
 
@@ -474,9 +592,9 @@ mod follow_up {
         pass_priority_pair(&mut game);
 
         assert_eq!(
-            game.prevention_shields.len(),
+            game.damage_preventions.len(),
             1,
-            "one shield, aimed at a player"
+            "one prevention rule, aimed at a player"
         );
         game.damage_target(Some(Target::Player(PlayerId::One)), 3);
         assert_eq!(
@@ -485,8 +603,8 @@ mod follow_up {
             "two of the three damage was prevented"
         );
         assert!(
-            game.prevention_shields.is_empty(),
-            "and the shield was spent doing it"
+            game.damage_preventions.is_empty(),
+            "and the rule was spent doing it"
         );
     }
 
@@ -515,18 +633,20 @@ mod follow_up {
             .expect("the ability activates");
         pass_priority_pair(&mut game);
 
-        let silenced = game
-            .battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == ogre_id)
-            .expect("the creature is still on the battlefield");
-        assert!(
-            silenced.combat_damage_dealt_by_prevented,
-            "the creature deals no combat damage this turn"
+        assert_eq!(
+            game.damage_target_from_kind(
+                Some(ogre_id),
+                Some(Target::Player(PlayerId::One)),
+                3,
+                true,
+            ),
+            0,
+            "the creature deals no combat damage this turn",
         );
-        assert!(
-            !silenced.combat_damage_prevented,
-            "but damage dealt to it is untouched"
+        assert_eq!(
+            game.damage_target_from_kind(Some(horn_id), Some(Target::Permanent(ogre_id)), 1, true,),
+            1,
+            "but combat damage dealt to it is untouched",
         );
     }
 
@@ -587,6 +707,26 @@ mod gaseous_form {
             i16::from(rules::STARTING_LIFE),
             "the enchanted creature's combat damage was prevented"
         );
+    }
+
+    #[test]
+    fn the_composite_prevents_combat_damage_both_to_and_by_the_creature() {
+        let (mut game, attacker_id, _aura_id) = form_game();
+        let mut blocker = creature(10_002, cards::SAVANNAH_LIONS, PlayerId::Two);
+        let blocker_id = blocker.card.id;
+        blocker.blocking = vec![attacker_id];
+        game.battlefield.push(blocker);
+
+        resolve_combat_damage(&mut game);
+
+        for id in [attacker_id, blocker_id] {
+            let permanent = game
+                .battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == id)
+                .expect("both creatures survive the prevented exchange");
+            assert_eq!(permanent.damage, 0, "{id:?} takes no combat damage");
+        }
     }
 
     /// The same creature, once the Aura is gone, hits for its printed power.
@@ -720,7 +860,7 @@ mod circle_of_protection {
 
         activate(&mut game, circle_id);
         game.damage_target_from(Some(dragon_id), Some(Target::Player(PlayerId::One)), 2);
-        assert!(game.prevention_shields.is_empty(), "the shield was spent");
+        assert!(game.damage_preventions.is_empty(), "the rule was spent");
 
         game.damage_target_from(Some(dragon_id), Some(Target::Player(PlayerId::One)), 2);
         assert_eq!(
@@ -750,6 +890,63 @@ mod circle_of_protection {
         assert_eq!(decision.observation.options.len(), 2);
     }
 
+    /// Object choices retain their actual zone kind. A spell chosen on the
+    /// stack must remain a spell reference when the nested shield consumes
+    /// the binding; treating every choice as a permanent silently drops it.
+    #[test]
+    fn a_stack_spell_can_be_the_chosen_damage_source() {
+        static SHIELD: EffectDef = EffectDef::PreventDamage {
+            prevention: DamagePreventionDef::events(
+                DamageEventMatcherDef {
+                    recipient: DamageRecipientMatcherDef::Recipients(
+                        EffectRecipientDef::Controller,
+                    ),
+                    ..DamageEventMatcherDef::from(ObjectRefDef::Binding(
+                        ObjectBindingIndex::PRIMARY,
+                    ))
+                },
+                1,
+            ),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
+        };
+
+        let mut game = ready_game();
+        let bolt = spell(10_001, cards::LIGHTNING_BOLT, PlayerId::Two, 0);
+        let bolt_id = bolt.id;
+        game.stack.push(bolt);
+        let resolving = resolving_prevention_object(PlayerId::One);
+
+        game.resolve_effect_def(
+            ScopedEffect::primary(EffectDef::Choose(ChooseDef {
+                binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+                unchosen: None,
+                chooser: PlayerRefDef::EffectController,
+                candidates: ObjectSetDef::Query(ObjectQueryDef::new(
+                    ObjectPredicateDef::Color(ManaColor::Red),
+                    &[ZoneKind::Battlefield, ZoneKind::Stack],
+                )),
+                exclude: Some(ObjectRefDef::ResolvingObject),
+                minimum: 1,
+                maximum: 1,
+                visibility: ChoiceVisibilityDef::Public,
+                then: &SHIELD,
+            })),
+            &resolving,
+            TriggerContext::empty(),
+        );
+
+        assert!(game.pending_decisions.is_empty(), "there is one red source");
+        assert_eq!(game.damage_preventions.len(), 1);
+        assert_eq!(
+            game.damage_preventions[0].source,
+            ResolvedDamageSourceMatcher::Exact(bolt_id),
+        );
+        assert_eq!(
+            game.damage_target_from(Some(bolt_id), Some(Target::Player(PlayerId::One)), 3),
+            0,
+        );
+    }
+
     #[test]
     fn the_cycle_reports_complete_coverage() {
         let catalog = poc::catalog().expect("catalog builds");
@@ -773,109 +970,8 @@ mod circle_of_protection {
     }
 }
 
-/// Two printed cards make the shield stop something other than the whole hit,
-/// or pay a rider when it fires. The arithmetic is the point: an odd point of
-/// damage gets through Dark Sphere, and Reverse Damage gains exactly what it
-/// stopped rather than what was aimed.
-mod shield_coverage {
-    use super::*;
-
-    fn shielded(game: &mut Game, source: GameObjectId, card: CardDefinitionId) {
-        let holder = creature(10_000, card, PlayerId::One);
-        let holder_id = holder.card.id;
-        game.battlefield.push(holder);
-        let action = game
-            .legal_actions(PlayerId::One)
-            .into_iter()
-            .find(|action| {
-                matches!(action, Action::ActivateAbility { source, .. } if *source == holder_id)
-            })
-            .expect("the ability is offered");
-        game.apply(PlayerId::One, action)
-            .expect("the ability activates");
-        pass_priority_pair(game);
-        let _ = source;
-    }
-
-    /// Half of five is two, so three still lands. Rounding down is what the
-    /// card says and what a naive halving would get wrong.
-    #[test]
-    fn dark_sphere_lets_the_odd_point_through() {
-        let mut game = ready_game();
-        let dragon = creature(10_001, cards::DRAGON_WHELP, PlayerId::Two);
-        let dragon_id = dragon.card.id;
-        game.battlefield.push(dragon);
-        shielded(&mut game, dragon_id, cards::DARK_SPHERE);
-
-        game.damage_target_from(Some(dragon_id), Some(Target::Player(PlayerId::One)), 5);
-        assert_eq!(
-            game.players[PlayerId::One.index()].life,
-            i16::from(rules::STARTING_LIFE) - 3,
-            "half of five, rounded down, was prevented"
-        );
-        assert!(game.prevention_shields.is_empty(), "and the shield is gone");
-    }
-
-    #[test]
-    fn dark_sphere_prevents_nothing_from_a_single_point() {
-        let mut game = ready_game();
-        let dragon = creature(10_001, cards::DRAGON_WHELP, PlayerId::Two);
-        let dragon_id = dragon.card.id;
-        game.battlefield.push(dragon);
-        shielded(&mut game, dragon_id, cards::DARK_SPHERE);
-
-        game.damage_target_from(Some(dragon_id), Some(Target::Player(PlayerId::One)), 1);
-        assert_eq!(
-            game.players[PlayerId::One.index()].life,
-            i16::from(rules::STARTING_LIFE) - 1,
-            "half of one, rounded down, is none of it"
-        );
-    }
-
-    /// The life gained is what was actually stopped, which for an ordinary
-    /// full shield is the whole hit. Gaining what was *aimed* would be the
-    /// same number here, so the test also spends the shield on a smaller hit
-    /// than the source could have dealt.
-    #[test]
-    fn reverse_damage_gains_exactly_what_it_prevented() {
-        let mut game = ready_game();
-        let dragon = creature(10_001, cards::DRAGON_WHELP, PlayerId::Two);
-        let dragon_id = dragon.card.id;
-        game.battlefield.push(dragon);
-        let reverse = card(10_002, cards::REVERSE_DAMAGE, PlayerId::One);
-        let reverse_id = reverse.id;
-        game.players[PlayerId::One.index()].hand.push(reverse);
-        game.players[PlayerId::One.index()].mana_pool.white = 2;
-        game.players[PlayerId::One.index()].mana_pool.colorless = 1;
-
-        let action = game
-            .legal_actions(PlayerId::One)
-            .into_iter()
-            .find(|action| matches!(action, Action::CastSpell { card, .. } if *card == reverse_id))
-            .expect("Reverse Damage is castable");
-        game.apply(PlayerId::One, action)
-            .expect("the spell is cast");
-        pass_priority_pair(&mut game);
-
-        game.damage_target_from(Some(dragon_id), Some(Target::Player(PlayerId::One)), 3);
-        assert_eq!(
-            game.players[PlayerId::One.index()].life,
-            i16::from(rules::STARTING_LIFE) + 3,
-            "three prevented, three gained"
-        );
-    }
-
-    #[test]
-    fn the_coverage_cards_report_complete_coverage() {
-        let catalog = poc::catalog().expect("catalog builds");
-        for definition in [cards::REVERSE_DAMAGE, cards::DARK_SPHERE] {
-            let card = catalog.get(definition).expect("the card is cataloged");
-            assert_eq!(
-                card.rules.implementation_status(),
-                crate::ImplementationStatus::Complete,
-                "{} should be fully executable",
-                card.name,
-            );
-        }
-    }
-}
+// Two printed cards make the shield stop something other than the whole hit,
+// or pay a rider when it fires. The arithmetic is the point: an odd point of
+// damage gets through Dark Sphere, and Reverse Damage gains exactly what it
+// stopped rather than what was aimed.
+include!("prevention/shield_coverage.rs");

@@ -1,10 +1,12 @@
 use super::{
     BTreeMap, CardCatalog, CardDefinitionId, CardInstance, CharacteristicSource, CombatDamageStage,
-    ContinuousEffectTimestamp, CounterKind, Deck, Format, Game, GameError, GameEvent, GameObjectId,
-    GameStack, ManaPool, ObjectBacking, Permanent, PermanentLastKnownInformation, PhysicalCard,
+    ContinuousEffectTimestamp, CounterKind, DamageSourceGroupDef, Deck, Format, Game, GameError,
+    GameEvent, GameObjectId, GameStack, ManaPool, ObjectBacking, ObjectCharacteristics,
+    ObjectInstance, ObjectKind, Permanent, PermanentLastKnownInformation, PhysicalCard,
     PhysicalCardId, PlayerId, PlayerState, Pregame, ReplayRng, RetiredObject, StackObject, Step,
-    ValueDef, VecDeque, ZoneChangeOutcome, remove_card,
+    TriggerContext, ValueDef, VecDeque, ZoneChangeOutcome, remove_card,
 };
+use crate::card::PlayerRelation;
 
 impl Game {
     /// Creates a game, shuffles both decks, and draws opening hands.
@@ -82,6 +84,7 @@ impl Game {
                         owner: player,
                         backing: ObjectBacking::Cards(vec![physical_id]),
                         characteristics: CharacteristicSource::Card(definition),
+                        counters: crate::game::counters::Counters::new(),
                     });
                 }
                 rng.shuffle(&mut library);
@@ -104,8 +107,8 @@ impl Game {
                     outside_game: Vec::new(),
                     mana_pool: ManaPool::default(),
                     mana: Vec::new(),
-                    land_played_this_turn: false,
-                    poison: 0,
+                    lands_played_this_turn: 0,
+                    counters: crate::game::counters::Counters::new(),
                 })
             };
 
@@ -143,66 +146,91 @@ impl Game {
                     owner: player,
                     backing: ObjectBacking::Cards(vec![physical_id]),
                     characteristics: CharacteristicSource::Card(definition),
+                    counters: crate::game::counters::Counters::new(),
                 });
             }
         }
 
         Ok(Self {
             format,
+            arrived: None,
+            prospective_x: super::prospective_x::ProspectiveX::default(),
+            successors: std::collections::HashMap::new(),
             seed,
             rng,
             catalog,
             physical_cards,
             players,
             battlefield: Vec::new(),
+            phased_out: Vec::new(),
             stack: GameStack::default(),
             retired_objects: BTreeMap::new(),
             temporary_ability_grants: Vec::new(),
+            ongoing_effects: Vec::new(),
             next_object_id,
             next_continuous_effect_timestamp: u64::from(next_object_id),
             turn: 1,
             turns_started: [1, 0],
+            damage_taken_this_turn: [0; 2],
+            damage_taken_by_group_this_turn: [[0; DamageSourceGroupDef::COUNT]; 2],
             active_player: PlayerId::One,
             priority: PlayerId::One,
             consecutive_passes: 0,
             step: Step::Upkeep,
             attackers_declared: false,
             creature_died_this_turn: false,
+            creatures_died_this_turn: 0,
+            lost_life_this_turn: [false; 2],
             linked_exiles: Vec::new(),
+            graveyard_permission_uses: Vec::new(),
+            monarch: None,
+            ninjutsu_returned_defender: None,
+            exile_play_permissions: Vec::new(),
+            damage_cannot_be_prevented_this_turn: false,
             sorcery_flash_grants: [0; 2],
-            additional_combat_phases: 0,
-            noncreature_casts_locked: [false; 2],
+            cannot_gain_life: [false; 2],
+            combat_damage_to_players: Vec::new(),
+            turn_phase_queue: VecDeque::new(),
+            turn_phase_resume: None,
+            resolved_play_restrictions: Vec::new(),
+            resolved_attack_restrictions: Vec::new(),
+            resolved_play_permissions: Vec::new(),
             emblems: Vec::new(),
             spells_cast_this_turn: [0; 2],
             spells_cast_last_turn: [0; 2],
+            spell_cast_history_this_turn: Vec::new(),
+            total_spells_cast: [0; 2],
             cards_drawn_this_turn: [0; 2],
+            citys_blessing: [false; 2],
+            permanent_left_battlefield_this_turn: [false; 2],
+            card_left_graveyard_this_turn: [false; 2],
+            life_gained_this_turn: [0; 2],
+            draw_step_draw_taken: [false; 2],
             drawn_this_turn: [Vec::new(), Vec::new()],
             defer_empty_library_loss: false,
             draw_replacements: std::array::from_fn(|_| VecDeque::new()),
-            relational_damage_preventions: Vec::new(),
-            miracle_window: None,
-            delayed_triggers: Vec::new(),
-            floating_triggers: Vec::new(),
+            damage_preventions: Vec::new(),
+            damage_redirects: Vec::new(),
+            installed_triggers: Vec::new(),
+            next_installed_trigger_id: 0,
             blockers_declared: false,
             untap_pending: false,
             pregame: Some(Pregame::Mulligan(PlayerId::One)),
             mulligans: [0, 0],
             cleanup_pending: false,
             pending_decisions: Vec::new(),
+            pending_discard_follow_up: None,
             next_decision_id: 0,
             pending_events: VecDeque::new(),
             pending_procedures: VecDeque::new(),
             pending_triggers: Vec::new(),
             next_trigger_id: 0,
             last_seen_hands: [None, None],
-            pending_combat_attackers: Vec::new(),
+            pending_combat_assignments: Vec::new(),
             combat_damage_stage: CombatDamageStage::NotStarted,
             combat_blocked_attackers: Vec::new(),
             next_regular_player: PlayerId::Two,
             extra_turns: Vec::new(),
-            channel_active: [false, false],
-            all_combat_damage_prevented: false,
-            prevention_shields: Vec::new(),
             result: None,
             events: vec![GameEvent::GameStarted { seed }],
         })
@@ -257,18 +285,17 @@ impl Game {
             .iter()
             .chain(self.emblems.iter())
             .map(|permanent| permanent.timestamp.0)
-            .chain(self.battlefield.iter().flat_map(|permanent| {
-                permanent
-                    .temporary_granted_abilities
+            .chain(
+                self.battlefield
                     .iter()
-                    .map(|effect| effect.timestamp.0)
-                    .chain(
+                    .chain(self.emblems.iter())
+                    .flat_map(|permanent| {
                         permanent
-                            .temporary_removed_abilities
+                            .resolved_continuous_effects
                             .iter()
-                            .map(|effect| effect.timestamp.0),
-                    )
-            }))
+                            .map(|effect| effect.timestamp.0)
+                    }),
+            )
             .max()
             .map_or(0, |timestamp| timestamp.saturating_add(1));
         self.next_continuous_effect_timestamp =
@@ -290,6 +317,8 @@ impl Game {
             .entry(previous)
             .or_insert_with(|| RetiredObject::Card(card.clone()));
         card.id = self.allocate_object_id();
+        card.counters = crate::game::counters::Counters::new();
+        self.successors.insert(previous, card.id);
         let created = vec![card.id];
         (card, ZoneChangeOutcome { previous, created })
     }
@@ -316,6 +345,16 @@ impl Game {
     pub(super) fn retire_stack_object(&mut self, object: &StackObject) {
         self.retired_objects
             .insert(object.id, RetiredObject::Stack(Box::new(object.clone())));
+    }
+
+    /// The source recorded on a stack object that has already left the stack.
+    /// A countered ability is retired with its source intact, which is how
+    /// "destroy that permanent" finds the permanent afterwards.
+    pub(super) fn retired_stack_object_source(&self, object: GameObjectId) -> Option<GameObjectId> {
+        match self.retired_objects.get(&object) {
+            Some(RetiredObject::Stack(stack)) => stack.source,
+            _ => None,
+        }
     }
 
     pub(super) fn current_or_last_known_power(&self, object: GameObjectId) -> Option<i16> {
@@ -358,6 +397,43 @@ impl Game {
             })
     }
 
+    /// The player an Aura enchanted immediately before it left the
+    /// battlefield. A triggered ability remains independent of its source,
+    /// so removing the Curse in response must not erase who it enchanted.
+    pub(super) fn current_or_last_known_enchanted_player(
+        &self,
+        object: GameObjectId,
+    ) -> Option<PlayerId> {
+        self.battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == object)
+            .and_then(|permanent| permanent.attached_player)
+            .or_else(|| match self.retired_objects.get(&object) {
+                Some(RetiredObject::Permanent { permanent, .. }) => permanent.attached_player,
+                Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => None,
+            })
+    }
+
+    /// What a permanent was blocking, using last-known information once it
+    /// has left the battlefield. A creature that died in combat still knows
+    /// what it had blocked, which is what a death trigger reading "creatures
+    /// blocked by it" has to see.
+    pub(super) fn current_or_last_known_blocking(
+        &self,
+        object: GameObjectId,
+    ) -> Option<GameObjectId> {
+        self.battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == object)
+            .and_then(|permanent| permanent.blocking.first().copied())
+            .or_else(|| match self.retired_objects.get(&object) {
+                Some(RetiredObject::Permanent { permanent, .. }) => {
+                    permanent.blocking.first().copied()
+                }
+                Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => None,
+            })
+    }
+
     /// How many counters of one kind an object has, using last-known
     /// information once it has left the battlefield. An ability whose cost
     /// sacrificed its own source still reads the counters it had.
@@ -366,16 +442,23 @@ impl Game {
         object: GameObjectId,
         kind: CounterKind,
     ) -> u16 {
-        self.battlefield
+        if let Some(permanent) = self
+            .battlefield
             .iter()
             .find(|permanent| permanent.card.id == object)
-            .map_or_else(
-                || match self.retired_objects.get(&object) {
-                    Some(RetiredObject::Permanent { permanent, .. }) => permanent.counters(kind),
-                    Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => 0,
-                },
-                |permanent| permanent.counters(kind),
-            )
+        {
+            return permanent.counters(kind);
+        }
+        // A card outside the battlefield can carry counters too: suspend's
+        // time counters sit on a card in exile, and so does the silver
+        // counter that says which exiled cards Karn may take back.
+        if let Some((_, card)) = self.card_in_nonbattlefield_zone(object) {
+            return card.counters(kind);
+        }
+        match self.retired_objects.get(&object) {
+            Some(RetiredObject::Permanent { permanent, .. }) => permanent.counters(kind),
+            Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => 0,
+        }
     }
 
     /// Whether an object is tapped, using its last existence on the
@@ -414,18 +497,81 @@ impl Game {
                 .or_else(|| match self.retired_objects.get(&source) {
                     Some(RetiredObject::Stack(object)) => Some(i32::from(object.x())),
                     Some(RetiredObject::Card(_) | RetiredObject::Permanent { .. }) | None => None,
+                })
+                // A spell being cast has no stack object yet, and "target
+                // creature with power X or less" has to be answered before
+                // it gets one.
+                .or_else(|| self.prospective_x.get().map(i32::from)),
+            // Converge, reached the same way and for the same reason: the
+            // spell is its own source, and it has left the stack by the time
+            // its effect asks what paid for it.
+            ValueDef::ColorsOfManaSpent => self
+                .stack
+                .iter()
+                .find(|object| object.id == source)
+                .map(|object| i32::from(object.colors_spent_count()))
+                .or_else(|| match self.retired_objects.get(&source) {
+                    Some(RetiredObject::Stack(object)) => {
+                        Some(i32::from(object.colors_spent_count()))
+                    }
+                    Some(RetiredObject::Card(_) | RetiredObject::Permanent { .. }) | None => None,
                 }),
-            // Read live, so pumping the source widens what its ability can
-            // reach. This is safe here because a target predicate is not
-            // consulted while static effects are being applied; a static
-            // ability whose own recipient predicate read this would not
-            // terminate.
-            ValueDef::SourcePower => self
+            // Pumping the source widens the predicate while it is live. If
+            // source and triggering object leave simultaneously, use the
+            // same last-known power frozen for the rest of the trigger.
+            ValueDef::SourcePower => self.current_or_last_known_power(source).map(i32::from),
+            ValueDef::SourceToughness => {
+                self.current_or_last_known_toughness(source).map(i32::from)
+            }
+            ValueDef::CardsInHandAbove { player, threshold } => {
+                let controller = self.current_or_last_known_controller(source)?;
+                let counted = if player == PlayerRelation::ControllerOfAttachedPermanent {
+                    self.attached_host_controller_of(source)
+                        .unwrap_or(controller)
+                } else {
+                    [PlayerId::One, PlayerId::Two]
+                        .into_iter()
+                        .find(|candidate| {
+                            self.player_relation_matches(
+                                *candidate,
+                                player,
+                                controller,
+                                TriggerContext::empty(),
+                            )
+                        })
+                        .unwrap_or(controller)
+                };
+                Some(
+                    i32::try_from(
+                        self.players[counted.index()]
+                            .hand
+                            .len()
+                            .saturating_sub(usize::from(threshold)),
+                    )
+                    .unwrap_or(i32::MAX),
+                )
+            }
+            // The X its own spell was cast for, which the permanent recorded
+            // as it arrived. "Target artifact with mana value X or less" is
+            // a predicate rather than an effect, and by the time it is asked
+            // the spell is a permanent.
+            ValueDef::SourceCastX => self
                 .battlefield
                 .iter()
                 .find(|permanent| permanent.card.id == source)
-                .and_then(|permanent| self.power(permanent))
-                .map(i32::from),
+                .map(|permanent| i32::from(permanent.cast_x))
+                .or_else(|| match self.retired_objects.get(&source) {
+                    Some(RetiredObject::Permanent { permanent, .. }) => {
+                        Some(i32::from(permanent.cast_x))
+                    }
+                    Some(RetiredObject::Card(_) | RetiredObject::Stack(_)) | None => None,
+                }),
+            // "Power X or less" is said as "below X plus one", so a sum has
+            // to be reachable from here as well as its parts.
+            ValueDef::Sum(sum) => self
+                .value_from_source(sum.left, source)
+                .zip(self.value_from_source(sum.right, source))
+                .map(|(left, right)| left.saturating_add(right)),
             _ => None,
         }
     }
@@ -447,6 +593,7 @@ impl Game {
     ) -> Option<PlayerId> {
         self.battlefield
             .iter()
+            .chain(self.emblems.iter())
             .find(|permanent| permanent.card.id == object)
             .map(|permanent| permanent.controller)
             .or_else(|| {
@@ -462,6 +609,30 @@ impl Game {
             })
     }
 
+    pub(super) fn current_or_last_known_owner(&self, object: GameObjectId) -> Option<PlayerId> {
+        self.battlefield
+            .iter()
+            .chain(self.emblems.iter())
+            .find(|permanent| permanent.card.id == object)
+            .map(|permanent| permanent.card.owner)
+            .or_else(|| {
+                self.stack
+                    .iter()
+                    .find(|candidate| candidate.id == object)
+                    .map(|candidate| candidate.card.owner)
+            })
+            .or_else(|| {
+                self.card_in_nonbattlefield_zone(object)
+                    .map(|(_, card)| card.owner)
+            })
+            .or_else(|| match self.retired_objects.get(&object) {
+                Some(RetiredObject::Card(card)) => Some(card.owner),
+                Some(RetiredObject::Permanent { permanent, .. }) => Some(permanent.card.owner),
+                Some(RetiredObject::Stack(stack)) => Some(stack.card.owner),
+                None => None,
+            })
+    }
+
     pub(super) fn unbacked_object(
         &mut self,
         definition: CardDefinitionId,
@@ -474,6 +645,48 @@ impl Game {
             owner,
             backing: ObjectBacking::None,
             characteristics,
+            counters: crate::game::counters::Counters::new(),
+        }
+    }
+
+    pub(super) fn unbacked_ability_object(
+        &mut self,
+        presentation: ObjectCharacteristics,
+        owner: PlayerId,
+    ) -> ObjectInstance {
+        let characteristics = match presentation {
+            ObjectCharacteristics::Card { definition, .. } => {
+                CharacteristicSource::Ability(definition)
+            }
+            ObjectCharacteristics::Token { token, .. } => CharacteristicSource::Token(token),
+            ObjectCharacteristics::Emblem { emblem } => CharacteristicSource::Emblem(emblem),
+            ObjectCharacteristics::FaceDown { face_down } => {
+                CharacteristicSource::FaceDown(face_down)
+            }
+        };
+        ObjectInstance {
+            id: self.allocate_object_id(),
+            definition: ObjectKind::Ability,
+            owner,
+            backing: ObjectBacking::None,
+            characteristics,
+            counters: crate::game::counters::Counters::new(),
+        }
+    }
+
+    /// Mints the object shell for a creator-owned command-zone emblem.
+    pub(super) fn unbacked_emblem_object(
+        &mut self,
+        emblem: crate::EmblemCharacteristics,
+        owner: PlayerId,
+    ) -> ObjectInstance {
+        ObjectInstance {
+            id: self.allocate_object_id(),
+            definition: ObjectKind::Emblem,
+            owner,
+            backing: ObjectBacking::None,
+            characteristics: CharacteristicSource::Emblem(emblem),
+            counters: crate::game::counters::Counters::new(),
         }
     }
 

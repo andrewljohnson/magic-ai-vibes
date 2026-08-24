@@ -9,7 +9,7 @@ fn a_first_striker_kills_a_smaller_blocker_before_it_can_answer() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     game.battlefield = vec![attacker, blocker];
 
@@ -99,7 +99,7 @@ fn archangel_of_thune_grows_the_team_on_its_own_lifelink_damage() {
         game.battlefield
             .iter()
             .find(|permanent| permanent.card.id == CardInstanceId(id))
-            .map(|permanent| permanent.counters[CounterKind::PlusOnePlusOne.index()])
+            .map(|permanent| permanent.counters.count(CounterKind::PlusOnePlusOne))
     };
     assert_eq!(counters(10_000), Some(1), "the Angel counts itself");
     assert_eq!(counters(10_001), Some(1));
@@ -476,7 +476,13 @@ fn celestial_flare_lets_the_targeted_player_pick_which_attacker_dies() {
     let keep = decision
         .options
         .iter()
-        .find(|option| option.card == Some((CardInstanceId(10_001), cards::SAVANNAH_LIONS)))
+        .find(|option| {
+            option.card
+                == Some((
+                    CardInstanceId(10_001),
+                    ObjectCharacteristics::card(cards::SAVANNAH_LIONS, CardPartId::PRIMARY),
+                ))
+        })
         .expect("both attackers are offered");
     game.apply(
         PlayerId::Two,
@@ -576,7 +582,7 @@ fn an_order_can_buy_first_strike_and_win_a_trade_it_would_have_lost() {
     game.battlefield.push(order);
     // Another 2/1: without first strike the two would kill each other.
     let mut blocker = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::Two);
-    blocker.blocking = Some(order_id);
+    blocker.blocking = vec![order_id];
     game.battlefield.push(blocker);
     game.players[0].mana_pool.black = 1;
     let first_strike = activated_ability_for(&game, order_id, 0);
@@ -663,7 +669,7 @@ fn syncopate_exiles_the_spell_when_its_controller_will_not_pay() {
     let decline = decision
         .options
         .iter()
-        .find(|option| option.label == "Let it be countered")
+        .find(|option| option.label == "Decline")
         .expect("declining is always available");
     game.apply(
         PlayerId::Two,
@@ -822,8 +828,9 @@ fn ratchet_bomb_sweeps_the_mana_value_it_ticked_up_to() {
                             ability,
                         },
                         targets: Vec::new(),
-                        cost_object: None,
+                        cost_objects: Vec::new(),
                         x: 0,
+                        modes: Vec::new(),
                     },
                 )),
                 _ => None,

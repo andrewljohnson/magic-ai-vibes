@@ -53,11 +53,15 @@ fn only_the_big_creature_stays_tapped() {
 #[test]
 fn shrinking_past_three_frees_a_creature() {
     let (mut game, big, _) = meekstone_board();
-    game.battlefield
-        .iter_mut()
-        .find(|permanent| permanent.card.id == big)
-        .expect("still there")
-        .power_bonus = -2;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        big,
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(-2),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
 
     take_turn(&mut game, PlayerId::One);
 
@@ -68,11 +72,15 @@ fn shrinking_past_three_frees_a_creature() {
 #[test]
 fn pumping_past_two_holds_a_creature_down() {
     let (mut game, _, small) = meekstone_board();
-    game.battlefield
-        .iter_mut()
-        .find(|permanent| permanent.card.id == small)
-        .expect("still there")
-        .power_bonus = 1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        small,
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(1),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
 
     take_turn(&mut game, PlayerId::One);
 

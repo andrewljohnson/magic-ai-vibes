@@ -9,12 +9,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum KeywordSnapshot {
+    Convoke,
+    Delve,
+    Improvise,
+    Devoid,
+    Compleated,
+    SplitSecond,
+    Infect,
     Flying,
     Trample,
     Haste,
     FirstStrike,
     DoubleStrike,
     Banding,
+    BandsWithOtherLegendaryCreatures,
+    BandsWithOtherWolvesOfTheHunt,
     Vigilance,
     Defender,
     Deathtouch,
@@ -25,6 +34,7 @@ pub(super) enum KeywordSnapshot {
     Shroud,
     Unleash,
     Intimidate,
+    Menace,
     Undying,
     Indestructible,
     AttacksEachCombatIfAble,
@@ -40,4 +50,22 @@ pub(super) enum KeywordSnapshot {
     ProtectionFromRed,
     ProtectionFromGreen,
     ProtectionFromColorless,
+    ProtectionFromZombies,
+    ProtectionFromVampires,
+    ProtectionFromWerewolves,
+    ProtectionFromVampiresWerewolvesAndZombies,
+    ProtectionFromCreatures,
+    ProtectionFromMulticolored,
+    ProtectionFromNonHumanCreatures,
+    ProtectionFromEnchantments,
+    ProtectionFromInstantAndSorcerySpells,
+    ProtectionFromColoredSpells,
+    ProtectionFromChosenPlayer,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct UpkeepKeywordSnapshot {
+    pub(super) seat: usize,
+    pub(super) keyword: KeywordSnapshot,
 }

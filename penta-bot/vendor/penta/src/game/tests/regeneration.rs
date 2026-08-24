@@ -541,7 +541,7 @@ mod follow_up {
             !game.legal_actions(PlayerId::One).iter().any(|action| {
                 matches!(
                     action,
-                    Action::ActivateAbility { cost_object, .. } if *cost_object == Some(kobolds_id)
+                    Action::ActivateAbility { cost_objects, .. } if cost_objects.as_slice() == [kobolds_id]
                 )
             }),
             "no offered activation pays with something that is not a Goblin"
@@ -553,12 +553,12 @@ mod follow_up {
             .find(|action| match action {
                 Action::ActivateAbility {
                     source,
-                    cost_object,
+                    cost_objects,
                     targets,
                     ..
                 } => {
                     *source == chirurgeon_id
-                        && *cost_object == Some(fodder_id)
+                        && cost_objects.as_slice() == [fodder_id]
                         && targets
                             .iter()
                             .flat_map(crate::casting::TargetSelection::targets)
@@ -854,8 +854,8 @@ mod premodern {
             !game.legal_actions(PlayerId::One).iter().any(|action| {
                 matches!(
                     action,
-                    Action::ActivateAbility { source, cost_object: Some(paid), .. }
-                        if *source == warlord_id && *paid == warlord_id
+                    Action::ActivateAbility { source, cost_objects, .. }
+                        if *source == warlord_id && cost_objects.as_slice() == [warlord_id]
                 )
             }),
             "\"another creature\" excludes the Warlord itself"
@@ -867,8 +867,8 @@ mod premodern {
             .find(|action| {
                 matches!(
                     action,
-                    Action::ActivateAbility { source, cost_object: Some(paid), .. }
-                        if *source == warlord_id && *paid == fodder_id
+                    Action::ActivateAbility { source, cost_objects, .. }
+                        if *source == warlord_id && cost_objects.as_slice() == [fodder_id]
                 )
             })
             .expect("the other creature can pay");

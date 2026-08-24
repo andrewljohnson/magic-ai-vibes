@@ -30,21 +30,20 @@ fn answer_shock_land_choice(game: &mut Game, decision: u32, pay: bool) {
 }
 
 #[test]
-fn replacement_life_payments_are_preflighted_and_paid_atomically() {
-    static SPLIT_LIFE_COST: [CostDef; 2] = [CostDef::PayLife(2), CostDef::PayLife(2)];
-    let payment = PaymentDef::new(PlayerRelation::You, &SPLIT_LIFE_COST);
+fn effect_life_payments_are_preflighted_and_paid_atomically() {
+    let payment = ResolvedEffectPayment::Life(4);
     let mut game = ready_game();
 
     game.players[0].life = 3;
-    assert!(!game.can_pay_payment(PlayerId::One, payment));
-    assert!(!game.pay_payment(PlayerId::One, payment));
+    assert!(!game.can_pay_effect_payment(PlayerId::One, payment));
+    assert!(!game.pay_effect_payment(PlayerId::One, payment));
     assert_eq!(game.players[0].life, 3);
 
     game.players[0].life = 4;
     let event_start = game.events().len();
-    assert!(game.can_pay_payment(PlayerId::One, payment));
-    assert_eq!(Game::payment_label(payment), "Pay 4 life");
-    assert!(game.pay_payment(PlayerId::One, payment));
+    assert!(game.can_pay_effect_payment(PlayerId::One, payment));
+    assert_eq!(Game::effect_payment_label(payment), "Pay 4 life");
+    assert!(game.pay_effect_payment(PlayerId::One, payment));
     assert_eq!(game.players[0].life, 0);
     assert_eq!(
         game.events()[event_start..]
@@ -52,6 +51,64 @@ fn replacement_life_payments_are_preflighted_and_paid_atomically() {
             .filter(|event| matches!(event, GameEvent::LifeLost { amount: 4, .. }))
             .count(),
         1
+    );
+}
+
+#[test]
+fn resolved_grants_participate_in_external_entry_replacement_discovery() {
+    let source_definition = CardDefinitionId::new(10_501);
+    let land_definition = CardDefinitionId::new(10_502);
+    let mut source = CardDefinition::new(
+        source_definition,
+        "Test resolved replacement source",
+        CardSet::Gatecrash,
+        false,
+        CardBehavior::Unsupported,
+    );
+    source.rules = CardRules::new_enchantment(ManaCost::default());
+    synchronize_single_part_definition(&mut source);
+    let mut land = CardDefinition::new(
+        land_definition,
+        "Test entering land",
+        CardSet::Gatecrash,
+        false,
+        CardBehavior::Unsupported,
+    );
+    land.rules = CardRules::new_land(&[]);
+    synchronize_single_part_definition(&mut land);
+
+    let mut game = ready_game();
+    game.catalog = CardCatalog::new([source, land]).unwrap();
+    let source_id = GameObjectId(10_501);
+    game.battlefield
+        .push(creature(source_id.0, source_definition, PlayerId::Two));
+    attach_constant_resolved_characteristics(
+        &mut game,
+        source_id,
+        &[AppliedEffectDef::add_ability(
+            &TEST_OPPONENT_LANDS_ENTER_TAPPED_ABILITY[0],
+        )],
+        ContinuousEffectExpiration::Never,
+    );
+
+    let entering = card(10_502, land_definition, PlayerId::One);
+    game.players[0].hand.push(entering.clone());
+    game.apply(
+        PlayerId::One,
+        Action::PlayLand {
+            card: entering.id,
+            option: PlayOptionId::DEFAULT,
+        },
+    )
+    .unwrap();
+
+    assert!(
+        game.battlefield
+            .iter()
+            .find(|permanent| permanent.card.definition == land_definition)
+            .expect("the land committed after replacement discovery")
+            .tapped,
+        "a resolved layer-6 replacement grant must pass the entry scan's optimization gate",
     );
 }
 
@@ -153,7 +210,10 @@ fn shock_land_payment_or_decline_is_applied_before_ankh_observes_the_entry() {
                 matches!(
                     event,
                     GameEvent::AbilityTriggered {
-                        definition: cards::ANKH_OF_MISHRA,
+                        presentation: ObjectCharacteristics::Card {
+                            definition: cards::ANKH_OF_MISHRA,
+                            ..
+                        },
                         ..
                     }
                 )
@@ -184,7 +244,7 @@ fn shock_land_payment_or_decline_is_applied_before_ankh_observes_the_entry() {
 
 #[test]
 fn replacement_effects_are_ordered_and_re_evaluated_before_entry_commits() {
-    let external_definition = CardDefinitionId(10_501);
+    let external_definition = CardDefinitionId::new(10_501);
     let mut external = CardDefinition::new(
         external_definition,
         "Test entry restriction",
@@ -273,7 +333,7 @@ fn replacement_effects_are_ordered_and_re_evaluated_before_entry_commits() {
 
 #[test]
 fn nested_replacement_effects_keep_their_source_controller_context() {
-    let external_definition = CardDefinitionId(10_501);
+    let external_definition = CardDefinitionId::new(10_501);
     let mut external = CardDefinition::new(
         external_definition,
         "Test source-relative entry replacement",

@@ -18,8 +18,9 @@ fn domri_ultimate_grants_two_combat_damage_steps() {
             ability: AbilityId(2),
         },
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&ultimate));
     game.apply(PlayerId::One, ultimate).unwrap();
@@ -54,9 +55,9 @@ fn attacker_controller_assigns_damage_freely_across_multiple_blockers() {
     let mut attacker = creature(10_000, cards::SU_CHI, PlayerId::One);
     attacker.attacking = true;
     let mut first_blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    first_blocker.blocking = Some(attacker.card.id);
+    first_blocker.blocking = vec![attacker.card.id];
     let mut second_blocker = creature(10_002, cards::ATOG, PlayerId::Two);
-    second_blocker.blocking = Some(attacker.card.id);
+    second_blocker.blocking = vec![attacker.card.id];
     let attacker_id = attacker.card.id;
     let first_id = first_blocker.card.id;
     let second_id = second_blocker.card.id;
@@ -106,7 +107,7 @@ fn first_strike_kills_a_normal_blocker_before_it_can_hit_back() {
     knight.attacking = true;
     let knight_id = knight.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(knight_id);
+    blocker.blocking = vec![knight_id];
     let blocker_id = blocker.card.id;
     game.battlefield = vec![knight, blocker];
     let opponent_life = game.players[1].life;
@@ -173,6 +174,16 @@ fn delayed_combat_damage_effect_queued_between_strike_waves_fires_once() {
         recipient: EffectRecipientDef::Controller,
         amount: ValueDef::Constant(1),
     };
+    static COMBAT_DAMAGE_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of the next combat damage step, you lose 1 life.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::CombatDamage,
+            player: PlayerRelation::Any,
+        },
+        LOSE_ONE,
+    );
+    const INSTALL: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::once(&COMBAT_DAMAGE_TRIGGER));
 
     let mut game = ready_game();
     game.step = Step::DeclareBlockers;
@@ -186,13 +197,12 @@ fn delayed_combat_damage_effect_queued_between_strike_waves_fires_once() {
     );
 
     let life_before = game.players[0].life;
-    game.delayed_triggers.push(DelayedTrigger {
-        object: Box::new(spell(10_001, cards::LIGHTNING_BOLT, PlayerId::One, 0)),
-        context: TriggerContext::empty(),
-        step: TurnStepDef::CombatDamage,
-        player: PlayerRelation::Any,
-        effect: ScopedEffect::primary(LOSE_ONE),
-    });
+    let object = installing_object(10_001, PlayerId::One, Vec::new(), Vec::new(), 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(INSTALL),
+        &object,
+        TriggerContext::empty(),
+    );
 
     pass_priority_pair(&mut game);
 
@@ -201,8 +211,14 @@ fn delayed_combat_damage_effect_queued_between_strike_waves_fires_once() {
         !game.regular_combat_damage_pending(),
         "the regular combat-damage step has begun",
     );
+    assert_eq!(
+        game.players[0].life, life_before,
+        "the trigger uses the stack"
+    );
+    assert_eq!(game.stack.len(), 1);
+    drain_pending(&mut game);
     assert_eq!(game.players[0].life, life_before - 1);
-    assert!(game.delayed_triggers.is_empty());
+    assert!(game.installed_triggers.is_empty());
 }
 
 #[test]
@@ -213,7 +229,7 @@ fn first_strike_blocker_kills_a_normal_attacker_before_it_deals_damage() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut knight = creature(10_001, cards::BLACK_KNIGHT, PlayerId::Two);
-    knight.blocking = Some(attacker_id);
+    knight.blocking = vec![attacker_id];
     let knight_id = knight.card.id;
     game.battlefield = vec![attacker, knight];
 
@@ -271,7 +287,7 @@ fn double_striker_stays_blocked_after_killing_its_only_blocker() {
         .push(KeywordAbility::DoubleStrike);
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     game.battlefield = vec![attacker, blocker];
     let life_before = game.players[1].life;
@@ -302,7 +318,7 @@ fn double_striker_can_trample_after_killing_its_only_blocker() {
         .push(KeywordAbility::DoubleStrike);
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     game.battlefield = vec![attacker, blocker];
     let life_before = game.players[1].life;
 
@@ -334,9 +350,9 @@ fn double_strike_recomputes_multi_blocker_assignment_for_the_second_step() {
         .push(KeywordAbility::DoubleStrike);
     let attacker_id = attacker.card.id;
     let mut first = creature(10_001, cards::SERRA_ANGEL, PlayerId::Two);
-    first.blocking = Some(attacker_id);
+    first.blocking = vec![attacker_id];
     let mut second = creature(10_002, cards::SERRA_ANGEL, PlayerId::Two);
-    second.blocking = Some(attacker_id);
+    second.blocking = vec![attacker_id];
     let mut blocker_ids = [first.card.id, second.card.id];
     blocker_ids.sort_unstable();
     game.battlefield = vec![attacker, first, second];
@@ -371,7 +387,7 @@ fn double_strike_recomputes_multi_blocker_assignment_for_the_second_step() {
 
     pass_priority_pair(&mut game);
 
-    assert_eq!(game.pending_combat_attackers, vec![attacker_id]);
+    assert_eq!(game.pending_combat_assignments, vec![attacker_id]);
     assert!(
         game.battlefield
             .iter()
@@ -399,9 +415,9 @@ fn first_strike_step_does_not_prompt_an_ineligible_multi_blocked_attacker() {
     normal_attacker.attacking = true;
     let normal_id = normal_attacker.card.id;
     let mut first_blocker = creature(10_002, cards::SERRA_ANGEL, PlayerId::Two);
-    first_blocker.blocking = Some(normal_id);
+    first_blocker.blocking = vec![normal_id];
     let mut second_blocker = creature(10_003, cards::SERRA_ANGEL, PlayerId::Two);
-    second_blocker.blocking = Some(normal_id);
+    second_blocker.blocking = vec![normal_id];
     game.battlefield = vec![
         first_striker,
         normal_attacker,
@@ -412,12 +428,12 @@ fn first_strike_step_does_not_prompt_an_ineligible_multi_blocked_attacker() {
     game.advance_step();
 
     assert!(
-        game.pending_combat_attackers.is_empty(),
+        game.pending_combat_assignments.is_empty(),
         "the normal attacker is not asked to assign during the strike wave",
     );
     pass_priority_pair(&mut game);
     assert_eq!(
-        game.pending_combat_attackers,
+        game.pending_combat_assignments,
         vec![normal_id],
         "the normal attacker assigns when the regular damage step begins",
     );
@@ -522,7 +538,7 @@ fn a_single_blocker_without_trample_needs_no_damage_assignment() {
     let mut attacker = creature(10_000, cards::SU_CHI, PlayerId::One);
     attacker.attacking = true;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker.card.id);
+    blocker.blocking = vec![attacker.card.id];
     let blocker_id = blocker.card.id;
     game.battlefield = vec![attacker, blocker];
     let life_before = game.players[1].life;
@@ -557,7 +573,7 @@ fn a_lone_blocker_still_asks_a_trampler_how_much_spills() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     game.battlefield = vec![attacker, blocker];
     let life_before = game.players[1].life;
     game.begin_combat_damage_assignment();
@@ -586,9 +602,9 @@ fn trample_requires_lethal_assignment_before_player_damage() {
     let mut attacker = creature(10_000, cards::BALL_LIGHTNING, PlayerId::One);
     attacker.attacking = true;
     let mut first = creature(10_001, cards::ATOG, PlayerId::Two);
-    first.blocking = Some(attacker.card.id);
+    first.blocking = vec![attacker.card.id];
     let mut second = creature(10_002, cards::GOBLIN_BALLOON_BRIGADE, PlayerId::Two);
-    second.blocking = Some(attacker.card.id);
+    second.blocking = vec![attacker.card.id];
     let attacker_id = attacker.card.id;
     let (first_id, second_id) = (first.card.id, second.card.id);
     game.battlefield = vec![attacker, first, second];
@@ -642,7 +658,7 @@ fn damage_can_be_divided_freely_across_several_blockers() {
     let mut ids = Vec::new();
     for index in 0..3 {
         let mut blocker = creature(10_001 + index, cards::ATOG, PlayerId::Two);
-        blocker.blocking = Some(attacker_id);
+        blocker.blocking = vec![attacker_id];
         ids.push(blocker.card.id);
         game.battlefield.push(blocker);
     }

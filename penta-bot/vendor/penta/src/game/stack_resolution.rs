@@ -1,10 +1,11 @@
 use super::{
     BattlefieldExitCompletion, CardBehavior, CardPartId, CardRuntime, CardType, CounterKind,
     DecisionContinuation, DecisionOption, DecisionPreference, DecisionVisibility, DecisionZone,
-    EntryCompletion, Game, GameEvent, GameObjectId, PendingBattlefieldEntry, Permanent, PlayerId,
-    ResolvedAbility, StackAbilityResolver, StackObject, StackObjectKind, Target, ZoneKind,
-    public_cards,
+    EntryCompletion, Game, GameEvent, GameObjectId, PendingBattlefieldEntry, PendingProcedure,
+    Permanent, PlayerId, ResolvedAbility, StackAbilityResolver, StackObject, StackObjectKind,
+    Target, ZoneKind,
 };
+use crate::SpellResolutionDestinationDef;
 
 impl Game {
     pub(super) fn pass_priority(&mut self, _player: PlayerId) {
@@ -34,17 +35,35 @@ impl Game {
         self.retire_stack_object(&object);
         match object.kind {
             StackObjectKind::ActivatedAbility | StackObjectKind::TriggeredAbility => {
+                // Counted as the resolution begins rather than after it, so
+                // an ability asking whether this is the first time it has
+                // resolved this turn counts the one asking. A resolution
+                // that suspends on a decision resumes at the finish, never
+                // here, so nothing is counted twice.
+                self.record_ability_resolution(&object);
                 let pending_before = self.pending_decisions.len();
+                let procedures_before = self.pending_procedures.len();
+                let events_before = self.pending_events.len();
                 let resolved = self.resolve_stack_ability(&object);
-                if self.defer_stack_resolution(pending_before, &object, resolved) {
+                if self.defer_stack_resolution(
+                    pending_before,
+                    procedures_before,
+                    events_before,
+                    &object,
+                    resolved,
+                ) {
                     return;
                 }
-                self.finish_stack_resolution(object, resolved);
+                self.finish_stack_resolution(&object, resolved);
                 return;
             }
             StackObjectKind::Spell => {}
         }
-        let definition = object.card.definition;
+        let definition = object
+            .card
+            .definition
+            .card_definition()
+            .expect("a spell object is backed by a card definition");
         let behavior = self
             .behavior(definition)
             .unwrap_or(CardBehavior::Unsupported);
@@ -52,11 +71,13 @@ impl Game {
             .stack_spell_types(&object)
             .unwrap_or_else(|| behavior.types());
         let aura_host = Self::aura_host_for(&object);
-        let aura_fizzles =
-            spell_types.is_permanent() && aura_host.is_some() && self.spell_fizzles(&object);
+        let aura_player = Self::aura_player_for(&object);
+        let aura_fizzles = spell_types.is_permanent()
+            && (aura_host.is_some() || aura_player.is_some())
+            && self.spell_fizzles(&object);
         if spell_types.is_permanent() && !aura_fizzles {
-            let chosen_player = match object.first_target() {
-                Some(Target::Player(player)) => Some(player),
+            let chosen_player = match (aura_player, object.first_target()) {
+                (None, Some(Target::Player(player))) => Some(player),
                 _ => None,
             };
             let presented = object
@@ -72,11 +93,35 @@ impl Game {
                 presented,
                 object.controller,
                 self.turns_started[object.controller.index()],
+                self.turn,
             );
+            permanent.face_down = object.face_down;
             self.initialize_battlefield_entry(&mut permanent);
+            if object.phyrexian_symbols_paid_with_life > 0
+                && self.effective_rules(&permanent).is_some_and(|rules| {
+                    rules.has_executable_keyword(crate::card::KeywordAbility::Compleated)
+                })
+            {
+                let loyalty = permanent
+                    .counters(CounterKind::Loyalty)
+                    .saturating_sub(object.phyrexian_symbols_paid_with_life.saturating_mul(2));
+                permanent.set_counters(CounterKind::Loyalty, loyalty);
+            }
             permanent.chosen_player = chosen_player;
+            permanent.cast_x = object
+                .signature
+                .as_ref()
+                .map_or(0, crate::casting::CastSignature::x);
+            permanent.cast_alternative = object.signature.as_ref().and_then(|signature| {
+                let card = self.catalog.get(definition)?;
+                let option = card.play_option(signature.play_option())?;
+                self.selected_alternative_kind(card, option, object.id, signature.costs())
+            });
+            permanent.cast_at_instant_speed = object.cast_at_instant_speed;
+            permanent.cast_from_zone = object.cast_from_zone;
             permanent.text_changes = object.text_changes;
             permanent.attached_to = aura_host;
+            permanent.attached_player = aura_player;
             self.enqueue_battlefield_entry(PendingBattlefieldEntry {
                 permanent,
                 from: ZoneKind::Stack,
@@ -84,9 +129,12 @@ impl Game {
                     card: object.id,
                     definition,
                 },
+                redirected_to: None,
             });
             return;
-        } else if aura_fizzles || self.spell_fizzles(&object) {
+        }
+        let spell_fizzled = aura_fizzles || self.spell_fizzles(&object);
+        if spell_fizzled {
             // 608.2b: a spell whose targets are all illegal on resolution does
             // nothing at all — a second Counterspell aimed at the same target
             // arrives to find it gone and goes to the graveyard spent.
@@ -96,22 +144,65 @@ impl Game {
             });
         } else if object.ability.is_some() {
             let pending_before = self.pending_decisions.len();
+            let procedures_before = self.pending_procedures.len();
+            let events_before = self.pending_events.len();
             let _ = self.resolve_stack_ability(&object);
-            if self.defer_stack_resolution(pending_before, &object, true) {
+            if self.defer_stack_resolution(
+                pending_before,
+                procedures_before,
+                events_before,
+                &object,
+                true,
+            ) {
                 return;
             }
         } else {
             let pending_before = self.pending_decisions.len();
+            let procedures_before = self.pending_procedures.len();
+            let events_before = self.pending_events.len();
             self.resolve_spell_effect(&object, behavior);
-            if self.defer_stack_resolution(pending_before, &object, true) {
+            if self.defer_stack_resolution(
+                pending_before,
+                procedures_before,
+                events_before,
+                &object,
+                true,
+            ) {
                 return;
             }
         }
-        self.finish_stack_resolution(object, true);
+        self.finish_stack_resolution(&object, !spell_fizzled);
     }
 
-    pub(super) fn finish_stack_resolution(&mut self, object: StackObject, resolved: bool) {
-        let definition = object.card.definition;
+    /// Records that one of a permanent's abilities is resolving, for the
+    /// cards that count their own resolutions.
+    fn record_ability_resolution(&mut self, object: &StackObject) {
+        let Some(payload) = object.ability.as_ref() else {
+            return;
+        };
+        let Some(source) = object.source else {
+            return;
+        };
+        let origin = payload.origin;
+        let Some(permanent) = self
+            .battlefield
+            .iter_mut()
+            .find(|permanent| permanent.card.id == source)
+        else {
+            return;
+        };
+        match permanent
+            .resolutions_this_turn
+            .iter_mut()
+            .find(|(recorded, _)| *recorded == origin)
+        {
+            Some((_, count)) => *count = count.saturating_add(1),
+            None => permanent.resolutions_this_turn.push((origin, 1)),
+        }
+    }
+
+    pub(super) fn finish_stack_resolution(&mut self, object: &StackObject, resolved: bool) {
+        let presentation = object.presentation();
         match object.kind {
             StackObjectKind::ActivatedAbility => {
                 let source = object
@@ -121,13 +212,13 @@ impl Game {
                     GameEvent::AbilityResolved {
                         object: object.id,
                         source,
-                        definition,
+                        presentation,
                     }
                 } else {
                     GameEvent::AbilityFizzled {
                         object: object.id,
                         source,
-                        definition,
+                        presentation,
                     }
                 };
                 self.events.push(event);
@@ -141,13 +232,13 @@ impl Game {
                     GameEvent::TriggeredAbilityResolved {
                         object: object.id,
                         source,
-                        definition,
+                        presentation,
                     }
                 } else {
                     GameEvent::TriggeredAbilityFizzled {
                         object: object.id,
                         source,
-                        definition,
+                        presentation,
                     }
                 };
                 self.events.push(event);
@@ -156,27 +247,24 @@ impl Game {
             StackObjectKind::Spell => {}
         }
 
+        let definition = object
+            .card
+            .definition
+            .card_definition()
+            .expect("a spell object is backed by a card definition");
+
         let behavior = self
             .behavior(definition)
             .unwrap_or(CardBehavior::Unsupported);
         let spell_types = self
-            .stack_spell_types(&object)
+            .stack_spell_types(object)
             .unwrap_or_else(|| behavior.types());
         let aura_fizzles = spell_types.is_permanent()
-            && Self::aura_host_for(&object).is_some()
-            && self.spell_fizzles(&object);
+            && Self::aura_host_for(object).is_some()
+            && self.spell_fizzles(object);
         let card_id = object.id;
-        if (!spell_types.is_permanent() || aura_fizzles) && !object.is_copy {
-            let owner = object.card.owner;
-            // A flashback spell exiles itself instead of returning to the
-            // graveyard it was cast from, which is what keeps it from being
-            // flashed back again.
-            let (card, _zone_change) = self.zone_change_card(object.card);
-            if object.cast_via_flashback || behavior == CardBehavior::Recall {
-                self.players[owner.index()].exile.push(card);
-            } else {
-                self.put_card_into_graveyard(owner, card);
-            }
+        if !spell_types.is_permanent() || aura_fizzles {
+            self.finish_spell_destination(object, behavior, resolved);
         }
         self.events.push(GameEvent::SpellResolved {
             card: card_id,
@@ -184,9 +272,105 @@ impl Game {
         });
     }
 
+    fn finish_spell_destination(
+        &mut self,
+        object: &StackObject,
+        behavior: CardBehavior,
+        resolved: bool,
+    ) {
+        let owner = object.card.owner;
+        let destination = if resolved {
+            object
+                .ability
+                .as_ref()
+                .and_then(|ability| ability.resolution_destination)
+                .unwrap_or(SpellResolutionDestinationDef::Graveyard)
+        } else {
+            SpellResolutionDestinationDef::Graveyard
+        };
+        // Rebound only exiles a spell its caster cast from hand. Settled here
+        // rather than in the walk below because it is a question about the
+        // cast rather than about the move: from anywhere else this is an
+        // ordinary spell going to an ordinary graveyard.
+        let destination = match destination {
+            SpellResolutionDestinationDef::ExileIfCastFromHand => {
+                if object
+                    .cast_from_zone
+                    .is_some_and(|from| from.zone() == ZoneKind::Hand)
+                {
+                    SpellResolutionDestinationDef::Exile
+                } else {
+                    SpellResolutionDestinationDef::Graveyard
+                }
+            }
+            other => other,
+        };
+        if object.is_copy {
+            // A copy has no card to move, but "shuffle it into its owner's
+            // library" still instructs its controller to shuffle.
+            if destination == SpellResolutionDestinationDef::LibraryShuffled {
+                self.rng.shuffle(&mut self.players[owner.index()].library);
+            }
+            return;
+        }
+
+        // Flashback replaces the move from the stack with exile, not the rest
+        // of the resolution. In particular, White Sun's Zenith still shuffles
+        // its owner's library, and a spell that already exiles itself still
+        // gets its destination counters.
+        let flashback_replaces_move = object.cast_via_flashback || behavior == CardBehavior::Recall;
+        let (mut card, _zone_change) = self.zone_change_card(
+            object
+                .card
+                .clone()
+                .into_card()
+                .expect("a spell object is backed by a card"),
+        );
+        match destination {
+            SpellResolutionDestinationDef::Graveyard if !flashback_replaces_move => {
+                self.put_card_into_graveyard(owner, card);
+            }
+            SpellResolutionDestinationDef::Hand if !flashback_replaces_move => {
+                self.players[owner.index()].hand.push(card);
+            }
+            // Flashback exiles the card wherever else it would have gone, so
+            // a bought-back flashback spell is still exiled rather than
+            // returned (CR 702.34a).
+            SpellResolutionDestinationDef::Graveyard
+            | SpellResolutionDestinationDef::Hand
+            | SpellResolutionDestinationDef::Exile => {
+                self.players[owner.index()].exile.push(card);
+            }
+            SpellResolutionDestinationDef::ExileOnAdventure => {
+                // The exiled card is a new object, and it is that object its
+                // owner may cast the creature half of later.
+                self.permit_adventure_return(card.id, owner);
+                self.players[owner.index()].exile.push(card);
+            }
+            SpellResolutionDestinationDef::ExileWithCounters(counters) => {
+                for &(kind, amount) in counters {
+                    card.add_counters(kind, amount);
+                }
+                self.players[owner.index()].exile.push(card);
+            }
+            // Resolved into one of the two above before the walk began.
+            SpellResolutionDestinationDef::ExileIfCastFromHand => {}
+            SpellResolutionDestinationDef::LibraryShuffled => {
+                if flashback_replaces_move {
+                    self.players[owner.index()].exile.push(card);
+                } else {
+                    self.players[owner.index()].library.push(card);
+                }
+                self.rng.shuffle(&mut self.players[owner.index()].library);
+            }
+        }
+    }
+
     fn defer_stack_resolution(
         &mut self,
         pending_before: usize,
+        procedures_before: usize,
+        events_before: usize,
         object: &StackObject,
         resolved: bool,
     ) -> bool {
@@ -199,63 +383,18 @@ impl Game {
         ) {
             return true;
         }
-        false
-    }
-
-    /// Sin Collector and Lifebane Zombie reveal the targeted player's hand,
-    /// then choose and exile one card matching the source's printed filter.
-    pub(super) fn queue_reveal_and_exile(
-        &mut self,
-        controller: PlayerId,
-        victim: PlayerId,
-        behavior: CardBehavior,
-    ) {
-        self.last_seen_hands[controller.index()] =
-            Some((victim, public_cards(&self.players[victim.index()].hand)));
-        let eligible = self.players[victim.index()]
-            .hand
-            .iter()
-            .filter(|card| {
-                self.catalog
-                    .get(card.definition)
-                    .is_some_and(|definition| match behavior {
-                        CardBehavior::LifebaneZombie => {
-                            let colors = definition.rules.colors();
-                            definition.rules.has_type(CardType::Creature)
-                                && (colors[0] || colors[4])
-                        }
-                        CardBehavior::SinCollector => {
-                            definition.rules.has_type(CardType::Instant)
-                                || definition.rules.has_type(CardType::Sorcery)
-                        }
-                        _ => false,
-                    })
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        if eligible.is_empty() {
-            // The hand is revealed and holds nothing this card can take. A
-            // prompt with no options is answerable, but there is nothing to
-            // ask.
-            return;
+        if self.pending_decisions.len() > pending_before
+            || self.pending_procedures.len() > procedures_before
+            || self.pending_events.len() > events_before
+        {
+            self.pending_procedures
+                .push_back(PendingProcedure::FinishStackResolution {
+                    object: Box::new(object.clone()),
+                    resolved,
+                });
+            return true;
         }
-        let options = self.card_decision_options(&eligible, DecisionZone::Hand);
-        let prompt = if behavior == CardBehavior::LifebaneZombie {
-            "Exile a green or white creature card from their hand"
-        } else {
-            "Exile an instant or sorcery card from their hand"
-        };
-        // The hand is revealed, so the choice is public rather than hidden.
-        self.queue_decision(
-            controller,
-            prompt,
-            DecisionVisibility::Public,
-            DecisionPreference::HigherCardValue,
-            1..=1,
-            false,
-            options,
-            DecisionContinuation::ExileFromHand { victim },
-        );
+        false
     }
 
     pub(super) fn resolve_stack_ability(&mut self, object: &StackObject) -> bool {
@@ -271,7 +410,7 @@ impl Game {
                 condition,
                 object.source.unwrap_or(object.id),
                 object.controller,
-                ability.context,
+                ability.context.trigger,
                 Some(ability.origin),
                 None,
             )
@@ -284,13 +423,14 @@ impl Game {
             .map(|ability| {
                 (
                     ability.resolver,
-                    ability.context,
+                    ability.context.clone(),
                     ability.mode_effects.as_slice(),
                 )
             })
             .expect("ability stack objects freeze their complete payload");
         match resolver {
-            StackAbilityResolver::Declarative(effect) => {
+            StackAbilityResolver::Declarative(effect)
+            | StackAbilityResolver::DeclarativeIgnoringTargetFizzle(effect) => {
                 let mut effects = Vec::with_capacity(mode_effects.len() + 1);
                 effects.push(effect);
                 effects.extend_from_slice(mode_effects);
@@ -324,6 +464,21 @@ impl Game {
                         targets,
                     },
                 );
+            }
+            StackAbilityResolver::CastOffer(alternative) => {
+                if let (Some(card), Some(payload)) = (object.source, object.ability.as_ref()) {
+                    debug_assert_eq!(
+                        self.ability_for_origin(card, payload.origin)
+                            .and_then(|ability| match ability.definition {
+                                super::DeclarativeAbilityDef::AlternativeCast(definition) => {
+                                    Some(definition.kind)
+                                }
+                                _ => None,
+                            }),
+                        Some(alternative),
+                    );
+                    self.queue_alternative_cast_offer(object.controller, card, payload.origin);
+                }
             }
         }
         true
@@ -373,7 +528,7 @@ impl Game {
             .battlefield
             .iter()
             .filter(|permanent| permanent.created_by == Some(source))
-            .map(|permanent| (permanent.card.id, permanent.card.definition))
+            .map(|permanent| (permanent.card.id, Self::effective_rules_source(permanent)))
             .collect::<Vec<_>>();
         if tokens.is_empty() {
             return;
@@ -381,13 +536,12 @@ impl Game {
         let options = tokens
             .iter()
             .enumerate()
-            .map(|(index, (id, definition))| DecisionOption {
+            .map(|(index, (id, presentation))| DecisionOption {
                 id: u32::try_from(index).unwrap_or(u32::MAX),
-                label: self.catalog.get(*definition).map_or_else(
-                    || "Unknown token".into(),
-                    |definition| definition.name.clone(),
-                ),
-                card: Some((*id, *definition)),
+                label: self
+                    .presentation_name(*presentation)
+                    .map_or_else(|| "Unknown token".to_owned(), std::borrow::Cow::into_owned),
+                card: Some((*id, *presentation)),
                 members: Vec::new(),
                 ability_text: None,
                 zone: DecisionZone::Battlefield,
@@ -406,72 +560,11 @@ impl Game {
         );
     }
 
-    /// "You may draw two additional cards. If you do, choose two cards in
-    /// your hand drawn this turn..." The offer comes first because declining
-    /// it skips the rest of the ability entirely.
-    pub(super) fn queue_sylvan_offer(&mut self, player: PlayerId) {
-        self.queue_decision(
-            player,
-            "Draw two additional cards?",
-            DecisionVisibility::Private,
-            DecisionPreference::Neutral,
-            1..=1,
-            false,
-            vec![
-                DecisionOption {
-                    id: 0,
-                    label: "Do not draw".into(),
-                    card: None,
-                    members: Vec::new(),
-                    ability_text: None,
-                    zone: DecisionZone::None,
-                },
-                DecisionOption {
-                    id: 1,
-                    label: "Draw two additional cards".into(),
-                    card: None,
-                    members: Vec::new(),
-                    ability_text: None,
-                    zone: DecisionZone::None,
-                },
-            ],
-            DecisionContinuation::SylvanOffer { player },
-        );
-    }
-
-    /// The cards this player drew this turn that are still in hand, which is
-    /// the pool Sylvan Library chooses from.
-    pub(super) fn sylvan_candidates(&self, player: PlayerId) -> Vec<GameObjectId> {
-        self.drawn_this_turn[player.index()]
-            .iter()
-            .copied()
-            .filter(|drawn| {
-                self.players[player.index()]
-                    .hand
-                    .iter()
-                    .any(|card| card.id == *drawn)
-            })
-            .collect()
-    }
-
     pub(super) fn resolve_custom_triggered_ability(
         &mut self,
         object: &StackObject,
         behavior: CardBehavior,
     ) {
-        if behavior == CardBehavior::SylvanLibrary {
-            self.queue_sylvan_offer(object.controller);
-            return;
-        }
-        if matches!(
-            behavior,
-            CardBehavior::SinCollector | CardBehavior::LifebaneZombie
-        ) {
-            if let Some(Target::Player(victim)) = self.first_legal_ability_target(object) {
-                self.queue_reveal_and_exile(object.controller, victim, behavior);
-            }
-            return;
-        }
         if matches!(
             behavior,
             CardBehavior::TetravusDetach | CardBehavior::TetravusAssemble
@@ -537,6 +630,12 @@ impl Game {
         let Some(ability) = &object.ability else {
             return false;
         };
+        if matches!(
+            ability.resolver,
+            StackAbilityResolver::DeclarativeIgnoringTargetFizzle(_)
+        ) {
+            return false;
+        }
         let mut had_target = false;
         let mut has_legal_target = false;
         for selection in &ability.targets {

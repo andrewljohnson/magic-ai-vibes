@@ -1,6 +1,9 @@
 use crate::action::AbilityOrigin;
 use crate::card::{AbilityDef, BasicLandType, CardTypeSet, KeywordAbility};
-use crate::ids::{CardDefinitionId, CardPartId, MeldRecipeId};
+use crate::ids::{CardDefinitionId, MeldRecipeId};
+use crate::{
+    EmblemCharacteristics, FaceDownCharacteristics, ObjectCharacteristics, TokenCharacteristics,
+};
 
 use super::TriggerEventObject;
 
@@ -12,6 +15,9 @@ use super::TriggerEventObject;
 #[allow(dead_code)]
 pub(super) enum CharacteristicSource {
     Card(CardDefinitionId),
+    Token(TokenCharacteristics),
+    Emblem(EmblemCharacteristics),
+    FaceDown(FaceDownCharacteristics),
     Copy(CardDefinitionId),
     Ability(CardDefinitionId),
     Meld(MeldRecipeId),
@@ -29,7 +35,12 @@ pub(super) struct BasicLandTypeChange {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LandTypeOperation {
     SetTo(&'static [BasicLandType]),
+    /// The same layer-4 set, for the one type a permanent was told to be as
+    /// it entered. A chosen type is not something a card could have written
+    /// down, so it cannot ride in the static slice above.
+    SetToChosen(BasicLandType),
     Add(&'static [BasicLandType]),
+    Remove(&'static [BasicLandType]),
 }
 
 /// An ability added as an exception while copying an object. Unlike an
@@ -46,9 +57,66 @@ pub(super) struct CopiableAbility {
 /// characteristics; copy-process exceptions are frozen beside it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct CopiableCharacteristics {
-    pub(super) base: (CardDefinitionId, CardPartId),
+    pub(super) base: ObjectCharacteristics,
     pub(super) added_types: CardTypeSet,
     pub(super) added_abilities: Vec<CopiableAbility>,
+    /// Whether the copying card's own printed subtypes stand beside the ones
+    /// it copied, which is what "except it's an Illusion in addition to its
+    /// other types" says.
+    pub(super) retain_printed_subtypes: bool,
+    /// "Except it's a 1/1." A copy exception is itself a copiable value
+    /// (CR 707.9a), so it rides here rather than being applied to the token
+    /// afterwards: a later copy of an offspring token is 1/1 as well.
+    pub(super) base_power_toughness: Option<(i16, i16)>,
+    /// "Except it's black." The colours the copy has instead of the ones it
+    /// copied, which is what makes an eternalized token black whatever the
+    /// card it came from was.
+    pub(super) colors: Option<crate::card::ColorSet>,
+    /// "Except it's a Zombie ...": creature types on top of the copied
+    /// ones. Interned names rather than the authored slice, so a restored
+    /// copy holds the same `&'static str` the cards do.
+    pub(super) added_creature_types: Vec<&'static str>,
+    /// "With no mana cost", which is what zeroes an eternalized token's mana
+    /// value.
+    pub(super) no_mana_cost: bool,
+}
+
+/// The permanent, two-face copiable values of a double-faced token created as
+/// a copy. The physical face identifiers stay separate from either face's
+/// effective base because an intervening copy effect can make both faces copy
+/// the same single-faced object without making the token single-faced.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct DoubleFacedCopiableCharacteristics {
+    pub(super) kind: crate::card::DoubleFacedKind,
+    pub(super) front_part: crate::CardPartId,
+    pub(super) back_part: crate::CardPartId,
+    pub(super) front: CopiableCharacteristics,
+    pub(super) back: CopiableCharacteristics,
+}
+
+impl DoubleFacedCopiableCharacteristics {
+    pub(super) fn face(&self, presented: crate::CardPartId) -> Option<&CopiableCharacteristics> {
+        if presented == self.front_part {
+            Some(&self.front)
+        } else if presented == self.back_part {
+            Some(&self.back)
+        } else {
+            None
+        }
+    }
+
+    pub(super) const fn other_face(
+        &self,
+        presented: crate::CardPartId,
+    ) -> Option<crate::CardPartId> {
+        if presented.0 == self.front_part.0 {
+            Some(self.back_part)
+        } else if presented.0 == self.back_part.0 {
+            Some(self.front_part)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

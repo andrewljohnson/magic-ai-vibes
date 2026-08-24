@@ -4,6 +4,7 @@ use super::{
     DeclarativeAbilityDef, EffectDef, EffectRecipientDef, HandcraftedPolicy, ObjectPredicateDef,
     PlayerRelation, SpellForm, ValueDef, ZoneKind,
 };
+use crate::PlayerSetDef;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DeclarativeSpellProfile {
@@ -22,6 +23,11 @@ pub(super) struct DeclarativeSpellProfile {
     pub(super) taps_source: bool,
     pub(super) opponent_creature_sweep: bool,
     pub(super) opponent_spell_sweep: bool,
+    /// Whether every effect this cast would resolve scales with the chosen X,
+    /// so casting for X=0 resolves to nothing at all. `None` until an effect
+    /// has been collected, which keeps a profile that recognized nothing from
+    /// claiming that the spell is empty.
+    pub(super) empty_without_x: Option<bool>,
 }
 
 impl DeclarativeSpellProfile {
@@ -46,6 +52,28 @@ impl HandcraftedPolicy {
         self.catalog
             .get(definition)
             .and_then(|card| card.rules.special_behavior())
+    }
+
+    /// Whether casting this spell for X=0 resolves to nothing at all, so the
+    /// card is spent to draw, deal, or discard nothing. The policy only ever
+    /// sees an X=0 cast when the bot has exactly the base cost and no more,
+    /// which is precisely when it should wait, so a true answer here means
+    /// hold the card. Restricted to spells that really do pay into an X.
+    /// Fireball is named rather than inspected because its card-local damage
+    /// selector leaves it no declarative effect to read.
+    pub(super) fn is_empty_at_zero_x(
+        &self,
+        definition: CardDefinitionId,
+        declarative: Option<DeclarativeSpellProfile>,
+    ) -> bool {
+        let Some(card) = self.catalog.get(definition) else {
+            return false;
+        };
+        if !card.rules.mana_cost().is_some_and(|cost| cost.variable_x) {
+            return false;
+        }
+        matches!(card.rules.special_behavior(), Some(CardBehavior::Fireball))
+            || declarative.is_some_and(|profile| profile.empty_without_x == Some(true))
     }
 
     pub(super) fn is_mana_source(&self, definition: CardDefinitionId) -> bool {
@@ -116,7 +144,7 @@ impl HandcraftedPolicy {
                 return None;
             }
             let mut profile = DeclarativeSpellProfile::default();
-            Self::collect_spell_effect_profile(
+            Self::collect_spell_effect(
                 ability.declarative_effect()?,
                 choices.x(),
                 &[],
@@ -131,7 +159,7 @@ impl HandcraftedPolicy {
             unreachable!("the selected ability is a spell ability")
         };
         let mut profile = DeclarativeSpellProfile::default();
-        Self::collect_spell_effect_profile(
+        Self::collect_spell_effect(
             ability.declarative_effect()?,
             choices.x(),
             spell.targets(),
@@ -145,7 +173,7 @@ impl HandcraftedPolicy {
             if !mode.is_executable() {
                 return None;
             }
-            Self::collect_spell_effect_profile(
+            Self::collect_spell_effect(
                 mode.declarative_effect()?,
                 choices.x(),
                 match mode.definition {
@@ -161,14 +189,18 @@ impl HandcraftedPolicy {
     /// Whether a recipient names every creature an opponent controls, which
     /// is what makes a damage or counter effect a one-sided sweep.
     pub(super) fn hits_every_opposing_creature(recipient: EffectRecipientDef) -> bool {
-        matches!(
-            recipient,
-            EffectRecipientDef::MatchingObjects {
-                object: ObjectPredicateDef::HasType(crate::CardType::Creature),
-                zones: [ZoneKind::Battlefield],
-                controller: PlayerRelation::Opponent | PlayerRelation::NotYou,
-            }
-        )
+        recipient.object_query().is_some_and(|query| {
+            query.object == ObjectPredicateDef::HasType(crate::CardType::Creature)
+                && query.zones == [ZoneKind::Battlefield]
+                && query.controller.is_none()
+                && query.owner.is_none()
+                && matches!(
+                    query.related_player,
+                    Some(PlayerSetDef::Related(
+                        PlayerRelation::Opponent | PlayerRelation::NotYou
+                    ))
+                )
+        })
     }
 
     /// A destroy is removal; a destroy aimed at every creature on the
@@ -178,15 +210,13 @@ impl HandcraftedPolicy {
         profile: &mut DeclarativeSpellProfile,
     ) {
         profile.mark(DeclarativeSpellProfile::REMOVES);
-        if let EffectRecipientDef::MatchingObjects {
-            object,
-            zones,
-            controller,
-        } = object
-            && zones == [ZoneKind::Battlefield]
-            && controller == PlayerRelation::Any
+        if let Some(query) = object.object_query()
+            && query.zones == [ZoneKind::Battlefield]
+            && query.controller.is_none()
+            && query.owner.is_none()
+            && query.related_player == Some(PlayerSetDef::Related(PlayerRelation::Any))
         {
-            let destroyed_types = Self::globally_destroyed_types(object);
+            let destroyed_types = Self::globally_destroyed_types(query.object);
             profile.global_destroy_types = profile.global_destroy_types.union(destroyed_types);
             if destroyed_types.contains(CardType::Creature) {
                 profile.mark(DeclarativeSpellProfile::SWEEPS_CREATURES);
@@ -244,6 +274,48 @@ impl HandcraftedPolicy {
         }
     }
 
+    /// Collects one whole effect a cast would resolve. Every effect reaches
+    /// the profile through here rather than through the recursive collector,
+    /// so `empty_without_x` sees each top-level effect exactly once.
+    fn collect_spell_effect(
+        effect: EffectDef,
+        x: u16,
+        targets: &[AbilityTargetDef],
+        profile: &mut DeclarativeSpellProfile,
+    ) {
+        Self::collect_spell_effect_profile(effect, x, targets, profile);
+        let empty = Self::is_empty_without_x(effect);
+        profile.empty_without_x = Some(profile.empty_without_x.unwrap_or(true) && empty);
+    }
+
+    /// Whether an effect does nothing whatsoever when the spell's X is zero,
+    /// because every amount it resolves is that X. A spell built only from
+    /// such effects — Braingeyser's draw, Earthquake's damage, Mind Twist's
+    /// discard — is a wasted card at X=0. Detonate is not one: its destroy
+    /// still kills a zero-cost artifact, so this reports false for it, as it
+    /// does for any effect whose behavior at X=0 is not obviously nothing.
+    fn is_empty_without_x(effect: EffectDef) -> bool {
+        match effect {
+            EffectDef::Sequence(effects) => {
+                !effects.is_empty()
+                    && effects
+                        .iter()
+                        .all(|effect| Self::is_empty_without_x(*effect))
+            }
+            EffectDef::May { effect, .. } => Self::is_empty_without_x(*effect),
+            EffectDef::DealDamage { amount, .. }
+            | EffectDef::DealDamageFrom { amount, .. }
+            | EffectDef::DealDamageAndApply { amount, .. }
+            | EffectDef::DrainLife { amount, .. }
+            | EffectDef::DrawCards { amount, .. }
+            | EffectDef::Discard { amount, .. }
+            | EffectDef::Mill { amount, .. }
+            | EffectDef::GainLife { amount, .. }
+            | EffectDef::LoseLife { amount, .. } => amount == ValueDef::ChosenX,
+            _ => false,
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     pub(super) fn collect_spell_effect_profile(
         effect: EffectDef,
@@ -265,15 +337,38 @@ impl HandcraftedPolicy {
                 Self::collect_spell_effect_profile(*on_success, x, targets, profile);
                 Self::collect_spell_effect_profile(*on_failure, x, targets, profile);
             }
-            EffectDef::ChooseDamageSource { then, .. }
-            | EffectDef::ChoosePermanent { then, .. } => {
+            EffectDef::Choose(choice) => {
+                Self::collect_spell_effect_profile(*choice.then, x, targets, profile);
+            }
+            EffectDef::SimultaneousChoose(choice) => {
+                Self::collect_spell_effect_profile(*choice.then, x, targets, profile);
+            }
+            EffectDef::ChooseCardName { then, .. }
+            | EffectDef::SearchZone { then: Some(then), .. }
+            | EffectDef::BindMatching { then, .. } => {
                 Self::collect_spell_effect_profile(*then, x, targets, profile);
             }
-            // An optional effect is worth what it would do if taken.
-            EffectDef::May { effect, .. } => {
+            EffectDef::PayOr(payment) => {
+                for effect in payment.if_paid.iter().chain(payment.otherwise.iter()) {
+                    Self::collect_spell_effect_profile(**effect, x, targets, profile);
+                }
+            }
+            EffectDef::SplitIntoPiles(partition) => {
+                Self::collect_spell_effect_profile(*partition.then, x, targets, profile);
+            }
+            // An optional effect is worth what it would do if taken. Iteration
+            // has the same child profile; multiplicity is intentionally not a
+            // separate policy weight here.
+            EffectDef::May { effect, .. } | EffectDef::ForEachInBinding { effect, .. } => {
                 Self::collect_spell_effect_profile(*effect, x, targets, profile);
             }
             EffectDef::DealDamage { recipient, amount }
+            | EffectDef::DealDamageFrom {
+                recipient, amount, ..
+            }
+            | EffectDef::DealDamageAndApply {
+                recipient, amount, ..
+            }
             | EffectDef::DrainLife { recipient, amount } => {
                 Self::collect_damage_profile(recipient, amount, x, profile);
             }
@@ -288,111 +383,149 @@ impl HandcraftedPolicy {
                         Some(drawn.saturating_sub(Self::policy_value(amount, x).unwrap_or(0)));
                 }
             }
-            EffectDef::Counter { object, .. } => {
+            // Returning a spell is not a counter, but it answers one the
+            // same way, so the policy weighs it as one.
+            EffectDef::ReturnSpellToHand { object }
+            | EffectDef::PutSpellIntoOwnersLibrary { object }
+            | EffectDef::Counter { object, .. } => {
                 profile.mark(DeclarativeSpellProfile::COUNTERS);
-                profile.opponent_spell_sweep |= matches!(
-                    object,
-                    EffectRecipientDef::MatchingObjects {
-                        object: ObjectPredicateDef::Spell,
-                        zones: [ZoneKind::Stack],
-                        controller: PlayerRelation::Opponent | PlayerRelation::NotYou,
-                    }
-                );
+                profile.opponent_spell_sweep |= object.object_query().is_some_and(|query| {
+                    query.object == ObjectPredicateDef::Spell
+                        && query.zones == [ZoneKind::Stack]
+                        && query.controller.is_none()
+                        && query.owner.is_none()
+                        && matches!(
+                            query.related_player,
+                            Some(PlayerSetDef::Related(
+                                PlayerRelation::Opponent | PlayerRelation::NotYou
+                            ))
+                        )
+                });
             }
-            EffectDef::CounterUnlessPaid { .. } => {
-                profile.mark(DeclarativeSpellProfile::COUNTERS);
+            EffectDef::Destroy { object, then, .. } => {
+                Self::collect_destroy_profile(object, profile);
+                if let Some(follow_up) = then {
+                    Self::collect_spell_effect_profile(*follow_up.effect, x, targets, profile);
+                }
             }
-            EffectDef::Destroy { object, .. } => Self::collect_destroy_profile(object, profile),
             EffectDef::MoveToZone {
-                object: EffectRecipientDef::Target(target),
+                object,
+                from: None,
                 zone: ZoneKind::Exile,
                 ..
-            } if Self::target_slot_is_on_battlefield(targets, target.index()) => {
+            } if object.legal_target().is_some_and(|target| {
+                Self::target_slot_is_on_battlefield(targets, target.index())
+            }) =>
+            {
                 profile.mark(DeclarativeSpellProfile::REMOVES);
             }
             EffectDef::Tap { .. }
             | EffectDef::RemoveFromCombat { .. }
-            | EffectDef::SetColor { .. }
-            | EffectDef::DestroyAtEndOfCombat { .. }
             | EffectDef::SkipNextUntapSteps { .. }
+            | EffectDef::DoubleCounters { .. }
             | EffectDef::RemoveAllCounters { .. }
             | EffectDef::Untap { .. }
-            | EffectDef::PreventAllCombatDamageThisTurn
-            | EffectDef::PreventNextDamage { .. }
-            | EffectDef::PreventAllDamageThisTurn { .. }
-            | EffectDef::PreventNextDamageFromSource { .. }
-            | EffectDef::PreventCombatDamageThisTurn { .. }
-            | EffectDef::PreventCombatDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerAndControlledCreaturesThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerFromThisTurn { .. }
-            | EffectDef::PreventAllCombatDamageExceptSourceThisTurn { .. } => {
+            | EffectDef::Saddle { .. }
+            | EffectDef::PreventDamage { .. } => {
                 profile.mark(DeclarativeSpellProfile::TAPS);
             }
-            EffectDef::Apply { .. } => profile.mark(DeclarativeSpellProfile::APPLIES),
+            EffectDef::StaticApply { .. } | EffectDef::Apply { .. } => {
+                profile.mark(DeclarativeSpellProfile::APPLIES);
+            }
             EffectDef::TakeExtraTurn {
                 player: EffectRecipientDef::Controller,
             } => profile.mark(DeclarativeSpellProfile::EXTRA_TURN),
             // Nothing outranks winning, so it needs no profile of its own.
             EffectDef::LoseTheGame { .. }
+            | EffectDef::WinTheGame { .. }
+            // A copy of the spell being cast is the same spell again, so the
+            // profile is already the right one.
+            | EffectDef::CopyResolvingSpell { .. }
             | EffectDef::None
             | EffectDef::AddMana(_)
             | EffectDef::AddManaEqualTo { .. }
             | EffectDef::ShuffleLibrary { .. }
+            | EffectDef::BuryGraveyard { .. }
             | EffectDef::EmptyManaPool { .. }
             | EffectDef::GainLife { .. }
             | EffectDef::AddPoisonCounters { .. }
+            | EffectDef::AddEnergyCounters { .. }
             | EffectDef::LoseLife { .. }
             | EffectDef::Regenerate { .. }
             | EffectDef::Sacrifice { .. }
             | EffectDef::SacrificeOfChoice { .. }
-            | EffectDef::DestroyOfChoice { .. }
-            | EffectDef::SplitPermanentsAndSacrificeAPile { .. }
-            | EffectDef::RevealAndSplitIntoPiles { .. }
+            | EffectDef::DiscardCards { .. }
+            | EffectDef::ExileTopOfLibraryToPlay { .. }
+            | EffectDef::ExileAtRandomFromGraveyardToPlay { .. }
+            | EffectDef::ExileTopAndMayCast { .. }
+            | EffectDef::MayCastTargetWithoutPaying { .. }
             | EffectDef::Mill { .. }
-            | EffectDef::LookAtTopAndMayTake { .. }
+            | EffectDef::SearchZonesAndExileRest { .. }
+            | EffectDef::MillUntil { .. }
+            | EffectDef::ExileFromTopUntil { .. }
+        | EffectDef::ManifestDread { .. }
+        | EffectDef::Cascade
+        | EffectDef::Proliferate
+        | EffectDef::Explore { .. }
             | EffectDef::LookAtTopAndSelect { .. }
             | EffectDef::LookAtHand { .. }
+            | EffectDef::LookAtRandomCardInHand { .. }
+            | EffectDef::RevealAtRandomFromHand { .. }
+            | EffectDef::RevealHand { .. }
             | EffectDef::SearchZone { .. }
             | EffectDef::ChooseCards { .. }
             | EffectDef::ReplaceNextDrawThisTurn { .. }
             | EffectDef::IfFormat { .. }
             | EffectDef::AddCounters { .. }
+            | EffectDef::RemoveCounters { .. }
             | EffectDef::ChangeTextBasicLandType { .. }
+            | EffectDef::ChooseColor { .. }
             | EffectDef::BecomeCopyOf { .. }
-            | EffectDef::OptionalPayment { .. }
-            | EffectDef::UnlessPaid { .. }
             | EffectDef::CannotBeForcedToSacrifice
+            | EffectDef::CannotBeForcedToDiscard
+            | EffectDef::GainClassLevel { .. }
+            | EffectDef::SubstituteBasicLandTypeUntilEndOfTurn { .. }
             | EffectDef::CreateEmblem { .. }
+            | EffectDef::CreateOngoingEffect(_)
+            | EffectDef::PutOntoBattlefieldThen { .. }
+            | EffectDef::ReturnWithHasteAndFinality { .. }
             | EffectDef::Transform { .. }
-            | EffectDef::AdditionalCombatPhase
+            | EffectDef::ScheduleTurnPhases(_)
             | EffectDef::TakeExtraTurn { .. }
-            | EffectDef::CannotCastNoncreatureSpellsThisTurn { .. }
+            | EffectDef::PutSourceOntoBattlefieldAttacking
+            | EffectDef::BecomeMonarch { .. }
+            | EffectDef::VoteForPermanentToExile { .. }
+            | EffectDef::DamageCannotBePreventedThisTurn
             | EffectDef::GrantFlashToNextSorcery
             | EffectDef::ExileLinkedToSource { .. }
+            | EffectDef::MayPlayWithoutPaying { .. }
+            | EffectDef::ExileGrantingOwnerPlay { .. }
             | EffectDef::ReturnLinkedExiles { .. }
             | EffectDef::Detain { .. }
-            | EffectDef::CannotRegenerateThisTurn { .. }
-            | EffectDef::MakeUnblockableThisTurn { .. }
-            | EffectDef::GainControlWhileSourceRemains { .. }
-            | EffectDef::GainControlThisTurn { .. }
-            | EffectDef::AtNextStep { .. }
+            | EffectDef::GainControl { .. }
+            | EffectDef::ExchangeControl { .. }
+            | EffectDef::InstallTrigger(_)
             | EffectDef::IfCondition { .. }
-            | EffectDef::TriggerUntilYourNextTurn { .. }
             | EffectDef::ReduceGenericCostBy(_)
-            | EffectDef::PlayersCantPlay(_)
+            | EffectDef::ModifyCost(_)
             | EffectDef::LandwalkCanBeBlocked(_)
             | EffectDef::CannotAttackUnless(_)
-            | EffectDef::MultiplyEventAmount(_)
-            | EffectDef::Replacement(_)
+            | EffectDef::CannotAttackIf(_)
+            | EffectDef::PutIntoLibraryBeneathTop { .. }
             | EffectDef::MoveToZone { .. }
             | EffectDef::Attach { .. }
+            | EffectDef::AttachToSource { .. }
+            | EffectDef::PhaseOut { .. }
+            | EffectDef::ReturnAttached { .. }
+            | EffectDef::Reconfigure { .. }
+            | EffectDef::Unattach { .. }
+            | EffectDef::PairWithSource { .. }
             | EffectDef::CreateToken { .. }
+            | EffectDef::CreateAttachedToken { .. }
+            | EffectDef::CreateTokenAttachedTo { .. }
             | EffectDef::CreateTokenCopyOf { .. }
-            | EffectDef::ChooseCardName { .. }
-            | EffectDef::ChoosePlayer { .. }
-            | EffectDef::CopyPermanentAsItEnters { .. }
-            | EffectDef::ChooseCreatureType { .. }
+            | EffectDef::Endure { .. }
+            | EffectDef::CreateMyriadTokens
             | EffectDef::Special(_) => {}
         }
     }
@@ -403,22 +536,55 @@ impl HandcraftedPolicy {
             ValueDef::ChosenX => Some(x),
             // Board-dependent values are not knowable from the definition
             // alone, so the caller falls back to its own heuristics.
-            ValueDef::SourcePower
+            ValueDef::SourceCastX
+            | ValueDef::SourcePower
+            | ValueDef::AffectedManaValue
+            | ValueDef::AffectedColorCount
+            | ValueDef::TotalPowerOfLinkedExiles
+            | ValueDef::TotalToughnessOfLinkedExiles
             | ValueDef::TriggeringObjectPower
+            | ValueDef::TriggeringObjectToughness
             | ValueDef::SourceToughness
             | ValueDef::TriggerEventAmount
             | ValueDef::CardsInHandAbove { .. }
+            | ValueDef::DamageTakenThisTurn { .. }
             | ValueDef::CountMatchingObjects(_)
+            | ValueDef::CountMatchingPlayerAttachments(_)
+            | ValueDef::CountSpellsCastThisTurn(_)
+            | ValueDef::GreatestPowerAmong(_)
             | ValueDef::AnyMatchingObject(_)
             | ValueDef::CountersOnSource(_)
+            | ValueDef::CardsDrawnThisTurn(_)
+            | ValueDef::DevotionTo(_)
+            | ValueDef::BasicLandTypesControlled(_)
+            | ValueDef::LibrarySize(_)
+            | ValueDef::SpellsCastThisGame(_)
+            | ValueDef::ColorsOfManaSpent
+            | ValueDef::PaidAmount
+            | ValueDef::MatchedCount
+            | ValueDef::MatchedCardTypes
+            | ValueDef::MatchedManaValue
+            | ValueDef::BoundObjectCount(_)
+            | ValueDef::SpellsCastBeforeThisTurn
+            | ValueDef::TimesAdditionalCostPaid
             | ValueDef::DividedAmongTargets
             | ValueDef::TargetPower(_)
+            | ValueDef::TargetToughness(_)
+            | ValueDef::TargetLibrarySize(_)
+            | ValueDef::LifeTotal(_)
             | ValueDef::TargetManaValue(_)
             | ValueDef::IfCreatureDiedThisTurn(_)
+            | ValueDef::IfControllerLifeAtMost(_)
             | ValueDef::IfTargetMatches(_)
             | ValueDef::IfMatchingObjectCount(_)
             | ValueDef::Negate(_)
-            | ValueDef::Scaled(_) => None,
+            | ValueDef::Scaled(_)
+            | ValueDef::Halved(_)
+            | ValueDef::Sum(_)
+            | ValueDef::CreaturesDiedThisTurn
+            | ValueDef::OpponentsWhoLostLifeThisTurn
+            | ValueDef::CardTypesAmongGraveyards(_)
+            | ValueDef::IfCardTypesAmongGraveyards(_) => None,
         }
     }
 }

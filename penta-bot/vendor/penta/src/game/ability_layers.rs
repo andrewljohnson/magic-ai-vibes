@@ -1,11 +1,14 @@
 use std::cell::Cell;
 
-use crate::card::AbilityPredicateDef;
+use crate::ids::GrantId;
 
+use super::continuous_effects::StaticEffectKind;
 use super::{
-    AbilityDef, AbilityId, AbilityLayerOperation, AbilityLayerOperationKind, AbilityOrigin,
-    AppliedEffectDef, BasicLandType, CardBehavior, CardType, ControlFlow, DeclarativeAbilityDef,
-    EffectiveAbility, Game, KeywordAbility, Permanent, StaticAppliedEffect, abilities,
+    AbilityDef, AbilityId, AbilityLayerOperation, AbilityLayerOperationKind, AbilityOperationDef,
+    AbilityOrigin, AppliedEffectDef, BasicLandType, CardBehavior, CardType,
+    CharacteristicOperationDef, ControlFlow, DeclarativeAbilityDef, EffectiveAbility, Game,
+    KeywordAbility, Permanent, ResolvedAbilityOperation, ResolvedContinuousEffectKind,
+    StaticAppliedEffect, abilities,
 };
 
 thread_local! {
@@ -37,6 +40,29 @@ impl Drop for StaticAbilityLayerGuard {
 }
 
 impl Game {
+    /// Whether one printed or copied ability remains after rules-text removal
+    /// and already-resolved layer-6 operations. Static layer-6 dependencies
+    /// still use the documented one-level model, but a resolved "loses all
+    /// abilities" effect must immediately stop this ability from supplying a
+    /// live static rule.
+    pub(super) fn ability_survives_resolved_operations(
+        &self,
+        permanent: &Permanent,
+        origin: AbilityOrigin,
+    ) -> bool {
+        let operations = self.resolved_ability_layer_operations(permanent);
+        if operations.is_empty() {
+            return true;
+        }
+        let mut abilities = self.collect_base_effective_abilities(permanent, None);
+        for operation in operations {
+            Self::apply_ability_layer_operation(&mut abilities, &operation);
+        }
+        abilities
+            .into_iter()
+            .any(|effective| effective.origin == origin)
+    }
+
     /// Whether an object has a nonmana activated ability, reading printed and
     /// copied abilities plus already-resolved grants and removals. The one
     /// predicate that asks — Rising Waters' recipient query — is itself a
@@ -45,7 +71,7 @@ impl Game {
     /// Nothing else needs the question, so no full-walk variant exists yet.
     pub(super) fn has_nonmana_activated_ability(&self, permanent: &Permanent) -> bool {
         let mut abilities = self.collect_base_effective_abilities(permanent, None);
-        for operation in Self::resolved_ability_layer_operations(permanent) {
+        for operation in self.resolved_ability_layer_operations(permanent) {
             Self::apply_ability_layer_operation(&mut abilities, &operation);
         }
         abilities.into_iter().any(|effective| {
@@ -96,32 +122,35 @@ impl Game {
                 self.rules_text_abilities_removed_with_prospective(permanent, prospective)
             },
         );
-        let animation_removes_abilities = permanent
-            .animation
-            .is_some_and(|animation| animation.loses_abilities);
         let mut abilities = Vec::new();
-        if !rules_text_removed
-            && !animation_removes_abilities
-            && let Some(rules) = self.effective_rules(characteristics)
-        {
-            let (definition, part) = Self::effective_rules_source(characteristics);
+        if !rules_text_removed && let Some(rules) = self.effective_rules(characteristics) {
+            let source = Self::effective_rules_source(characteristics);
             for attached in rules.indexed_abilities() {
                 abilities.push(EffectiveAbility {
-                    origin: AbilityOrigin::Printed {
-                        definition,
-                        part,
-                        ability: attached.id,
-                    },
+                    origin: Self::authored_ability_origin(source, attached.id),
                     ability: attached.definition,
                 });
             }
-            if let Some(copy) = &characteristics.copy_effect {
+            if let Some(copy) = characteristics.active_copy_values() {
                 for added in &copy.added_abilities {
                     abilities.push(EffectiveAbility {
                         origin: added.origin,
                         ability: added.definition,
                     });
                 }
+            }
+        }
+
+        // A keyword counter is not a grant with a duration: the permanent
+        // has the keyword exactly while the counter is sitting on it
+        // (CR 122.1b), so it is read off the counters the way a basic land's
+        // mana ability is read off its subtypes.
+        for (kind, _) in characteristics.counters.iter() {
+            if let Some(ability) = abilities::keyword_counter_ability(kind) {
+                abilities.push(EffectiveAbility {
+                    origin: AbilityOrigin::IntrinsicCounter(kind),
+                    ability,
+                });
             }
         }
 
@@ -151,7 +180,7 @@ impl Game {
         // A few legacy setup paths still write keyword markers directly. Seed
         // them before ordered operations so generalized removal affects them
         // just like an ordinary granted ability.
-        let (definition, part) = Self::effective_rules_source(characteristics);
+        let source = Self::effective_rules_source(characteristics);
         for keyword in permanent.temporary_keywords.iter().copied().chain(
             permanent
                 .keywords_until_upkeep_of
@@ -159,11 +188,7 @@ impl Game {
                 .map(|(_, keyword)| *keyword),
         ) {
             abilities.push(EffectiveAbility {
-                origin: AbilityOrigin::Printed {
-                    definition,
-                    part,
-                    ability: AbilityId::PRIMARY,
-                },
+                origin: Self::authored_ability_origin(source, AbilityId::PRIMARY),
                 ability: AbilityDef::keyword("Granted keyword ability", keyword),
             });
         }
@@ -191,25 +216,27 @@ impl Game {
         permanent: &Permanent,
         prospective: Option<&Permanent>,
     ) -> Vec<AbilityLayerOperation> {
-        let mut operations = Self::resolved_ability_layer_operations(permanent);
+        let mut operations = self.resolved_ability_layer_operations(permanent);
         let Some(_pass) = StaticAbilityLayerGuard::enter() else {
             return operations;
         };
         let mut visit_static = |applied: StaticAppliedEffect| {
-            let order = u16::try_from(operations.len()).unwrap_or(u16::MAX);
-            if let Some(operation) = Self::static_ability_layer_operation(applied, order) {
-                operations.push(operation);
-            }
+            self.push_static_ability_layer_operations(&applied, &mut operations);
             ControlFlow::Continue(())
         };
         let result = if let Some(prospective) = prospective {
             self.visit_static_applied_effects_with_prospective(
                 permanent,
                 prospective,
+                StaticEffectKind::Abilities,
                 &mut visit_static,
             )
         } else {
-            self.visit_static_applied_effects(permanent, &mut visit_static)
+            self.visit_static_applied_effects(
+                permanent,
+                StaticEffectKind::Abilities,
+                &mut visit_static,
+            )
         };
         debug_assert!(result.is_continue());
 
@@ -217,29 +244,38 @@ impl Game {
         operations
     }
 
-    fn resolved_ability_layer_operations(permanent: &Permanent) -> Vec<AbilityLayerOperation> {
+    fn resolved_ability_layer_operations(
+        &self,
+        permanent: &Permanent,
+    ) -> Vec<AbilityLayerOperation> {
         let mut operations = Vec::new();
-        for granted in &permanent.temporary_granted_abilities {
+        for effect in &permanent.resolved_continuous_effects {
+            if !self.resolved_continuous_effect_is_active(effect) {
+                continue;
+            }
+            let ResolvedContinuousEffectKind::Abilities(operation) = effect.kind else {
+                continue;
+            };
+            let kind = match operation {
+                ResolvedAbilityOperation::Add { ability, grant } => {
+                    AbilityLayerOperationKind::Add {
+                        origin: Self::granted_ability_origin(
+                            effect.source.object,
+                            effect.source.ability,
+                            Self::effective_rules_source(permanent),
+                            grant,
+                        ),
+                        ability,
+                    }
+                }
+                ResolvedAbilityOperation::Remove(predicate) => {
+                    AbilityLayerOperationKind::Remove(predicate)
+                }
+            };
             operations.push(AbilityLayerOperation {
-                timestamp: granted.timestamp,
-                order: granted.order,
-                kind: AbilityLayerOperationKind::Add {
-                    origin: AbilityOrigin::Granted {
-                        source: granted.source,
-                        source_definition: granted.source_definition,
-                        source_part: granted.source_part,
-                        source_ability: granted.source_ability,
-                        grant: granted.grant,
-                    },
-                    ability: granted.ability,
-                },
-            });
-        }
-        for removal in &permanent.temporary_removed_abilities {
-            operations.push(AbilityLayerOperation {
-                timestamp: removal.timestamp,
-                order: removal.order,
-                kind: AbilityLayerOperationKind::Remove(removal.predicate),
+                timestamp: effect.timestamp,
+                order: effect.component_order,
+                kind,
             });
         }
         operations.sort_by_key(|operation| (operation.timestamp, operation.order));
@@ -255,72 +291,113 @@ impl Game {
                 abilities.push(EffectiveAbility { origin, ability });
             }
             AbilityLayerOperationKind::Remove(predicate) => {
-                abilities.retain(|ability| !Self::ability_predicate_matches(predicate, ability));
+                abilities.retain(|ability| !predicate.matches(&ability.ability));
+            }
+        }
+    }
+
+    /// The layer-6 operations one static applied effect contributes. Every
+    /// written-down operation contributes exactly one; a grant that reads the
+    /// exile pile contributes one per ability it finds there, which is why
+    /// this fills a list rather than returning a single operation.
+    fn push_static_ability_layer_operations(
+        &self,
+        applied: &StaticAppliedEffect,
+        operations: &mut Vec<AbilityLayerOperation>,
+    ) {
+        if matches!(
+            applied.effect,
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::AddActivatedAbilitiesOfLinkedExiles,
+            ))
+        ) {
+            self.push_linked_exile_ability_grants(applied, operations);
+            return;
+        }
+        operations.extend(Self::static_ability_layer_operation(applied));
+    }
+
+    /// One Add operation for each activated ability of each creature card
+    /// exiled with the granting object, in exile order. The grant identity is
+    /// that position, which is stable because the pile only ever grows while
+    /// the granting object is on the battlefield: an ability keeps the same
+    /// identity from the moment it appears until the whole pile goes home.
+    fn push_linked_exile_ability_grants(
+        &self,
+        applied: &StaticAppliedEffect,
+        operations: &mut Vec<AbilityLayerOperation>,
+    ) {
+        let mut position = 0_usize;
+        for (_, exiled) in self
+            .linked_exiles
+            .iter()
+            .filter(|(source, _)| *source == applied.source)
+        {
+            let Some(rules) = self
+                .card_in_nonbattlefield_zone(*exiled)
+                .and_then(|(_, card)| self.catalog.get(card.definition))
+                .map(|definition| &definition.rules)
+                .filter(|rules| rules.has_type(CardType::Creature))
+            else {
+                continue;
+            };
+            for attached in rules.indexed_abilities() {
+                if !matches!(
+                    attached.definition.definition,
+                    DeclarativeAbilityDef::Activated(_)
+                ) {
+                    continue;
+                }
+                let Some(grant) = GrantId::from_index(position) else {
+                    return;
+                };
+                position += 1;
+                operations.push(AbilityLayerOperation {
+                    timestamp: applied.timestamp,
+                    order: applied.component_order,
+                    kind: AbilityLayerOperationKind::Add {
+                        origin: Self::granted_ability_origin(
+                            applied.source,
+                            applied.source_origin,
+                            applied.source_presentation,
+                            grant,
+                        ),
+                        ability: attached.definition,
+                    },
+                });
             }
         }
     }
 
     fn static_ability_layer_operation(
-        applied: StaticAppliedEffect,
-        order: u16,
+        applied: &StaticAppliedEffect,
     ) -> Option<AbilityLayerOperation> {
         let kind = match applied.effect {
-            AppliedEffectDef::GrantAbility(ability) => AbilityLayerOperationKind::Add {
-                origin: AbilityOrigin::Granted {
-                    source: applied.source,
-                    source_definition: applied.source_definition,
-                    source_part: applied.source_part,
-                    source_ability: applied.source_ability,
-                    grant: applied
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::Add(ability),
+            )) => AbilityLayerOperationKind::Add {
+                origin: Self::granted_ability_origin(
+                    applied.source,
+                    applied.source_origin,
+                    applied.source_presentation,
+                    applied
                         .grant
                         .expect("a granted ability has a structural grant identity"),
-                },
+                ),
                 ability: *ability,
             },
-            AppliedEffectDef::RemoveAbilities(predicate) => {
-                AbilityLayerOperationKind::Remove(predicate)
-            }
-            AppliedEffectDef::CannotBeCountered
-            | AppliedEffectDef::DoesNotUntapDuringUntapStep
-            | AppliedEffectDef::MayChooseNotToUntap
-            | AppliedEffectDef::CannotBlock
-            | AppliedEffectDef::CannotAttack
-            | AppliedEffectDef::CannotBeBlocked
-            | AppliedEffectDef::CannotBeEnchanted
-            | AppliedEffectDef::CannotBecomeEnchanted
-            | AppliedEffectDef::CannotChangeController
-            | AppliedEffectDef::RemainsAttachedThroughProtection
-            | AppliedEffectDef::CannotBeBlockedBy(_)
-            | AppliedEffectDef::CanBlockOnly(_)
-            | AppliedEffectDef::PreventDamageFrom(_)
-            | AppliedEffectDef::PreventCombatDamageFrom(_)
-            | AppliedEffectDef::PreventCombatDamage
-            | AppliedEffectDef::PreventCombatDamageDealtBy
-            | AppliedEffectDef::AddLandTypes(_)
-            | AppliedEffectDef::SetLandTypes(_)
-            | AppliedEffectDef::Animate(_)
-            | AppliedEffectDef::Composite(_)
-            | AppliedEffectDef::ModifyPowerToughness { .. }
-            | AppliedEffectDef::Special(_) => return None,
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::Remove(predicate),
+            )) => AbilityLayerOperationKind::Remove(predicate),
+            AppliedEffectDef::Characteristic(_)
+            | AppliedEffectDef::Rule(_)
+            | AppliedEffectDef::Composite(_) => return None,
         };
         Some(AbilityLayerOperation {
             timestamp: applied.timestamp,
-            order,
+            order: applied.component_order,
             kind,
         })
-    }
-
-    fn ability_predicate_matches(
-        predicate: AbilityPredicateDef,
-        ability: &EffectiveAbility,
-    ) -> bool {
-        match predicate {
-            AbilityPredicateDef::Any => true,
-            AbilityPredicateDef::Keyword(expected) => matches!(
-                ability.ability.definition,
-                DeclarativeAbilityDef::Keyword(actual) if actual == expected
-            ),
-        }
     }
 
     pub(super) fn visit_effective_replacement_abilities_with_prospective(
@@ -388,7 +465,7 @@ impl Game {
         &self,
         permanent: &Permanent,
         prospective: Option<&Permanent>,
-    ) -> u32 {
+    ) -> u64 {
         let abilities = self.collect_effective_abilities(permanent, prospective);
         let mut mask = 0;
         let mut set = |keyword: KeywordAbility| {
@@ -408,7 +485,7 @@ impl Game {
 
     pub(super) fn effective_behavior(&self, permanent: &Permanent) -> Option<CardBehavior> {
         let mut abilities = self.collect_base_effective_abilities(permanent, None);
-        for operation in Self::resolved_ability_layer_operations(permanent) {
+        for operation in self.resolved_ability_layer_operations(permanent) {
             Self::apply_ability_layer_operation(&mut abilities, &operation);
         }
         abilities

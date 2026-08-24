@@ -172,8 +172,9 @@ fn ability_events_distinguish_the_stack_object_from_a_source_that_left_play() {
             source: source_id,
             ability: activated_ability_for(&game, source_id, 0),
             targets: activated_targets(Target::Permanent(target_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -202,7 +203,7 @@ fn ability_events_distinguish_the_stack_object_from_a_source_that_left_play() {
             player: PlayerId::One,
             object: ability_id,
             source: source_id,
-            definition: cards::STRIP_MINE,
+            presentation: ObjectCharacteristics::card(cards::STRIP_MINE, CardPartId::PRIMARY),
             chosen_permanents: vec![target_id],
         })
     );
@@ -212,7 +213,7 @@ fn ability_events_distinguish_the_stack_object_from_a_source_that_left_play() {
         game.events[event_start..].contains(&GameEvent::AbilityResolved {
             object: ability_id,
             source: source_id,
-            definition: cards::STRIP_MINE,
+            presentation: ObjectCharacteristics::card(cards::STRIP_MINE, CardPartId::PRIMARY),
         })
     );
 }
@@ -281,13 +282,57 @@ fn white_red_hybrid_symbols_accept_either_color_but_not_colorless() {
 }
 
 #[test]
+fn overlapping_hybrid_pairs_share_each_colors_capacity() {
+    let mut cost = ManaCost::default();
+    cost.hybrid[HybridPair::WhiteBlue.index()] = 1;
+    cost.hybrid[HybridPair::WhiteBlack.index()] = 1;
+
+    assert!(
+        !can_pay(
+            ManaPool {
+                white: 1,
+                green: 1,
+                ..ManaPool::default()
+            },
+            cost,
+            0,
+        ),
+        "one white cannot satisfy both overlapping hybrid symbols",
+    );
+
+    let mut pool = ManaPool {
+        white: 1,
+        blue: 1,
+        ..ManaPool::default()
+    };
+    assert!(can_pay(pool, cost, 0));
+    pay_cost(&mut pool, cost, 0);
+    assert_eq!(pool, ManaPool::default());
+
+    cost.generic = 1;
+    assert_eq!(
+        Game::generic_shortfall(
+            ManaPool {
+                white: 1,
+                blue: 1,
+                ..ManaPool::default()
+            },
+            cost,
+            0,
+        ),
+        1,
+        "both colored units are globally committed to the hybrid symbols",
+    );
+}
+
+#[test]
 fn declarative_mana_production_drives_generic_mana_sources() {
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::activated_mana(
         "{T}: Add {U} or {R}.",
         &[AbilityCostDef::TapSource],
         EffectDef::AddMana(AddManaEffectDef::choice(&[ManaColor::Blue, ManaColor::Red])),
     )];
-    let definition_id = CardDefinitionId(10_000);
+    let definition_id = CardDefinitionId::new(10_000);
     let mut definition = CardDefinition::new(
         definition_id,
         "Test dual land",
@@ -317,7 +362,37 @@ fn declarative_mana_production_drives_generic_mana_sources() {
         CardInstanceId(10_000),
         ability,
         ManaColor::Blue,
+        ManaActivationChoices::default(),
     );
     assert_eq!(game.players[0].mana_pool.blue, 1);
     assert!(game.battlefield[0].tapped);
+}
+
+#[test]
+fn observations_keep_permanents_with_object_specific_state_out_of_shared_piles() {
+    let mut game = ready_game();
+    game.battlefield
+        .push(creature(10_100, cards::MANA_VAULT, PlayerId::One));
+    game.battlefield
+        .push(creature(10_101, cards::MANA_VAULT, PlayerId::One));
+
+    let pristine = game.observe(PlayerId::One);
+    assert!(
+        pristine
+            .battlefield
+            .iter()
+            .all(|permanent| !permanent.has_individual_state),
+        "a permanent's own printed static ability is shared card state",
+    );
+
+    game.battlefield[0].skipped_untap_steps = 1;
+    let affected = game.observe(PlayerId::One);
+    assert!(affected.battlefield[0].has_individual_state);
+    assert!(!affected.battlefield[1].has_individual_state);
+
+    let first = game.battlefield[0].card.id;
+    game.battlefield[1].attached_to = Some(first);
+    let attached = game.observe(PlayerId::One);
+    assert!(attached.battlefield[0].has_individual_state);
+    assert!(attached.battlefield[1].has_individual_state);
 }

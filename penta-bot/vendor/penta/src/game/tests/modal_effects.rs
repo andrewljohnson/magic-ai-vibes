@@ -1,4 +1,5 @@
 use super::*;
+use crate::AbilityProgramDef;
 
 /// Casts a modal spell by picking one mode. A selected mode's clause-local
 /// primary target becomes runtime slot zero.
@@ -114,7 +115,13 @@ fn izzet_charm_loots_by_drawing_two_then_discarding_two_of_choice() {
     let discards = decision
         .options
         .iter()
-        .filter(|option| option.card != Some((keeper.id, cards::BLACK_LOTUS)))
+        .filter(|option| {
+            option.card
+                != Some((
+                    keeper.id,
+                    ObjectCharacteristics::card(cards::BLACK_LOTUS, CardPartId::PRIMARY),
+                ))
+        })
         .map(|option| option.id)
         .collect::<Vec<_>>();
     assert_eq!(discards.len(), 2, "the drawn cards are discardable");
@@ -163,22 +170,27 @@ fn selesnya_charm_pumps_and_grants_trample() {
         panic!("Selesnya Charm should have a spell ability")
     };
     let mode = spell.mode(ModeId(0)).unwrap();
-    let EffectDef::Apply {
-        recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+    let AbilityProgramDef::Effects(EffectDef::Apply {
+        recipient,
         effect: AppliedEffectDef::Composite(components),
-        duration: EffectDurationDef::UntilEndOfTurn,
-    } = mode.effect.definition
+        duration: ResolvedEffectDurationDef::UntilEndOfTurn,
+    }) = mode.effect.definition
     else {
         panic!("Selesnya Charm should apply one composite effect until end of turn")
     };
+    assert_eq!(recipient.legal_target(), Some(TargetIndex::PRIMARY));
     assert!(matches!(
         components,
         [
-            AppliedEffectDef::ModifyPowerToughness {
-                power: ValueDef::Constant(2),
-                toughness: ValueDef::Constant(2),
-            },
-            AppliedEffectDef::GrantAbility(ability),
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::PowerToughness(
+                PowerToughnessOperationDef::Modify {
+                    power: ValueDef::Constant(2),
+                    toughness: ValueDef::Constant(2),
+                },
+            )),
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::Add(ability),
+            )),
         ] if ability.definition == DeclarativeAbilityDef::Keyword(KeywordAbility::Trample)
     ));
 
@@ -226,7 +238,12 @@ fn selesnya_charm_can_instead_make_a_knight() {
     let knight = game
         .battlefield
         .iter()
-        .find(|permanent| permanent.card.definition == cards::KNIGHT_TOKEN_2_2_WHITE)
+        .find(|permanent| {
+            is_token_with(
+                permanent,
+                token_with_vigilance(tokens::creature(&["Knight"], &[ManaColor::White], 2, 2)),
+            )
+        })
         .expect("a Knight token arrived");
     assert_eq!(game.power(knight), Some(2));
     assert_eq!(game.toughness(knight), Some(2));
@@ -272,9 +289,17 @@ fn selesnya_charm_reads_current_power_not_printed_power() {
     // A 4/4 pumped to 6/6 by the charm's own first mode qualifies for the
     // second, which is why the predicate reads live power.
     let mut game = ready_game();
-    let mut angel = creature(10_000, cards::SERRA_ANGEL, PlayerId::Two);
-    angel.power_bonus = 2;
+    let angel = creature(10_000, cards::SERRA_ANGEL, PlayerId::Two);
     game.battlefield.push(angel);
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_000),
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(2),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
     let charm = card(10_001, cards::SELESNYA_CHARM, PlayerId::One);
     game.players[0].hand.push(charm.clone());
     game.players[0].mana_pool.green = 1;
@@ -487,7 +512,7 @@ fn primeval_bounty_makes_a_beast_only_for_its_controller() {
             if game
                 .battlefield
                 .iter()
-                .any(|p| p.card.definition == cards::BEAST_TOKEN_3_3_GREEN)
+                .any(|p| is_token_with(p, tokens::creature(&["Beast"], &[ManaColor::Green], 3, 3)))
             {
                 break;
             }
@@ -500,7 +525,7 @@ fn primeval_bounty_makes_a_beast_only_for_its_controller() {
         let made_token = game
             .battlefield
             .iter()
-            .any(|p| p.card.definition == cards::BEAST_TOKEN_3_3_GREEN);
+            .any(|p| is_token_with(p, tokens::creature(&["Beast"], &[ManaColor::Green], 3, 3)));
         assert_eq!(
             made_token,
             expect_token,
@@ -519,7 +544,7 @@ fn primeval_bounty_gains_life_only_for_its_own_lands() {
         game.players[lander.index()]
             .hand
             .push(card(10_002, cards::FOREST, lander));
-        game.players[lander.index()].land_played_this_turn = false;
+        game.players[lander.index()].lands_played_this_turn = 0;
         game.play_land(lander, CardInstanceId(10_002), PlayOptionId::DEFAULT);
         for _ in 0..8 {
             if game.players[0].life != 20 {
@@ -923,7 +948,17 @@ fn assemble_the_legion_musters_one_more_soldier_every_upkeep() {
         mustered.push(
             game.battlefield
                 .iter()
-                .filter(|permanent| permanent.card.definition == cards::SOLDIER_TOKEN_1_1_RED_WHITE)
+                .filter(|permanent| {
+                    is_token_with(
+                        permanent,
+                        token_with_haste(tokens::creature(
+                            &["Soldier"],
+                            &[ManaColor::Red, ManaColor::White],
+                            1,
+                            1,
+                        )),
+                    )
+                })
                 .count(),
         );
     }

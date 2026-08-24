@@ -147,6 +147,61 @@ macro_rules! deck {
     };
 }
 
+/// Built-in Premodern decklists, from the Sacred Torch Showdown Top 8.
+///
+/// A list is registered only once every card in it resolves; the rest of the
+/// staged tranche stays in `decks/premodern/` until it does.
+pub mod premodern {
+    deck!(
+        rg_goblins,
+        "premodern",
+        "rg_goblins_andy_dominguez.yaml",
+        "Returns Andy Dominguez's RG Goblins list from the Sacred Torch Showdown."
+    );
+    deck!(
+        sligh,
+        "premodern",
+        "sligh_neal_sacks.yaml",
+        "Returns Neal Sacks's Sligh list from the Sacred Torch Showdown."
+    );
+    deck!(
+        gat,
+        "premodern",
+        "gat_daniel_sondike.yaml",
+        "Returns Daniel Sondike's GAT list from the Sacred Torch Showdown."
+    );
+    deck!(
+        landstill,
+        "premodern",
+        "landstill_tentaclefan.yaml",
+        "Returns the sixth-place Landstill list from the Sacred Torch Showdown."
+    );
+    deck!(
+        stasis,
+        "premodern",
+        "stasis_drew_glauberg.yaml",
+        "Returns Drew Glauberg's Stasis list from the Sacred Torch Showdown."
+    );
+    deck!(
+        bw_control,
+        "premodern",
+        "bw_control_chris_danis.yaml",
+        "Returns Chris Danis's BW Control list from the Sacred Torch Showdown."
+    );
+    deck!(
+        replenish,
+        "premodern",
+        "replenish_bryan_gulotta.yaml",
+        "Returns Bryan Gulotta's Replenish list from the Sacred Torch Showdown."
+    );
+    deck!(
+        angry_hermit,
+        "premodern",
+        "angry_hermit_ryan_marvin.yaml",
+        "Returns Ryan Marvin's Angry Hermit list from the Sacred Torch Showdown."
+    );
+}
+
 /// Built-in Eternal Central Old School 93/94 decklists.
 pub mod old_school_93_94 {
     deck!(
@@ -247,55 +302,67 @@ pub mod old_school_93_94 {
     }
 }
 
-/// Built-in decks from the September 2013 ISD–RTR Standard card pool.
-pub mod isd_rtr_standard {
+/// Built-in decks legal in the final pre-Theros ISD–M14 Standard card pool.
+pub mod isd_m14_standard {
     deck!(
         naya_midrange_rudy_briksza,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "naya_midrange_rudy_briksza.yaml",
         "Returns Rudy Briksza's first-place Naya Midrange deck from SCG Open Atlanta."
     );
     deck!(
         gr_aggro_joseph_greer,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "gr_aggro_joseph_greer.yaml",
         "Returns Joseph Greer's second-place G/R Aggro deck from SCG Open Atlanta."
     );
     deck!(
         bg_midrange_mike_fyrberg,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "bg_midrange_mike_fyrberg.yaml",
         "Returns Mike Fyrberg's third-place B/G Midrange deck from SCG Open Atlanta."
     );
     deck!(
         naya_midrange_jimmie_smith,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "naya_midrange_jimmie_smith.yaml",
         "Returns Jimmie Smith's fourth-place Naya Midrange deck from SCG Open Atlanta."
     );
     deck!(
         uwr_flash_korey_mcduffie,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "uwr_flash_korey_mcduffie.yaml",
         "Returns the fifth-place U/W/R Flash deck piloted by Korey `McDuffie` at SCG Open Atlanta."
     );
     deck!(
         uw_flash_phillip_lorren,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "uw_flash_phillip_lorren.yaml",
         "Returns Phillip Lorren's sixth-place U/W Flash deck from SCG Open Atlanta."
     );
     deck!(
         uw_flash_clayton_arch,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "uw_flash_clayton_arch.yaml",
         "Returns a legality-corrected version of Clayton Arch's seventh-place U/W Flash deck from SCG Open Atlanta."
     );
     deck!(
         junk_reanimator_drew_kuenzinger,
-        "isd_rtr_standard",
+        "isd_m14_standard",
         "junk_reanimator_drew_kuenzinger.yaml",
         "Returns Drew Kuenzinger's eighth-place Junk Reanimator deck from SCG Open Atlanta."
+    );
+    deck!(
+        omnidoor_thragfire_todd_anderson,
+        "isd_m14_standard",
+        "omnidoor_thragfire_todd_anderson.yaml",
+        "Returns Todd Anderson's Omnidoor Thragfire test deck from January 2013."
+    );
+    deck!(
+        naya_midrange_brian_braun_duin,
+        "isd_m14_standard",
+        "naya_midrange_brian_braun_duin.yaml",
+        "Returns Brian Braun-Duin's Naya Midrange test deck from January 2013."
     );
 }
 
@@ -376,7 +443,7 @@ mod tests {
 
     use super::{
         BuiltinDeckError, artifacts, bwr_aggro, counterburn, erhnamgeddon, goblins, gr_aggro,
-        isd_rtr_standard, jeskai_aggro, lions_dib, lions_dib_bolt, mono_black, mono_red_atog,
+        isd_m14_standard, jeskai_aggro, lions_dib, lions_dib_bolt, mono_black, mono_red_atog,
         old_school_93_94, parse, robots, sligh, the_deck, troll_disk, white_weenie,
     };
     use crate::card;
@@ -384,7 +451,7 @@ mod tests {
 
     type DeckBuilder = fn() -> Deck;
 
-    const STAGED_PREMODERN_TOP_8: &[(&str, &str, usize)] = &[
+    const PREMODERN_TOP_8: &[(&str, &str, usize)] = &[
         (
             "Sligh — Neal Sacks",
             include_str!("../decks/premodern/sligh_neal_sacks.yaml"),
@@ -509,34 +576,89 @@ mod tests {
     }
 
     #[test]
-    fn standard_decks_parse_from_the_union_catalog_and_are_legal() {
+    fn standard_decks_parse_from_the_union_catalog_and_are_legal_in_their_profiles() {
         let catalog = card::catalog().unwrap();
-        let builders: &[fn() -> Deck] = &[
-            isd_rtr_standard::naya_midrange_rudy_briksza,
-            isd_rtr_standard::gr_aggro_joseph_greer,
-            isd_rtr_standard::bg_midrange_mike_fyrberg,
-            isd_rtr_standard::naya_midrange_jimmie_smith,
-            isd_rtr_standard::uwr_flash_korey_mcduffie,
-            isd_rtr_standard::uw_flash_phillip_lorren,
-            isd_rtr_standard::uw_flash_clayton_arch,
-            isd_rtr_standard::junk_reanimator_drew_kuenzinger,
+        let m14_builders: &[fn() -> Deck] = &[
+            isd_m14_standard::naya_midrange_rudy_briksza,
+            isd_m14_standard::gr_aggro_joseph_greer,
+            isd_m14_standard::bg_midrange_mike_fyrberg,
+            isd_m14_standard::naya_midrange_jimmie_smith,
+            isd_m14_standard::uwr_flash_korey_mcduffie,
+            isd_m14_standard::uw_flash_phillip_lorren,
+            isd_m14_standard::uw_flash_clayton_arch,
+            isd_m14_standard::junk_reanimator_drew_kuenzinger,
+            isd_m14_standard::omnidoor_thragfire_todd_anderson,
+            isd_m14_standard::naya_midrange_brian_braun_duin,
         ];
 
-        for build in builders {
+        for build in m14_builders {
             let deck = build();
             assert_eq!(deck.main.len(), 60);
             assert_eq!(deck.sideboard.len(), 15);
-            deck.validate_for_format(&catalog, Format::IsdRtrStandard)
+            deck.validate_for_format(&catalog, Format::IsdM14Standard)
                 .unwrap();
         }
     }
 
+    /// A registered Premodern list has to be legal in the format it is
+    /// registered under, and no card in it may be metadata-only -- publishing
+    /// a deck whose cards the engine cannot carry out would offer legal
+    /// actions it then fails to perform.
     #[test]
-    fn staged_premodern_top_8_lists_and_backlog_stay_in_sync() {
-        let roadmap = include_str!("../docs/premodern.md");
+    fn the_registered_premodern_deck_is_legal_and_fully_playable() {
+        let catalog = crate::card::catalog().expect("catalog builds");
+        let mut partial = BTreeSet::new();
+        for build in [
+            super::premodern::rg_goblins as fn() -> crate::Deck,
+            super::premodern::sligh,
+            super::premodern::gat,
+            super::premodern::landstill,
+            super::premodern::stasis,
+            super::premodern::bw_control,
+            super::premodern::replenish,
+            super::premodern::angry_hermit,
+        ] {
+            let deck = build();
+            // Sixty is the floor rather than the size: Drew Glauberg
+            // registered sixty-one, and a list is transcribed as it was
+            // submitted rather than trimmed to a round number.
+            assert!(deck.main.len() >= 60, "a legal main deck is at least 60");
+            assert_eq!(deck.sideboard.len(), 15);
+            deck.clone()
+                .validate_for_format(&catalog, Format::Premodern)
+                .expect("the list is Premodern legal");
+
+            for definition in deck.main.iter().copied() {
+                let card = catalog.get(definition).expect("every card is cataloged");
+                assert_ne!(
+                    card.rules.implementation_status(),
+                    crate::ImplementationStatus::MetadataOnly,
+                    "{} is in a registered main deck and does nothing at all",
+                    card.name,
+                );
+                if card.rules.implementation_status() == crate::ImplementationStatus::Partial {
+                    partial.insert(card.name.clone());
+                }
+            }
+        }
+
+        // A partial card is allowed in a registered deck only when its main
+        // function resolves and the gap is a rider. Naming them here is what
+        // stops the list growing quietly: a new partial fails this until
+        // somebody decides it is acceptable and says so. Nothing registered is
+        // partial today, and an empty set is the strongest form of that.
+        assert_eq!(
+            partial,
+            BTreeSet::new(),
+            "the partial cards in registered decks are not the expected ones",
+        );
+    }
+
+    #[test]
+    fn premodern_top_8_lists_retain_their_sources_and_submitted_sizes() {
         let mut unique_cards = BTreeSet::new();
 
-        for (deck_name, yaml, expected_main) in STAGED_PREMODERN_TOP_8 {
+        for (deck_name, yaml, expected_main) in PREMODERN_TOP_8 {
             assert!(
                 yaml.contains("# Source: https://melee.gg/Decklist/View/"),
                 "{deck_name} must retain its submitted-list source"
@@ -548,11 +670,5 @@ mod tests {
         }
 
         assert_eq!(unique_cards.len(), 145);
-        for name in unique_cards {
-            assert!(
-                roadmap.contains(&format!("`{name}`")),
-                "Premodern roadmap is missing {name}"
-            );
-        }
     }
 }

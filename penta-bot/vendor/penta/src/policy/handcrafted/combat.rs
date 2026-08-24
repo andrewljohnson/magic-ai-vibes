@@ -1,6 +1,4 @@
-use super::{
-    AttackDefender, CardBehavior, GameObjectId, HandcraftedPolicy, PlayerObservation, Target,
-};
+use super::{AttackDefender, GameObjectId, HandcraftedPolicy, PlayerObservation, Target};
 
 impl HandcraftedPolicy {
     /// Which defender to point an attacker at. Damage that would finish the
@@ -32,11 +30,11 @@ impl HandcraftedPolicy {
         }
     }
 
-    pub(super) fn score_attack(
-        &self,
-        observation: &PlayerObservation,
-        attacker: GameObjectId,
-    ) -> i32 {
+    /// Card-specific blocking restrictions are no longer consulted here: the
+    /// one that was is now an ordinary static ability, and the observation
+    /// this scores from does not carry it. The heuristic is a little blunter
+    /// for it, which is a policy cost rather than a rules one.
+    pub(super) fn score_attack(observation: &PlayerObservation, attacker: GameObjectId) -> i32 {
         let Some(attacker) = observation
             .battlefield
             .iter()
@@ -62,8 +60,6 @@ impl HandcraftedPolicy {
                     && !permanent.tapped
                     && permanent.power.is_some()
                     && (!attacker.flying || permanent.flying)
-                    && !(self.behavior(permanent.definition) == Some(CardBehavior::IronclawOrcs)
-                        && attacker_power >= 2)
             })
             .collect();
         if already_attacking >= blockers.len() {
@@ -105,7 +101,7 @@ impl HandcraftedPolicy {
         let existing_power: i16 = observation
             .battlefield
             .iter()
-            .filter(|permanent| permanent.blocking == Some(attacker.id))
+            .filter(|permanent| permanent.blocking.contains(&attacker.id))
             .filter_map(|permanent| permanent.power)
             .fold(0, i16::saturating_add);
         if existing_power >= attacker_toughness {

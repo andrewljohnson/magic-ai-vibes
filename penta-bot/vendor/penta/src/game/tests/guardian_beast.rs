@@ -1,4 +1,5 @@
 use super::*;
+use crate::card::PlayerRefDef;
 
 static ENCHANT_PERMANENT_TARGETS: [AbilityTargetDef; 1] = [AbilityTargetDef::exactly_one(
     AbilityTargetPredicate::Object {
@@ -73,8 +74,10 @@ fn guardian_beast_stops_an_opponent_from_gaining_control_of_an_artifact() {
         creature(guardian.0, cards::GUARDIAN_BEAST, PlayerId::One),
         creature(orb.0, cards::CHAOS_ORB, PlayerId::One),
     ]);
-    let steal = EffectDef::GainControlThisTurn {
+    let steal = EffectDef::GainControl {
         object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+        duration: crate::card::ControlDurationDef::UntilEndOfTurn,
+        controller: PlayerRefDef::EffectController,
     };
 
     let object = spell_with_targets(
@@ -128,7 +131,7 @@ fn guardian_beast_stops_an_opponent_from_gaining_control_of_an_artifact() {
 
 #[test]
 fn guardian_beast_keeps_an_existing_aura_but_blocks_a_new_one() {
-    let aura_definition = CardDefinitionId(10_100);
+    let aura_definition = CardDefinitionId::new(10_100);
     let mut definition = CardDefinition::new(
         aura_definition,
         "Enchant permanent test Aura",

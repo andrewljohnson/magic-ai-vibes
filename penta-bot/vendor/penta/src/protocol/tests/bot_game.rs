@@ -457,7 +457,7 @@ fn protocol_reincarnates_public_object_identity_across_cast_zones() {
                     .iter()
                     .find(|card| card["objectId"].as_u64() == Some(hand_raw))?;
                 let definition_raw = hand_card["definition"].as_u64()?;
-                let definition = crate::CardDefinitionId(u16::try_from(definition_raw).ok()?);
+                let definition = crate::CardDefinitionId::try_new(definition_raw)?;
                 if !game
                     .catalog
                     .get(definition)
@@ -547,7 +547,7 @@ fn protocol_reincarnates_public_object_identity_across_cast_zones() {
         .as_array()
         .expect("stack")
         .iter()
-        .find(|object| object["definition"].as_u64() == Some(u64::from(definition_id.0)))
+        .find(|object| object["definition"].as_u64() == Some(definition_id.get()))
         .expect("cast spell is public on the stack");
     assert_eq!(spell["kind"], "Spell");
     assert!(spell["sourceObjectId"].is_null());
@@ -581,7 +581,7 @@ fn protocol_reincarnates_public_object_identity_across_cast_zones() {
         .as_array()
         .expect("battlefield")
         .iter()
-        .find(|object| object["definition"].as_u64() == Some(u64::from(definition_id.0)))
+        .find(|object| object["definition"].as_u64() == Some(definition_id.get()))
         .expect("resolved permanent is public on the battlefield");
     let permanent_id = GameObjectId(
         u32::try_from(permanent["objectId"].as_u64().expect("permanent object ID"))
@@ -649,60 +649,126 @@ fn bots_are_never_offered_the_chance_to_resign() {
 }
 
 #[test]
-#[ignore = "slow simulation sweep"]
 fn decisions_reach_bots_as_concrete_indexed_actions() {
-    // The engine's decision template has empty options; the protocol
-    // must never show that to a bot. Play games until decisions appear
-    // and check every ChooseDecision carries a concrete selection.
-    // A bot that plays lands and casts spells, so card effects (Chain
-    // Lightning copies, discard effects) actually raise decisions.
-    let cast_bot = |observation: &Value| {
-        let actions = observation["legalActions"].as_array().expect("array");
-        for preferred in ["PlayLand", "CastSpell"] {
-            if let Some(action) = actions.iter().find(|action| action["type"] == preferred) {
-                return usize::try_from(action["index"].as_u64().expect("index"))
-                    .expect("index fits");
-            }
-        }
-        pass_bot(observation)
-    };
-    let mut saw_decision = false;
-    for seed in 0..20 {
-        let mut game = BotGame::new(
-            "Sligh",
-            "The Deck",
-            Opponent::Handcrafted,
-            PlayerId::Two,
-            seed,
-        )
+    // The engine exposes one empty-options template and expects an ordinary
+    // caller to fill it from the decision schema. Bots can act by index alone,
+    // so the protocol expands that template into one legal action per option.
+    let game = BotGame::new("Sligh", "The Deck", Opponent::External, PlayerId::Two, 0)
         .expect("game starts");
-        for _ in 0..2_000 {
-            if game.result().is_some() {
-                break;
-            }
-            let seat = game.decision_seat().expect("still running");
-            let observation: Value =
-                serde_json::from_str(&game.observe_json(seat)).expect("valid JSON");
-            for action in observation["legalActions"].as_array().expect("array") {
-                if action["type"] == "ChooseDecision" {
-                    saw_decision = true;
-                    assert!(
-                        !observation["decision"].is_null(),
-                        "a decision action implies a decision object",
-                    );
-                    let minimum = observation["decision"]["minimum"].as_u64().expect("min");
-                    let chosen = action["options"].as_array().expect("options").len();
-                    assert!(
-                        u64::try_from(chosen).expect("fits") >= minimum,
-                        "every offered selection is submittable as-is",
-                    );
-                }
-            }
-            game.act(cast_bot(&observation)).expect("legal index");
-        }
-        if saw_decision {
-            break;
-        }
-    }
-    assert!(saw_decision, "the seeded games reached a decision");
+    let seat = game.decision_seat().expect("mulligan decision");
+    let mut observation = game.game.observe(seat);
+    let decision_id = 41;
+    observation.decision = Some(DecisionObservation {
+        id: decision_id,
+        player: seat,
+        kind: DecisionKind::Choice,
+        order_semantics: None,
+        source: None,
+        prompt: "Choose one".into(),
+        visibility: crate::game::DecisionVisibility::Public,
+        preference: crate::game::DecisionPreference::Neutral,
+        minimum: 1,
+        maximum: 1,
+        cancellable: false,
+        options: vec![
+            crate::game::DecisionOption {
+                id: 7,
+                label: "First".into(),
+                card: None,
+                members: Vec::new(),
+                ability_text: None,
+                zone: crate::game::DecisionZone::None,
+            },
+            crate::game::DecisionOption {
+                id: 9,
+                label: "Second".into(),
+                card: None,
+                members: Vec::new(),
+                ability_text: None,
+                zone: crate::game::DecisionZone::None,
+            },
+        ],
+    });
+    observation.legal_actions = vec![Action::ChooseDecision {
+        decision: decision_id,
+        options: Vec::new(),
+    }];
+
+    let actions = protocol_actions(&observation);
+    assert_eq!(
+        actions,
+        vec![
+            Action::ChooseDecision {
+                decision: decision_id,
+                options: vec![7],
+            },
+            Action::ChooseDecision {
+                decision: decision_id,
+                options: vec![9],
+            },
+        ],
+    );
+
+    let wire = observation_json_for_format(
+        &game.catalog,
+        game.format,
+        &observation,
+        game.game.in_pregame(),
+        &actions,
+    );
+    let legal = wire["legalActions"].as_array().expect("legal action array");
+    assert_eq!(legal[0]["index"], 0);
+    assert_eq!(legal[0]["type"], "ChooseDecision");
+    assert_eq!(legal[0]["options"], json!([7]));
+    assert_eq!(legal[1]["index"], 1);
+    assert_eq!(legal[1]["type"], "ChooseDecision");
+    assert_eq!(legal[1]["options"], json!([9]));
+}
+
+#[test]
+fn optional_single_choices_expose_decline_and_each_acceptance_by_index() {
+    let game = BotGame::new("Sligh", "The Deck", Opponent::External, PlayerId::Two, 0)
+        .expect("game starts");
+    let seat = game.decision_seat().expect("mulligan decision");
+    let mut observation = game.game.observe(seat);
+    let decision_id = 42;
+    observation.decision = Some(DecisionObservation {
+        id: decision_id,
+        player: seat,
+        kind: DecisionKind::Choice,
+        order_semantics: None,
+        source: None,
+        prompt: "Take up to one action".into(),
+        visibility: crate::game::DecisionVisibility::Private,
+        preference: crate::game::DecisionPreference::Neutral,
+        minimum: 0,
+        maximum: 1,
+        cancellable: false,
+        options: vec![crate::game::DecisionOption {
+            id: 7,
+            label: "Reveal".into(),
+            card: None,
+            members: Vec::new(),
+            ability_text: None,
+            zone: crate::game::DecisionZone::None,
+        }],
+    });
+    observation.legal_actions = vec![Action::ChooseDecision {
+        decision: decision_id,
+        options: Vec::new(),
+    }];
+
+    assert_eq!(
+        protocol_actions(&observation),
+        vec![
+            Action::ChooseDecision {
+                decision: decision_id,
+                options: Vec::new(),
+            },
+            Action::ChooseDecision {
+                decision: decision_id,
+                options: vec![7],
+            },
+        ]
+    );
 }

@@ -1,4 +1,5 @@
 use super::*;
+use crate::AbilityProgramDef;
 
 pub(super) fn dust_to_dust_targets(game: &mut Game, mut spell: StackObject) {
     spell.signature = Some(CastSignature::from_validated_choices(
@@ -31,32 +32,30 @@ fn wrath_and_supreme_verdict_use_equivalent_declarative_creature_sweepers() {
                 .all(|ability| ability.declarative_effect().is_some())
         );
         assert!(definition.rules.ability_clauses().iter().any(|ability| {
-            let EffectDef::Destroy {
-                object:
-                    EffectRecipientDef::MatchingObjects {
-                        object,
-                        zones,
-                        controller,
-                    },
+            let AbilityProgramDef::Effects(EffectDef::Destroy {
+                object,
                 can_regenerate: actual,
-            } = ability.effect.definition
+                then: None,
+            }) = ability.effect.definition
             else {
                 return false;
             };
-            object == ObjectPredicateDef::HasType(CardType::Creature)
-                && zones == [ZoneKind::Battlefield]
-                && controller == PlayerRelation::Any
-                && actual == can_regenerate
+            object.object_query().is_some_and(|query| {
+                query.object == ObjectPredicateDef::HasType(CardType::Creature)
+                    && query.zones == [ZoneKind::Battlefield]
+                    && query.related_player == Some(PlayerSetDef::Related(PlayerRelation::Any))
+                    && query.controller.is_none()
+                    && query.owner.is_none()
+            }) && actual == can_regenerate
         }));
         assert_eq!(
             definition.rules.ability_clauses().iter().any(|ability| {
                 matches!(
                     ability.effect.definition,
-                    EffectDef::Apply {
+                    AbilityProgramDef::Effects(EffectDef::StaticApply {
                         recipient: EffectRecipientDef::Source,
-                        effect: AppliedEffectDef::CannotBeCountered,
-                        ..
-                    }
+                        effect: AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered),
+                    })
                 )
             }),
             cannot_be_countered,
@@ -91,28 +90,32 @@ fn nevinyrrals_disk_declares_shared_costs_and_a_global_destroy_effect() {
         ]
     );
 
-    let EffectDef::Destroy {
-        object:
-            EffectRecipientDef::MatchingObjects {
-                object,
-                zones,
-                controller,
-            },
+    let AbilityProgramDef::Effects(EffectDef::Destroy {
+        object,
         can_regenerate,
-    } = ability.effect.definition
+        then: None,
+    }) = ability.effect.definition
     else {
         panic!("the Disk uses the shared global destruction effect")
     };
+    let query = object
+        .object_query()
+        .expect("the Disk destruction is an object query");
     assert_eq!(
-        object,
+        query.object,
         ObjectPredicateDef::AnyOf(&[
             ObjectPredicateDef::HasType(CardType::Artifact),
             ObjectPredicateDef::HasType(CardType::Creature),
             ObjectPredicateDef::HasType(CardType::Enchantment),
         ])
     );
-    assert_eq!(zones, [ZoneKind::Battlefield]);
-    assert_eq!(controller, PlayerRelation::Any);
+    assert_eq!(query.zones, [ZoneKind::Battlefield]);
+    assert_eq!(
+        query.related_player,
+        Some(PlayerSetDef::Related(PlayerRelation::Any))
+    );
+    assert_eq!(query.controller, None);
+    assert_eq!(query.owner, None);
     assert!(can_regenerate);
 }
 
@@ -137,8 +140,9 @@ fn nevinyrrals_disk_uses_the_shared_stack_and_destroys_every_named_type() {
         source: disk_id,
         ability: activated_ability_for(&game, disk_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&activation));
     game.apply(PlayerId::One, activation).unwrap();
@@ -182,6 +186,231 @@ fn nevinyrrals_disk_uses_the_shared_stack_and_destroys_every_named_type() {
 }
 
 #[test]
+fn object_queries_can_constrain_controller_and_owner_independently() {
+    let mut game = ready_game();
+    let mut stolen = creature(10_010, cards::SAVANNAH_LIONS, PlayerId::Two);
+    stolen.controller = PlayerId::One;
+    let stolen_id = stolen.card.id;
+    let yours = creature(10_011, cards::SAVANNAH_LIONS, PlayerId::One);
+    let yours_id = yours.card.id;
+    let theirs = creature(10_012, cards::SAVANNAH_LIONS, PlayerId::Two);
+    let theirs_id = theirs.card.id;
+    game.battlefield.extend([stolen, yours, theirs]);
+
+    let object = spell(10_013, cards::WRATH_OF_GOD, PlayerId::One, 0);
+    game.resolve_effect_def(
+        ScopedEffect::primary(EffectDef::Destroy {
+            object: EffectRecipientDef::objects(ObjectSetDef::Query(ObjectQueryDef {
+                object: ObjectPredicateDef::HasType(CardType::Creature),
+                zones: &[ZoneKind::Battlefield],
+                related_player: None,
+                controller: Some(PlayerSetDef::One(PlayerRefDef::EffectController)),
+                owner: Some(PlayerSetDef::Related(PlayerRelation::Opponent)),
+                relative_position: None,
+            })),
+            can_regenerate: true,
+            then: None,
+        }),
+        &object,
+        TriggerContext::empty(),
+    );
+
+    assert!(
+        game.battlefield
+            .iter()
+            .all(|permanent| permanent.card.id != stolen_id),
+        "only the permanent you control but an opponent owns matches both constraints",
+    );
+    assert!(
+        game.battlefield
+            .iter()
+            .any(|permanent| permanent.card.id == yours_id)
+    );
+    assert!(
+        game.battlefield
+            .iter()
+            .any(|permanent| permanent.card.id == theirs_id)
+    );
+}
+
+#[test]
+fn zone_relative_queries_span_battlefield_and_graveyard() {
+    let mut game = ready_game();
+    let permanent = creature(10_020, cards::SAVANNAH_LIONS, PlayerId::One);
+    let permanent_id = permanent.card.id;
+    game.battlefield.push(permanent);
+    let graveyard_card = card(10_021, cards::SAVANNAH_LIONS, PlayerId::One);
+    let graveyard_id = graveyard_card.id;
+    game.players[PlayerId::One.index()]
+        .graveyard
+        .push(graveyard_card);
+    game.players[PlayerId::Two.index()].graveyard.push(card(
+        10_022,
+        cards::SAVANNAH_LIONS,
+        PlayerId::Two,
+    ));
+
+    let matches = game.objects_matching_query(
+        ObjectQueryDef::matching(
+            ObjectPredicateDef::HasType(CardType::Creature),
+            &[ZoneKind::Battlefield, ZoneKind::Graveyard],
+            PlayerRelation::You,
+        ),
+        PlayerId::One,
+        permanent_id,
+        TriggerContext::empty(),
+    );
+
+    assert_eq!(
+        matches,
+        [Target::Permanent(permanent_id), Target::Card(graveyard_id)],
+    );
+}
+
+#[test]
+fn derived_object_players_use_last_known_controller_and_owner() {
+    let mut game = ready_game();
+    let mut chosen = creature(10_030, cards::SAVANNAH_LIONS, PlayerId::Two);
+    chosen.controller = PlayerId::One;
+    let chosen_id = chosen.card.id;
+    game.battlefield.push(chosen);
+    let mut context = EffectResolutionContext::empty();
+    context.bind_single_object(
+        ObjectBindingIndex::PRIMARY,
+        Some(Target::Permanent(chosen_id)),
+    );
+    game.move_target_to_zone(
+        Target::Permanent(chosen_id),
+        ZoneKind::Graveyard,
+        ZoneMoveCause::Effect {
+            controller: PlayerId::One,
+        },
+        None,
+        ZonePlacement::Top,
+    );
+    let resolving = spell_with_targets(
+        10_031,
+        cards::SWORDS_TO_PLOWSHARES,
+        PlayerId::One,
+        vec![Target::Permanent(chosen_id)],
+        0,
+    );
+
+    let recipients = |game: &Game, reference| {
+        game.effect_recipients(
+            EffectRecipientDef::player(reference),
+            &resolving,
+            &context,
+            ScopedEffect::primary(EffectDef::None),
+        )
+    };
+    assert_eq!(
+        recipients(
+            &game,
+            PlayerRefDef::ControllerOf(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY)),
+        ),
+        [Target::Player(PlayerId::One)],
+    );
+    assert_eq!(
+        recipients(
+            &game,
+            PlayerRefDef::OwnerOf(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY)),
+        ),
+        [Target::Player(PlayerId::Two)],
+    );
+    assert_eq!(
+        recipients(
+            &game,
+            PlayerRefDef::ControllerOf(ObjectRefDef::Target(TargetIndex::PRIMARY)),
+        ),
+        [Target::Player(PlayerId::One)],
+        "a later instruction uses the target's last-known controller",
+    );
+    assert_eq!(
+        recipients(
+            &game,
+            PlayerRefDef::OwnerOf(ObjectRefDef::Target(TargetIndex::PRIMARY)),
+        ),
+        [Target::Player(PlayerId::Two)],
+        "a later instruction uses the target's last-known owner",
+    );
+}
+
+#[test]
+fn direct_object_target_references_recheck_legality() {
+    static BLACK: ObjectPredicateDef = ObjectPredicateDef::Color(ManaColor::Black);
+    static NONBLACK_CREATURE: ObjectPredicateDef = ObjectPredicateDef::All(&[
+        ObjectPredicateDef::HasType(CardType::Creature),
+        ObjectPredicateDef::Not(&BLACK),
+    ]);
+    static TARGETS: [AbilityTargetDef; 1] = [AbilityTargetDef::exactly_one(
+        AbilityTargetPredicate::Object {
+            object: NONBLACK_CREATURE,
+            zones: &[ZoneKind::Battlefield],
+            controller: None,
+            owner: None,
+        },
+    )];
+
+    let mut game = ready_game();
+    let target = creature(10_040, cards::SAVANNAH_LIONS, PlayerId::Two);
+    let target_id = target.card.id;
+    game.battlefield.push(target);
+    let mut doom_blade = spell(10_041, cards::DOOM_BLADE, PlayerId::One, 0);
+    doom_blade.signature = Some(CastSignature::from_validated_choices(
+        SpellForm::Part(CardPartId::PRIMARY),
+        cast_choices(vec![Target::Permanent(target_id)], 0),
+    ));
+    doom_blade.ability = Some(StackAbilityPayload {
+        origin: primary_ability(cards::DOOM_BLADE),
+        definition: None,
+        presentation: ObjectCharacteristics::card(cards::DOOM_BLADE, CardPartId::PRIMARY),
+        text: Some("Test direct object target reference"),
+        target_defs: TARGETS.to_vec(),
+        targets: vec![TargetSelection::single(
+            TargetSlotId(0),
+            Target::Permanent(target_id),
+        )],
+        context: TriggerContext::empty().into(),
+        resolver: StackAbilityResolver::Declarative(ScopedEffect::primary(EffectDef::None)),
+        condition: None,
+        mode_effects: Vec::new(),
+        resolution_destination: None,
+        x: 0,
+    });
+    game.battlefield
+        .iter_mut()
+        .find(|permanent| permanent.card.id == target_id)
+        .expect("the target remains on the battlefield")
+        .card
+        .definition = ObjectKind::Card(cards::BLACK_KNIGHT);
+    game.battlefield
+        .iter_mut()
+        .find(|permanent| permanent.card.id == target_id)
+        .expect("the target remains on the battlefield")
+        .card
+        .characteristics = CharacteristicSource::Card(cards::BLACK_KNIGHT);
+
+    game.resolve_effect_def(
+        ScopedEffect::primary(EffectDef::Tap {
+            object: EffectRecipientDef::object(ObjectRefDef::Target(TargetIndex::PRIMARY)),
+        }),
+        &doom_blade,
+        TriggerContext::empty(),
+    );
+
+    assert!(
+        !game
+            .battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == target_id)
+            .expect("the now-black target remains")
+            .tapped,
+        "a target that became illegal is not affected through an object reference",
+    );
+}
+
+#[test]
 fn regeneration_shields_stop_destroy_but_not_wrath() {
     let mut game = ready_game();
     let mut troll = creature(10_000, cards::SEDGE_TROLL, PlayerId::One);
@@ -201,8 +430,8 @@ fn regeneration_shields_stop_destroy_but_not_wrath() {
         .expect("Wrath of God is in the catalog")
         .rules
         .ability_clauses()[0]
-        .effect
-        .definition;
+        .declarative_effect()
+        .expect("Wrath uses a resolving effect program");
     game.resolve_effect_def(
         ScopedEffect::primary(effect),
         &wrath,
@@ -270,7 +499,15 @@ fn indestructible_stops_destruction_and_lethal_damage_but_not_other_death() {
         "lethal damage does not destroy it"
     );
 
-    game.battlefield[0].toughness_bonus = -1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        lions_id,
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(0),
+            ValueDef::Constant(-1),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
     game.check_state_based_actions();
     assert!(
         game.battlefield.is_empty(),
@@ -436,7 +673,7 @@ fn negate_and_essence_scatter_split_the_stack_by_card_kind() {
         .push(spell(10_002, cards::LIGHTNING_BOLT, PlayerId::Two, 0));
 
     let spells_hit = |game: &Game, behavior| -> Vec<StackObjectId> {
-        game.legal_target_lists(behavior, PlayerId::One, None)
+        game.legal_target_lists(behavior, PlayerId::One, None, GameObjectId(0))
             .into_iter()
             .filter_map(|choice| match choice.first() {
                 Some(Target::Spell(id)) => Some(*id),
@@ -518,20 +755,34 @@ fn sign_in_blood_draws_two_and_costs_two_life_without_dealing_damage() {
 #[test]
 fn duress_takes_a_noncreature_nonland_card_of_the_casters_choosing() {
     let mut game = ready_game();
+    let duress = card(10_000, cards::DURESS, PlayerId::One);
+    game.players[0].hand.push(duress.clone());
+    game.players[0].mana_pool.black = 1;
     game.players[1].hand.extend([
         card(10_001, cards::SAVANNAH_LIONS, PlayerId::Two), // creature: off limits
         card(10_002, cards::MOUNTAIN, PlayerId::Two),       // land: off limits
         card(10_003, cards::LIGHTNING_BOLT, PlayerId::Two), // fair game
+        card(10_004, cards::BLACK_LOTUS, PlayerId::Two),    // fair game
     ]);
 
-    let cast = spell_with_targets(
-        10_000,
-        cards::DURESS,
+    game.apply(
         PlayerId::One,
-        vec![Target::Player(PlayerId::Two)],
-        0,
-    );
-    game.resolve_spell_effect(&cast, CardBehavior::Duress);
+        cast_action(
+            duress.id,
+            vec![Target::Player(PlayerId::Two)],
+            Vec::new(),
+            0,
+        ),
+    )
+    .expect("Duress can target the opponent");
+    pass_priority_pair(&mut game);
+
+    let seen = game
+        .observe(PlayerId::One)
+        .last_seen_hand
+        .expect("Duress reveals the complete hand to its controller");
+    assert_eq!(seen.0, PlayerId::Two);
+    assert_eq!(seen.1.len(), 4, "the observation includes excluded cards");
 
     let decision = game
         .observe(PlayerId::One)
@@ -539,13 +790,22 @@ fn duress_takes_a_noncreature_nonland_card_of_the_casters_choosing() {
         .expect("the caster chooses");
     assert_eq!(
         decision.options.len(),
-        1,
-        "only the instant is a legal choice"
+        2,
+        "both noncreature, nonland cards are legal choices"
     );
     // The hand is revealed, so the choice is public rather than hidden.
     assert_eq!(decision.visibility, DecisionVisibility::Public);
 
-    let choice = decision.options[0].id;
+    let choice = decision
+        .options
+        .iter()
+        .find(|option| {
+            option.card.is_some_and(|(_, characteristics)| {
+                characteristics.card_definition() == Some(cards::LIGHTNING_BOLT)
+            })
+        })
+        .expect("the Bolt is a legal choice")
+        .id;
     game.apply(
         PlayerId::One,
         Action::ChooseDecision {
@@ -555,7 +815,7 @@ fn duress_takes_a_noncreature_nonland_card_of_the_casters_choosing() {
     )
     .expect("choosing the revealed card is legal");
 
-    assert_eq!(game.players[1].hand.len(), 2, "one card was discarded");
+    assert_eq!(game.players[1].hand.len(), 3, "one card was discarded");
     assert!(
         !game.players[1]
             .hand
@@ -564,296 +824,148 @@ fn duress_takes_a_noncreature_nonland_card_of_the_casters_choosing() {
         "and it was the one the caster named"
     );
     assert_eq!(game.players[1].graveyard.len(), 1);
+    assert!(game.events.iter().any(|event| matches!(
+        event,
+        GameEvent::CardsDiscarded {
+            player: PlayerId::Two,
+            cards,
+        } if cards.iter().any(|(_, definition)| *definition == cards::LIGHTNING_BOLT)
+    )));
 }
 
 #[test]
-fn mulch_keeps_the_lands_and_bins_the_rest() {
+fn duress_observes_the_hand_without_asking_when_nothing_can_be_discarded() {
     let mut game = ready_game();
-    game.players[0].library.clear();
-    stack_library(
-        &mut game,
-        &[
-            (10_001, cards::MOUNTAIN),
-            (10_002, cards::LIGHTNING_BOLT),
-            (10_003, cards::MOUNTAIN),
-            (10_004, cards::SAVANNAH_LIONS),
-            (10_005, cards::BLACK_LOTUS), // fifth card is untouched
-        ],
-    );
-    let before_hand = game.players[0].hand.len();
-
-    let cast = spell(10_000, cards::MULCH, PlayerId::One, 0);
-    game.resolve_spell_effect(&cast, CardBehavior::Mulch);
-
-    assert_eq!(
-        game.players[0].hand.len(),
-        before_hand + 2,
-        "two lands kept"
-    );
-    assert_eq!(game.players[0].graveyard.len(), 2, "two nonlands binned");
-    assert_eq!(
-        game.players[0].library.len(),
-        1,
-        "only the top four were revealed"
-    );
-}
-
-#[test]
-fn grisly_salvage_may_keep_one_creature_or_land() {
-    let mut game = ready_game();
-    game.players[0].library.clear();
-    game.players[0].library.extend([
-        card(10_001, cards::LIGHTNING_BOLT, PlayerId::One), // not eligible
-        card(10_002, cards::SAVANNAH_LIONS, PlayerId::One), // creature
-        card(10_003, cards::MOUNTAIN, PlayerId::One),       // land
-        card(10_004, cards::BLACK_LOTUS, PlayerId::One),    // not eligible
-        card(10_005, cards::COUNTERSPELL, PlayerId::One),   // not eligible
+    let duress = card(10_010, cards::DURESS, PlayerId::One);
+    game.players[0].hand.push(duress.clone());
+    game.players[0].mana_pool.black = 1;
+    game.players[1].hand.extend([
+        card(10_011, cards::SAVANNAH_LIONS, PlayerId::Two),
+        card(10_012, cards::MOUNTAIN, PlayerId::Two),
     ]);
 
-    let cast = spell(10_000, cards::GRISLY_SALVAGE, PlayerId::One, 0);
-    game.resolve_spell_effect(&cast, CardBehavior::GrislySalvage);
+    game.apply(
+        PlayerId::One,
+        cast_action(
+            duress.id,
+            vec![Target::Player(PlayerId::Two)],
+            Vec::new(),
+            0,
+        ),
+    )
+    .unwrap();
+    pass_priority_pair(&mut game);
 
-    let decision = game.observe(PlayerId::One).decision.expect("a choice");
-    assert_eq!(decision.options.len(), 2, "the creature and the land");
+    assert!(game.pending_decisions.is_empty());
     assert_eq!(
-        decision.minimum, 0,
-        "'you may' means keeping nothing is legal"
+        game.observe(PlayerId::One)
+            .last_seen_hand
+            .expect("the full hand was still observed")
+            .1
+            .len(),
+        2
+    );
+    assert!(game.players[1].graveyard.is_empty());
+}
+
+#[test]
+fn a_thoughtseize_shaped_sequence_loses_life_after_the_generic_hand_choice() {
+    static DISCARD_CHOSEN: EffectDef = EffectDef::DiscardCards {
+        object: EffectRecipientDef::object(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY)),
+    };
+    static CHOOSE_NONLAND: EffectDef = EffectDef::Choose(ChooseDef {
+        binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+        unchosen: None,
+        chooser: PlayerRefDef::EffectController,
+        candidates: ObjectSetDef::Query(ObjectQueryDef::owned_by(
+            ObjectPredicateDef::Not(&ObjectPredicateDef::HasType(CardType::Land)),
+            &[ZoneKind::Hand],
+            PlayerSetDef::One(PlayerRefDef::Target(TargetIndex::PRIMARY)),
+        )),
+        exclude: None,
+        minimum: 1,
+        maximum: 1,
+        visibility: ChoiceVisibilityDef::Public,
+        then: &DISCARD_CHOSEN,
+    });
+    static THOUGHTSEIZE_SHAPED: [EffectDef; 3] = [
+        EffectDef::LookAtHand {
+            player: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+        },
+        CHOOSE_NONLAND,
+        EffectDef::LoseLife {
+            recipient: EffectRecipientDef::Controller,
+            amount: ValueDef::Constant(2),
+        },
+    ];
+
+    let mut game = ready_game();
+    game.players[1].hand.extend([
+        card(10_001, cards::MOUNTAIN, PlayerId::Two),
+        card(10_002, cards::LIGHTNING_BOLT, PlayerId::Two),
+        card(10_003, cards::BLACK_LOTUS, PlayerId::Two),
+    ]);
+    let source = spell_with_targets(
+        10_000,
+        cards::LIGHTNING_BOLT,
+        PlayerId::One,
+        vec![Target::Player(PlayerId::Two)],
+        0,
     );
 
-    let keep = decision
-        .options
-        .iter()
-        .find(|option| {
-            option
-                .card
-                .is_some_and(|(id, _)| id == CardInstanceId(10_003))
-        })
-        .expect("the land is offered")
-        .id;
+    game.resolve_effect_def(
+        ScopedEffect::primary(EffectDef::Sequence(&THOUGHTSEIZE_SHAPED)),
+        &source,
+        TriggerContext::empty(),
+    );
+
+    let decision = game
+        .observe(PlayerId::One)
+        .decision
+        .expect("the caster chooses a legal card from the revealed hand");
+    assert_eq!(game.players[0].life, 20, "the sequence tail is suspended");
     game.apply(
         PlayerId::One,
         Action::ChooseDecision {
             decision: decision.id,
-            options: vec![keep],
+            options: vec![decision.options[0].id],
         },
     )
     .unwrap();
 
-    // A zone change mints a new object id, so the card is identified by what
-    // it is rather than by the id it had in the library.
-    assert_eq!(game.players[0].hand.len(), 1);
     assert_eq!(
-        game.players[0].hand[0].definition,
-        cards::MOUNTAIN,
-        "the chosen land reached hand"
+        game.players[0].life, 18,
+        "the tail resumes after discarding"
     );
+    assert_eq!(game.players[1].graveyard.len(), 1);
     assert_eq!(
-        game.players[0].graveyard.len(),
-        4,
-        "the other four are binned"
+        game.players[1].graveyard[0].definition,
+        cards::LIGHTNING_BOLT,
     );
-    assert!(game.players[0].library.is_empty());
-}
 
-#[test]
-fn grisly_salvage_can_decline_and_bin_everything() {
-    let mut game = ready_game();
-    game.players[0].library.clear();
-    game.players[0]
-        .library
-        .extend((0..5).map(|i| card(10_100 + i, cards::SAVANNAH_LIONS, PlayerId::One)));
-
-    let cast = spell(10_000, cards::GRISLY_SALVAGE, PlayerId::One, 0);
-    game.resolve_spell_effect(&cast, CardBehavior::GrislySalvage);
-    let decision = game.observe(PlayerId::One).decision.expect("a choice");
-    game.apply(
+    let mut no_match = ready_game();
+    no_match.players[1]
+        .hand
+        .push(card(10_011, cards::MOUNTAIN, PlayerId::Two));
+    let source = spell_with_targets(
+        10_010,
+        cards::LIGHTNING_BOLT,
         PlayerId::One,
-        Action::ChooseDecision {
-            decision: decision.id,
-            options: Vec::new(),
-        },
-    )
-    .expect("declining is legal");
+        vec![Target::Player(PlayerId::Two)],
+        0,
+    );
+    no_match.resolve_effect_def(
+        ScopedEffect::primary(EffectDef::Sequence(&THOUGHTSEIZE_SHAPED)),
+        &source,
+        TriggerContext::empty(),
+    );
 
-    assert!(game.players[0].hand.is_empty(), "nothing was kept");
+    assert!(no_match.pending_decisions.is_empty());
     assert_eq!(
-        game.players[0].graveyard.len(),
-        5,
-        "and no revealed card was lost on the way"
+        no_match.players[0].life, 18,
+        "the independent life-loss instruction still resolves when no card qualifies",
     );
+    assert!(no_match.players[1].graveyard.is_empty());
 }
 
-#[test]
-fn sphinxs_revelation_scales_life_and_cards_with_x() {
-    let mut game = ready_game();
-    let before_life = game.players[0].life;
-    let before_hand = game.players[0].hand.len();
-
-    let cast = spell(10_000, cards::SPHINXS_REVELATION, PlayerId::One, 3);
-    game.resolve_spell_effect(&cast, CardBehavior::SphinxsRevelation);
-
-    assert_eq!(game.players[0].life, before_life + 3);
-    assert_eq!(game.players[0].hand.len(), before_hand + 3);
-}
-
-#[test]
-fn the_mana_creatures_tap_for_their_colour() {
-    // Their whole printed text is a mana ability the engine already models,
-    // so they are complete rather than staged.
-    for (definition, expected) in [
-        (cards::AVACYNS_PILGRIM, ManaColor::White),
-        (cards::ELVISH_MYSTIC, ManaColor::Green),
-    ] {
-        let mut game = ready_game();
-        game.battlefield
-            .push(creature(10_001, definition, PlayerId::One));
-        assert!(
-            game.legal_actions(PlayerId::One)
-                .iter()
-                .any(|action| matches!(
-                    action,
-                    Action::ActivateManaAbility { color, .. } if *color == expected
-                )),
-            "{definition:?} taps for {expected:?}"
-        );
-    }
-}
-
-#[test]
-fn deathtouch_kills_whatever_it_touches_and_lifelink_pays_its_controller() {
-    // Vampire Nighthawk is a 2/3 flying deathtouch lifelink. Before these
-    // keywords were read, it was a 2/3 flier and nothing more.
-    let mut game = ready_game();
-    game.step = Step::CombatDamage;
-    let mut hawk = creature(10_001, cards::VAMPIRE_NIGHTHAWK, PlayerId::One);
-    hawk.attacking = true;
-    let mut wall = creature(10_002, cards::SERRA_ANGEL, PlayerId::Two); // 4/4
-    wall.blocking = Some(CardInstanceId(10_001));
-    game.battlefield.extend([hawk, wall]);
-    let before_life = game.players[0].life;
-
-    game.deal_combat_damage();
-
-    assert!(
-        !game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::SERRA_ANGEL),
-        "two deathtouch damage is lethal to a 4/4"
-    );
-    assert_eq!(
-        game.players[0].life,
-        before_life + 2,
-        "and lifelink paid its controller for the damage dealt"
-    );
-}
-
-#[test]
-fn lifelink_pays_for_damage_to_a_player_too() {
-    let mut game = ready_game();
-    game.step = Step::CombatDamage;
-    let mut hawk = creature(10_001, cards::VAMPIRE_NIGHTHAWK, PlayerId::One);
-    hawk.attacking = true;
-    game.battlefield.push(hawk);
-    let before = game.players[0].life;
-
-    game.deal_combat_damage();
-
-    assert_eq!(game.players[1].life, 18, "unblocked, it hits for two");
-    assert_eq!(game.players[0].life, before + 2, "and gains that much");
-}
-
-#[test]
-fn an_ordinary_creature_does_not_gain_life_or_kill_through_toughness() {
-    let mut game = ready_game();
-    game.step = Step::CombatDamage;
-    let mut lions = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One); // 2/1 vanilla
-    lions.attacking = true;
-    let mut wall = creature(10_002, cards::SERRA_ANGEL, PlayerId::Two); // 4/4
-    wall.blocking = Some(CardInstanceId(10_001));
-    game.battlefield.extend([lions, wall]);
-    let before = game.players[0].life;
-
-    game.deal_combat_damage();
-
-    assert!(
-        game.battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::SERRA_ANGEL),
-        "two ordinary damage does not kill a 4/4"
-    );
-    assert_eq!(game.players[0].life, before, "and gains nobody any life");
-}
-
-#[test]
-fn reach_blocks_fliers_without_flying() {
-    // Ruric Thar has reach; a plain ground creature does not.
-    let mut game = ready_game();
-    game.step = Step::DeclareBlockers;
-    game.active_player = PlayerId::One;
-    let mut flier = creature(10_001, cards::SERRA_ANGEL, PlayerId::One);
-    flier.attacking = true;
-    game.battlefield.push(flier);
-    game.battlefield.push(creature(
-        10_002,
-        cards::RURIC_THAR_THE_UNBOWED,
-        PlayerId::Two,
-    ));
-    game.battlefield
-        .push(creature(10_003, cards::SAVANNAH_LIONS, PlayerId::Two));
-
-    let blockers: Vec<_> = game
-        .blocker_actions(PlayerId::Two)
-        .into_iter()
-        .filter_map(|action| match action {
-            Action::DeclareBlocker { blocker, .. } => Some(blocker),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        blockers.contains(&CardInstanceId(10_002)),
-        "reach can block a flier"
-    );
-    assert!(
-        !blockers.contains(&CardInstanceId(10_003)),
-        "a ground creature still cannot"
-    );
-}
-
-#[test]
-fn intimidate_only_lets_artifacts_and_matching_colours_block() {
-    // Lifebane Zombie is black; only black or artifact creatures may block it.
-    let mut game = ready_game();
-    game.step = Step::DeclareBlockers;
-    game.active_player = PlayerId::One;
-    let mut zombie = creature(10_001, cards::LIFEBANE_ZOMBIE, PlayerId::One);
-    zombie.attacking = true;
-    game.battlefield.push(zombie);
-    game.battlefield
-        .push(creature(10_002, cards::JUZAM_DJINN, PlayerId::Two)); // black
-    game.battlefield
-        .push(creature(10_003, cards::SAVANNAH_LIONS, PlayerId::Two)); // white
-    game.battlefield
-        .push(creature(10_004, cards::JUGGERNAUT, PlayerId::Two)); // artifact
-
-    let blockers: Vec<_> = game
-        .blocker_actions(PlayerId::Two)
-        .into_iter()
-        .filter_map(|action| match action {
-            Action::DeclareBlocker { blocker, .. } => Some(blocker),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        blockers.contains(&CardInstanceId(10_002)),
-        "a black creature shares a colour and may block"
-    );
-    assert!(
-        !blockers.contains(&CardInstanceId(10_003)),
-        "a white creature may not"
-    );
-    assert!(
-        blockers.contains(&CardInstanceId(10_004)),
-        "an artifact creature may block regardless of colour",
-    );
-}
+include!("removal_and_keywords/card_selection_and_keywords.rs");

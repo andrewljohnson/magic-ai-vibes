@@ -1,66 +1,248 @@
+mod player_rules;
+mod untap_limits;
+
+use std::cell::Cell;
+
 #[cfg(test)]
-use super::{AbilityId, AbilityOrigin};
+use super::{AbilityId, AbilityOrigin, ObjectCharacteristics};
 use super::{
-    AbilityTargetPredicate, AppliedEffectDef, CardDefinitionId, CardRules, CardSet, CardTypeSet,
-    ColorSet, ControlFlow, DeclarativeAbilityDef, EffectDef, EffectDurationDef, EffectRecipientDef,
-    Game, GameObjectId, GrantId, KeywordAbility, ManaColor, Permanent, PlayerId, RetiredObject,
-    StackAbilityResolver, StackObject, StaticAppliedEffect, StaticEffectTraversal, Target,
-    TargetIndex, TriggerContext, ZoneKind,
+    AbilityOperationDef, AbilityTargetPredicate, AppliedEffectDef, AppliedRuleDef,
+    AppliedRuleEffect, CardDefinitionId, CardPartId, CardRules, CardSet, CardType, CardTypeSet,
+    CharacteristicContext, CharacteristicOperationDef, ColorSet, ContinuousEffectExpiration,
+    ControlFlow, DeclarativeAbilityDef, EffectDef, EffectRecipientDef, EffectRecipientSetDef, Game,
+    GameObjectId, GrantId, KeywordAbility, ManaColor, ObjectPredicateDef, ObjectRefDef,
+    ObjectSetDef, Permanent, PlayerId, ResolvedContinuousEffect, ResolvedContinuousEffectKind,
+    RetiredObject, SetOperationDef, StackAbilityResolver, StackObject, StaticAppliedEffect,
+    StaticEffectTraversal, Target, TargetIndex, TriggerConditionDef, TriggerContext,
+    TriggerEventObject, ZoneKind,
 };
 
+thread_local! {
+    /// Guards the live set-characteristic walk when a static recipient query
+    /// asks for the same characteristics being assembled.
+    static STATIC_SET_CHARACTERISTIC_LAYER_PASS: Cell<bool> = const { Cell::new(false) };
+}
+
+pub(super) struct StaticSetCharacteristicLayerGuard;
+
+impl StaticSetCharacteristicLayerGuard {
+    pub(super) fn enter() -> Option<Self> {
+        STATIC_SET_CHARACTERISTIC_LAYER_PASS
+            .with(|pass| if pass.replace(true) { None } else { Some(Self) })
+    }
+}
+
+impl Drop for StaticSetCharacteristicLayerGuard {
+    fn drop(&mut self) {
+        STATIC_SET_CHARACTERISTIC_LAYER_PASS.with(|pass| pass.set(false));
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum StaticEffectKind {
+    Any,
+    Rules,
+    CardTypes,
+    Colors,
+    Abilities,
+    Subtypes,
+    PowerToughness,
+}
+
+impl StaticEffectKind {
+    const fn includes(self, effect: AppliedEffectDef) -> bool {
+        matches!(
+            (self, effect),
+            (
+                Self::Any,
+                AppliedEffectDef::Rule(_) | AppliedEffectDef::Characteristic(_)
+            ) | (Self::Rules, AppliedEffectDef::Rule(_))
+                | (
+                    Self::CardTypes,
+                    AppliedEffectDef::Characteristic(CharacteristicOperationDef::CardTypes(_)),
+                )
+                | (
+                    Self::Colors,
+                    AppliedEffectDef::Characteristic(CharacteristicOperationDef::Colors(_)),
+                )
+                | (
+                    Self::Abilities,
+                    AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(_)),
+                )
+                | (
+                    Self::Subtypes,
+                    AppliedEffectDef::Characteristic(
+                        CharacteristicOperationDef::CreatureTypes(_)
+                            | CharacteristicOperationDef::Subtypes(_),
+                    ),
+                )
+                | (
+                    Self::PowerToughness,
+                    AppliedEffectDef::Characteristic(CharacteristicOperationDef::PowerToughness(_)),
+                )
+        )
+    }
+}
+
 impl Game {
+    /// Whether a resolved characteristic component still contributes at this
+    /// moment. A source-tapped duration is read through its recorded source
+    /// object, not through the affected permanent.
+    pub(super) fn resolved_continuous_effect_is_active(
+        &self,
+        effect: &ResolvedContinuousEffect,
+    ) -> bool {
+        self.continuous_effect_expiration_is_active(effect.expiration, effect.source.object)
+    }
+
+    pub(super) fn continuous_effect_expiration_is_active(
+        &self,
+        expiration: ContinuousEffectExpiration,
+        source: GameObjectId,
+    ) -> bool {
+        match expiration {
+            ContinuousEffectExpiration::WhileSourceTapped => self
+                .battlefield
+                .iter()
+                .any(|permanent| permanent.card.id == source && permanent.tapped),
+            ContinuousEffectExpiration::EndOfTurn
+            | ContinuousEffectExpiration::EndOfCombat
+            | ContinuousEffectExpiration::UpkeepOf(_)
+            | ContinuousEffectExpiration::TurnOf { .. }
+            | ContinuousEffectExpiration::Never => true,
+        }
+    }
+
+    /// Whether anything currently forbids activating this permanent's
+    /// activated abilities. Read live off the permanent, so an Aura leaving
+    /// gives the abilities straight back.
+    pub(super) fn activated_abilities_are_prohibited(&self, permanent: &Permanent) -> bool {
+        self.visit_applied_rules(permanent, |applied| {
+            if applied.rule == AppliedRuleDef::CannotActivateAbilities {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .is_break()
+    }
+
+    /// What a creature assigns in combat. Ordinarily its power; a creature
+    /// under "assigns combat damage equal to its toughness rather than its
+    /// power" assigns that instead, which changes neither number.
+    pub(super) fn combat_assigned_power(&self, permanent: &Permanent) -> Option<i16> {
+        let assigns_toughness = self
+            .visit_applied_rules(permanent, |applied| {
+                if applied.rule == AppliedRuleDef::AssignsCombatDamageEqualToToughness {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .is_break();
+        if assigns_toughness {
+            self.toughness(permanent).or_else(|| self.power(permanent))
+        } else {
+            self.power(permanent)
+        }
+    }
+
+    /// Visits static and resolved rule leaves in timestamp/component order.
+    /// Static rules remain source-derived; resolved rules use the same stored
+    /// expiration path as resolved characteristic operations.
+    pub(super) fn visit_applied_rules(
+        &self,
+        affected: &Permanent,
+        mut visitor: impl FnMut(AppliedRuleEffect) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        let mut rules = affected
+            .resolved_continuous_effects
+            .iter()
+            .filter(|effect| self.resolved_continuous_effect_is_active(effect))
+            .filter_map(|effect| {
+                let ResolvedContinuousEffectKind::Rule(rule) = effect.kind else {
+                    return None;
+                };
+                Some(AppliedRuleEffect {
+                    source: effect.source.object,
+                    timestamp: effect.timestamp,
+                    component_order: effect.component_order,
+                    rule,
+                })
+            })
+            .collect::<Vec<_>>();
+        let static_result =
+            self.visit_static_applied_effects(affected, StaticEffectKind::Rules, |applied| {
+                let AppliedEffectDef::Rule(rule) = applied.effect else {
+                    unreachable!("the static rule filter admits only rules");
+                };
+                rules.push(AppliedRuleEffect {
+                    source: applied.source,
+                    timestamp: applied.timestamp,
+                    component_order: applied.component_order,
+                    rule,
+                });
+                ControlFlow::Continue(())
+            });
+        debug_assert!(static_result.is_continue());
+        rules.sort_by_key(|effect| (effect.timestamp, effect.component_order));
+        for rule in rules {
+            if visitor(rule).is_break() {
+                return ControlFlow::Break(());
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    pub(super) fn has_applied_rule(&self, affected: &Permanent, expected: AppliedRuleDef) -> bool {
+        self.visit_applied_rules(affected, |applied| {
+            if applied.rule == expected {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        })
+        .is_break()
+    }
+
     pub(super) fn visit_static_applied_effects(
         &self,
         affected: &Permanent,
+        kind: StaticEffectKind,
         mut visitor: impl FnMut(StaticAppliedEffect) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         // Emblems sit outside every zone but their abilities apply, so they
         // are walked alongside the battlefield and nowhere else.
         let land_type_sources = self.land_type_effect_sources(None);
         for source in self.battlefield.iter().chain(self.emblems.iter()) {
-            let Some(rules) = self.effective_rules(source) else {
-                continue;
-            };
-            let (source_definition, source_part) = Self::effective_rules_source(source);
-            let supplies_static_effect = rules.ability_clauses().iter().any(|ability| {
-                ability.is_executable()
-                    && matches!(ability.definition, DeclarativeAbilityDef::Static(_))
-                    && ability.declarative_effect().is_some()
-            });
-            if !supplies_static_effect {
-                continue;
-            }
             if self.rules_text_abilities_removed_from_sources(source, &land_type_sources) {
                 continue;
             }
-            for attached in rules.indexed_abilities() {
-                if !attached.definition.is_executable()
-                    || !matches!(
-                        attached.definition.definition,
-                        DeclarativeAbilityDef::Static(_)
-                    )
-                {
-                    continue;
-                }
-                let Some(effect) = attached.definition.declarative_effect() else {
-                    continue;
-                };
-                let mut traversal = StaticEffectTraversal {
-                    source,
-                    source_timestamp: source.timestamp,
-                    source_definition,
-                    source_part,
-                    source_ability: attached.id,
+            if self
+                .visit_static_source_effects(
+                    StaticEffectSource::battlefield(source, source.timestamp),
                     affected,
-                    prospective: None,
-                    next_grant: 0,
-                };
-                if self
-                    .visit_static_effect(effect, &mut traversal, &mut visitor)
-                    .is_break()
-                {
-                    return ControlFlow::Break(());
-                }
+                    None,
+                    kind,
+                    &mut visitor,
+                )
+                .is_break()
+            {
+                return ControlFlow::Break(());
+            }
+        }
+        for source in self.graveyard_static_sources() {
+            if self
+                .visit_static_source_effects(
+                    StaticEffectSource::graveyard(&source),
+                    affected,
+                    None,
+                    kind,
+                    &mut visitor,
+                )
+                .is_break()
+            {
+                return ControlFlow::Break(());
             }
         }
         ControlFlow::Continue(())
@@ -70,62 +252,49 @@ impl Game {
         &self,
         affected: &Permanent,
         prospective: &Permanent,
+        kind: StaticEffectKind,
         mut visitor: impl FnMut(StaticAppliedEffect) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         let prospective_source = (prospective.card.id == affected.card.id).then_some(prospective);
         let land_type_sources = self.land_type_effect_sources(prospective_source);
         for source in self.battlefield.iter().chain(prospective_source) {
-            let Some(rules) = self.effective_rules(source) else {
-                continue;
-            };
-            let (source_definition, source_part) = Self::effective_rules_source(source);
-            let supplies_static_effect = rules.ability_clauses().iter().any(|ability| {
-                ability.is_executable()
-                    && matches!(ability.definition, DeclarativeAbilityDef::Static(_))
-                    && ability.declarative_effect().is_some()
-            });
-            if !supplies_static_effect {
-                continue;
-            }
             let rules_text_removed =
                 self.rules_text_abilities_removed_from_sources(source, &land_type_sources);
             if rules_text_removed {
                 continue;
             }
-            for attached in rules.indexed_abilities() {
-                if !attached.definition.is_executable()
-                    || !matches!(
-                        attached.definition.definition,
-                        DeclarativeAbilityDef::Static(_)
-                    )
-                {
-                    continue;
-                }
-                let Some(effect) = attached.definition.declarative_effect() else {
-                    continue;
-                };
-                let mut traversal = StaticEffectTraversal {
-                    source,
-                    source_timestamp: if prospective_source
-                        .is_some_and(|prospective| std::ptr::eq(source, prospective))
-                    {
-                        self.prospective_continuous_effect_timestamp()
-                    } else {
-                        source.timestamp
-                    },
-                    source_definition,
-                    source_part,
-                    source_ability: attached.id,
+            let timestamp = if prospective_source
+                .is_some_and(|prospective| std::ptr::eq(source, prospective))
+            {
+                self.prospective_continuous_effect_timestamp()
+            } else {
+                source.timestamp
+            };
+            if self
+                .visit_static_source_effects(
+                    StaticEffectSource::battlefield(source, timestamp),
                     affected,
-                    prospective: prospective_source,
-                    next_grant: 0,
-                };
-                if self
-                    .visit_static_effect(effect, &mut traversal, &mut visitor)
-                    .is_break()
-                {
-                    return ControlFlow::Break(());
-                }
+                    prospective_source,
+                    kind,
+                    &mut visitor,
+                )
+                .is_break()
+            {
+                return ControlFlow::Break(());
+            }
+        }
+        for source in self.graveyard_static_sources() {
+            if self
+                .visit_static_source_effects(
+                    StaticEffectSource::graveyard(&source),
+                    affected,
+                    prospective_source,
+                    kind,
+                    &mut visitor,
+                )
+                .is_break()
+            {
+                return ControlFlow::Break(());
             }
         }
         ControlFlow::Continue(())
@@ -135,23 +304,25 @@ impl Game {
         &self,
         effect: EffectDef,
         traversal: &mut StaticEffectTraversal<'_>,
+        kind: StaticEffectKind,
         visitor: &mut impl FnMut(StaticAppliedEffect) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
-        self.visit_static_effect_if(effect, traversal, true, visitor)
+        self.visit_static_effect_tree(effect, traversal, &mut Vec::new(), kind, visitor)
     }
 
-    fn visit_static_effect_if(
+    fn visit_static_effect_tree(
         &self,
         effect: EffectDef,
         traversal: &mut StaticEffectTraversal<'_>,
-        enabled: bool,
+        conditions: &mut Vec<&'static TriggerConditionDef>,
+        kind: StaticEffectKind,
         visitor: &mut impl FnMut(StaticAppliedEffect) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         match effect {
             EffectDef::Sequence(effects) => {
                 for effect in effects {
                     if self
-                        .visit_static_effect_if(*effect, traversal, enabled, visitor)
+                        .visit_static_effect_tree(*effect, traversal, conditions, kind, visitor)
                         .is_break()
                     {
                         return ControlFlow::Break(());
@@ -160,42 +331,46 @@ impl Game {
                 ControlFlow::Continue(())
             }
             EffectDef::IfCondition { condition, then } => {
-                let condition_holds = enabled
-                    && self.trigger_condition_holds(
-                        condition,
-                        traversal.source.card.id,
-                        traversal.source.controller,
-                        TriggerContext::empty(),
-                        None,
-                        None,
-                    );
-                self.visit_static_effect_if(*then, traversal, condition_holds, visitor)
+                conditions.push(condition);
+                let result =
+                    self.visit_static_effect_tree(*then, traversal, conditions, kind, visitor);
+                conditions.pop();
+                result
             }
-            EffectDef::Apply {
-                recipient,
-                effect,
-                duration,
-            } => {
+            EffectDef::StaticApply { recipient, effect } => {
+                // CR 613.6 keeps one recipient set for every component of a
+                // continuous effect once that effect starts to apply. A
+                // compound animation therefore chooses its objects in layer
+                // 4 and keeps those same objects for its layer-7 body, even
+                // though its own type component has made them creatures by
+                // then. Re-entering the static set-characteristic walk while
+                // matching the recipient would instead let the later layer
+                // observe the animation itself and switch its own body off.
+                //
+                // The existing guarded layer-below view is also the honest
+                // boundary for dependencies the engine does not yet model:
+                // other static set-characteristic transformations are not
+                // guessed into the answer. Resolved and structural changes
+                // remain visible, as they are below this live static walk.
+                let _type_layer_selection = Self::applied_effect_starts_in_type_layer(effect)
+                    .then(StaticSetCharacteristicLayerGuard::enter)
+                    .flatten();
                 // Traverse the whole applied-effect structure even when this
                 // recipient does not match. Grant IDs identify structural
                 // grant sites, so later grants must not be renumbered by
                 // which permanent happens to be queried.
-                let include_effect = enabled
-                    && matches!(
-                        duration,
-                        EffectDurationDef::WhileSourceRemainsInZone
-                            | EffectDurationDef::UntilSourceLeavesZone
-                    )
-                    && self.static_recipient_matches(
-                        recipient,
-                        traversal.source,
-                        traversal.affected,
-                        traversal.prospective,
-                    );
-                Self::visit_static_applied_effect_components(
+                let recipient_matches = self.static_recipient_matches(
+                    recipient,
+                    traversal.source,
+                    traversal.affected,
+                    traversal.prospective,
+                );
+                self.visit_static_applied_effect_components(
                     effect,
                     traversal,
-                    include_effect,
+                    recipient_matches,
+                    conditions,
+                    kind,
                     visitor,
                 )
             }
@@ -203,52 +378,70 @@ impl Game {
         }
     }
 
+    /// Whether this one applied effect begins choosing its recipients in
+    /// layer 4. Later components keep that selection under CR 613.6.
+    fn applied_effect_starts_in_type_layer(effect: AppliedEffectDef) -> bool {
+        match effect {
+            AppliedEffectDef::Composite(effects) => effects
+                .iter()
+                .copied()
+                .any(Self::applied_effect_starts_in_type_layer),
+            AppliedEffectDef::Characteristic(
+                CharacteristicOperationDef::ChosenBasicLandType
+                | CharacteristicOperationDef::BasicLandTypes(_)
+                | CharacteristicOperationDef::CardTypes(_)
+                | CharacteristicOperationDef::CreatureTypes(_)
+                | CharacteristicOperationDef::Subtypes(_),
+            ) => true,
+            AppliedEffectDef::Characteristic(
+                CharacteristicOperationDef::Abilities(_)
+                | CharacteristicOperationDef::Colors(_)
+                | CharacteristicOperationDef::PowerToughness(_),
+            )
+            | AppliedEffectDef::Rule(_) => false,
+        }
+    }
+
     pub(super) fn visit_static_applied_effect_components(
+        &self,
         effect: AppliedEffectDef,
         traversal: &mut StaticEffectTraversal<'_>,
-        include_effect: bool,
+        recipient_matches: bool,
+        conditions: &[&'static TriggerConditionDef],
+        kind: StaticEffectKind,
         visitor: &mut impl FnMut(StaticAppliedEffect) -> ControlFlow<()>,
     ) -> ControlFlow<()> {
         match effect {
             AppliedEffectDef::Composite(effects) => {
                 for effect in effects {
-                    if Self::visit_static_applied_effect_components(
-                        *effect,
-                        traversal,
-                        include_effect,
-                        visitor,
-                    )
-                    .is_break()
+                    if self
+                        .visit_static_applied_effect_components(
+                            *effect,
+                            traversal,
+                            recipient_matches,
+                            conditions,
+                            kind,
+                            visitor,
+                        )
+                        .is_break()
                     {
                         return ControlFlow::Break(());
                     }
                 }
                 ControlFlow::Continue(())
             }
-            AppliedEffectDef::CannotBeCountered
-            | AppliedEffectDef::DoesNotUntapDuringUntapStep
-            | AppliedEffectDef::MayChooseNotToUntap
-            | AppliedEffectDef::CannotBlock
-            | AppliedEffectDef::CannotAttack
-            | AppliedEffectDef::CannotBeBlocked
-            | AppliedEffectDef::CannotBeEnchanted
-            | AppliedEffectDef::CannotBecomeEnchanted
-            | AppliedEffectDef::CannotChangeController
-            | AppliedEffectDef::RemainsAttachedThroughProtection
-            | AppliedEffectDef::CannotBeBlockedBy(_)
-            | AppliedEffectDef::CanBlockOnly(_)
-            | AppliedEffectDef::PreventDamageFrom(_)
-            | AppliedEffectDef::PreventCombatDamageFrom(_)
-            | AppliedEffectDef::PreventCombatDamage
-            | AppliedEffectDef::PreventCombatDamageDealtBy
-            | AppliedEffectDef::AddLandTypes(_)
-            | AppliedEffectDef::SetLandTypes(_)
-            | AppliedEffectDef::Animate(_)
-            | AppliedEffectDef::ModifyPowerToughness { .. }
-            | AppliedEffectDef::GrantAbility(_)
-            | AppliedEffectDef::RemoveAbilities(_)
-            | AppliedEffectDef::Special(_) => {
-                let grant = if matches!(effect, AppliedEffectDef::GrantAbility(_)) {
+            AppliedEffectDef::Characteristic(_) | AppliedEffectDef::Rule(_) => {
+                let component_order = traversal.next_component_order;
+                traversal.next_component_order = traversal
+                    .next_component_order
+                    .checked_add(1)
+                    .expect("one static ability contains at most 65,536 applied components");
+                let grant = if matches!(
+                    effect,
+                    AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                        AbilityOperationDef::Add(_)
+                    ))
+                ) {
                     let grant = GrantId::from_index(traversal.next_grant)
                         .expect("one static ability contains at most 256 grant sites");
                     traversal.next_grant += 1;
@@ -256,14 +449,30 @@ impl Game {
                 } else {
                     None
                 };
+                // Resolve the recipient and component layer before checking
+                // surrounding conditions. A source-only conditional static
+                // should not inspect live board state while an unrelated
+                // permanent or continuous-effect layer is being assembled.
+                let include_effect = recipient_matches
+                    && kind.includes(effect)
+                    && conditions.iter().all(|condition| {
+                        self.trigger_condition_holds(
+                            condition,
+                            traversal.source.card.id,
+                            traversal.source.controller,
+                            TriggerContext::empty(),
+                            None,
+                            None,
+                        )
+                    });
                 if include_effect {
                     visitor(StaticAppliedEffect {
                         source: traversal.source.card.id,
                         timestamp: traversal.source_timestamp,
-                        source_definition: traversal.source_definition,
-                        source_part: traversal.source_part,
-                        source_ability: traversal.source_ability,
+                        source_presentation: traversal.source_presentation,
+                        source_origin: traversal.source_origin,
                         grant,
+                        component_order,
                         effect,
                     })
                 } else {
@@ -273,28 +482,36 @@ impl Game {
         }
     }
 
-    /// Whether this permanent has the shared Aura attachment spell effect.
-    /// An Aura attaches as its own spell resolves, which is what separates it
-    /// from Equipment: both attach, but only one does so from a spell clause,
-    /// and only one goes to the graveyard when it comes loose.
-    pub(super) fn is_aura_permanent(&self, permanent: &Permanent) -> bool {
-        self.effective_rules(permanent).is_some_and(|rules| {
-            rules.ability_clauses().iter().any(|ability| {
-                ability.is_executable()
-                    && matches!(ability.definition, DeclarativeAbilityDef::Spell(_))
-                    && ability
-                        .declarative_effect()
-                        .and_then(Self::immediate_attachment_target)
-                        .is_some()
-            })
-        })
+    /// Whether this permanent is currently an Aura. The effective subtype
+    /// gate makes an Aura that loses the subtype become unattached and stay
+    /// on the battlefield. The attachment-semantic gate preserves the window
+    /// for permanents such as Necromancy: its model carries the eventual Aura
+    /// subtype, but its own trigger has not made it an Aura until it attaches.
+    /// Bestow (CR 702.103c): a permanent cast for its bestow cost is an Aura
+    /// for exactly as long as it is attached to something. Structural rather
+    /// than a clause the card writes, the same way impending is: it follows
+    /// from how the spell was paid for, and the permanent records that.
+    pub(super) fn is_bestowed_aura(permanent: &Permanent) -> bool {
+        permanent.cast_alternative == Some(crate::card::AlternativeCastKindDef::Bestow)
+            && permanent.attached_to.is_some()
     }
 
-    /// CR 301.5. Equipment attaches through its equip ability rather than as
-    /// it enters, and coming loose leaves it on the battlefield.
-    pub(super) fn is_equipment_permanent(&self, permanent: &Permanent) -> bool {
-        self.effective_rules(permanent)
-            .is_some_and(|rules| rules.subtypes().contains(&"Equipment"))
+    pub(super) fn is_aura_permanent(&self, permanent: &Permanent) -> bool {
+        if Self::is_bestowed_aura(permanent) {
+            return true;
+        }
+        self.effective_subtypes(permanent).contains(&"Aura")
+            && self.effective_rules(permanent).is_some_and(|rules| {
+                (rules.enchant().is_some() && permanent.became_aura)
+                    || rules.ability_clauses().iter().any(|ability| {
+                        ability.is_executable()
+                            && matches!(ability.definition, DeclarativeAbilityDef::Spell(_))
+                            && ability
+                                .declarative_effect()
+                                .and_then(Self::immediate_attachment_target)
+                                .is_some()
+                    })
+            })
     }
 
     /// Finds the target an Aura attaches to as part of its spell procedure.
@@ -302,9 +519,7 @@ impl Game {
     /// nested in one keeps the clause's target scope.
     pub(super) fn immediate_attachment_target(effect: EffectDef) -> Option<TargetIndex> {
         match effect {
-            EffectDef::Attach {
-                object: EffectRecipientDef::Target(target),
-            } => Some(target),
+            EffectDef::Attach { object } => object.legal_target(),
             EffectDef::Sequence(effects) => effects
                 .iter()
                 .find_map(|effect| Self::immediate_attachment_target(*effect)),
@@ -312,126 +527,128 @@ impl Game {
                 then, otherwise, ..
             } => Self::immediate_attachment_target(*then)
                 .or_else(|| Self::immediate_attachment_target(*otherwise)),
-            EffectDef::None
-            | EffectDef::Randomized { .. }
-            | EffectDef::ChoosePermanent { .. }
-            | EffectDef::ChooseDamageSource { .. }
-            | EffectDef::PreventNextDamageFromSource { .. }
-            | EffectDef::AddMana(_)
-            | EffectDef::AddManaEqualTo { .. }
-            | EffectDef::DealDamage { .. }
-            | EffectDef::DrainLife { .. }
-            | EffectDef::GainLife { .. }
-            | EffectDef::AddPoisonCounters { .. }
-            | EffectDef::DrawCards { .. }
-            | EffectDef::Discard { .. }
-            | EffectDef::ShuffleLibrary { .. }
-            | EffectDef::EmptyManaPool { .. }
-            | EffectDef::LoseLife { .. }
-            | EffectDef::LoseTheGame { .. }
-            | EffectDef::Regenerate { .. }
-            | EffectDef::Tap { .. }
-            | EffectDef::RemoveFromCombat { .. }
-            | EffectDef::SetColor { .. }
-            | EffectDef::DestroyAtEndOfCombat { .. }
-            | EffectDef::SkipNextUntapSteps { .. }
-            | EffectDef::RemoveAllCounters { .. }
-            | EffectDef::Untap { .. }
-            | EffectDef::PreventAllCombatDamageThisTurn
-            | EffectDef::PreventNextDamage { .. }
-            | EffectDef::PreventAllDamageThisTurn { .. }
-            | EffectDef::PreventCombatDamageThisTurn { .. }
-            | EffectDef::PreventCombatDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageDealtByThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerAndControlledCreaturesThisTurn { .. }
-            | EffectDef::PreventDamageToPlayerFromThisTurn { .. }
-            | EffectDef::PreventAllCombatDamageExceptSourceThisTurn { .. }
-            | EffectDef::Destroy { .. }
-            | EffectDef::Sacrifice { .. }
-            | EffectDef::SacrificeOfChoice { .. }
-            | EffectDef::DestroyOfChoice { .. }
-            | EffectDef::SplitPermanentsAndSacrificeAPile { .. }
-            | EffectDef::RevealAndSplitIntoPiles { .. }
-            | EffectDef::Mill { .. }
-            | EffectDef::LookAtTopAndMayTake { .. }
-            | EffectDef::LookAtTopAndSelect { .. }
-            | EffectDef::LookAtHand { .. }
-            | EffectDef::SearchZone { .. }
-            | EffectDef::ChooseCards { .. }
-            | EffectDef::ReplaceNextDrawThisTurn { .. }
-            | EffectDef::CreateEmblem { .. }
-            | EffectDef::Transform { .. }
-            | EffectDef::Counter { .. }
-            | EffectDef::CounterUnlessPaid { .. }
-            | EffectDef::AddCounters { .. }
-            | EffectDef::ChangeTextBasicLandType { .. }
-            | EffectDef::BecomeCopyOf { .. }
-            | EffectDef::OptionalPayment { .. }
-            | EffectDef::UnlessPaid { .. }
-            | EffectDef::May { .. }
-            | EffectDef::AdditionalCombatPhase
-            | EffectDef::TakeExtraTurn { .. }
-            | EffectDef::CannotCastNoncreatureSpellsThisTurn { .. }
-            | EffectDef::GrantFlashToNextSorcery
-            | EffectDef::ExileLinkedToSource { .. }
-            | EffectDef::ReturnLinkedExiles { .. }
-            | EffectDef::Detain { .. }
-            | EffectDef::CannotRegenerateThisTurn { .. }
-            | EffectDef::MakeUnblockableThisTurn { .. }
-            | EffectDef::GainControlWhileSourceRemains { .. }
-            | EffectDef::GainControlThisTurn { .. }
-            | EffectDef::AtNextStep { .. }
-            | EffectDef::IfCondition { .. }
-            | EffectDef::TriggerUntilYourNextTurn { .. }
-            | EffectDef::CannotBeForcedToSacrifice
-            | EffectDef::ReduceGenericCostBy(_)
-            | EffectDef::PlayersCantPlay(_)
-            | EffectDef::LandwalkCanBeBlocked(_)
-            | EffectDef::CannotAttackUnless(_)
-            | EffectDef::MultiplyEventAmount(_)
-            | EffectDef::Replacement(_)
-            | EffectDef::MoveToZone { .. }
-            | EffectDef::Attach { .. }
-            | EffectDef::CreateToken { .. }
-            | EffectDef::CreateTokenCopyOf { .. }
-            | EffectDef::ChooseCardName { .. }
-            | EffectDef::ChoosePlayer { .. }
-            | EffectDef::CopyPermanentAsItEnters { .. }
-            | EffectDef::ChooseCreatureType { .. }
-            | EffectDef::Apply { .. }
-            | EffectDef::Special(_) => None,
+            other => {
+                debug_assert!(Self::effect_never_attaches(other));
+                None
+            }
         }
+    }
+
+    /// Every effect that cannot attach anything. Listed exhaustively so a
+    /// new effect has to be classified rather than silently answering None.
+    fn effect_never_attaches(effect: EffectDef) -> bool {
+        matches!(
+            effect,
+            EffectDef::None
+                | EffectDef::Randomized { .. }
+                | EffectDef::Choose(_)
+                | EffectDef::SimultaneousChoose(_)
+                | EffectDef::ChooseCardName { .. }
+                | EffectDef::BindMatching { .. }
+                | EffectDef::PayOr(_)
+                | EffectDef::SplitIntoPiles(_)
+                | EffectDef::PreventDamage { .. }
+                | EffectDef::AddMana(_)
+                | EffectDef::AddManaEqualTo { .. }
+                | EffectDef::DealDamage { .. }
+                | EffectDef::DealDamageFrom { .. }
+                | EffectDef::DealDamageAndApply { .. }
+                | EffectDef::DrainLife { .. }
+                | EffectDef::GainLife { .. }
+                | EffectDef::AddPoisonCounters { .. }
+                | EffectDef::DrawCards { .. }
+                | EffectDef::Discard { .. }
+                | EffectDef::DiscardCards { .. }
+                | EffectDef::ShuffleLibrary { .. }
+                | EffectDef::BuryGraveyard { .. }
+                | EffectDef::EmptyManaPool { .. }
+                | EffectDef::LoseLife { .. }
+                | EffectDef::LoseTheGame { .. }
+                | EffectDef::WinTheGame { .. }
+                | EffectDef::Regenerate { .. }
+                | EffectDef::Tap { .. }
+                | EffectDef::RemoveFromCombat { .. }
+                | EffectDef::SkipNextUntapSteps { .. }
+                | EffectDef::DoubleCounters { .. }
+                | EffectDef::RemoveAllCounters { .. }
+                | EffectDef::Untap { .. }
+                | EffectDef::Saddle { .. }
+                | EffectDef::Destroy { .. }
+                | EffectDef::Sacrifice { .. }
+                | EffectDef::SacrificeOfChoice { .. }
+                | EffectDef::ExileTopOfLibraryToPlay { .. }
+                | EffectDef::Mill { .. }
+                | EffectDef::SearchZonesAndExileRest { .. }
+                | EffectDef::MillUntil { .. }
+                | EffectDef::LookAtTopAndSelect { .. }
+                | EffectDef::LookAtHand { .. }
+                | EffectDef::RevealHand { .. }
+                | EffectDef::SearchZone { .. }
+                | EffectDef::ChooseCards { .. }
+                | EffectDef::ReplaceNextDrawThisTurn { .. }
+                | EffectDef::CreateEmblem { .. }
+                | EffectDef::CreateOngoingEffect(_)
+                | EffectDef::Transform { .. }
+                | EffectDef::Unattach { .. }
+                | EffectDef::Counter { .. }
+                | EffectDef::ReturnSpellToHand { .. }
+                | EffectDef::CopyResolvingSpell { .. }
+                | EffectDef::AddCounters { .. }
+                | EffectDef::RemoveCounters { .. }
+                | EffectDef::ChangeTextBasicLandType { .. }
+                | EffectDef::ChooseColor { .. }
+                | EffectDef::BecomeCopyOf { .. }
+                | EffectDef::May { .. }
+                | EffectDef::ScheduleTurnPhases(_)
+                | EffectDef::TakeExtraTurn { .. }
+                | EffectDef::PutSourceOntoBattlefieldAttacking
+                | EffectDef::BecomeMonarch { .. }
+                | EffectDef::VoteForPermanentToExile { .. }
+                | EffectDef::DamageCannotBePreventedThisTurn
+                | EffectDef::GrantFlashToNextSorcery
+                | EffectDef::ExileLinkedToSource { .. }
+                | EffectDef::MayPlayWithoutPaying { .. }
+                | EffectDef::ReturnLinkedExiles { .. }
+                | EffectDef::Detain { .. }
+                | EffectDef::GainControl { .. }
+                | EffectDef::IfCondition { .. }
+                | EffectDef::InstallTrigger(_)
+                | EffectDef::CannotBeForcedToSacrifice
+                | EffectDef::CannotBeForcedToDiscard
+                | EffectDef::SubstituteBasicLandTypeUntilEndOfTurn { .. }
+                | EffectDef::ReduceGenericCostBy(_)
+                | EffectDef::ModifyCost(_)
+                | EffectDef::LandwalkCanBeBlocked(_)
+                | EffectDef::CannotAttackUnless(_)
+                | EffectDef::PutIntoLibraryBeneathTop { .. }
+                | EffectDef::MoveToZone { .. }
+                | EffectDef::Attach { .. }
+                | EffectDef::PhaseOut { .. }
+                | EffectDef::CreateToken { .. }
+                // Both put something else onto a permanent rather than
+                // attaching the resolving object, which is the only kind of
+                // attachment an Aura's own spell procedure performs.
+                | EffectDef::CreateAttachedToken { .. }
+                | EffectDef::CreateTokenAttachedTo { .. }
+                | EffectDef::CreateTokenCopyOf { .. }
+                | EffectDef::StaticApply { .. }
+                | EffectDef::Apply { .. }
+                | EffectDef::Special(_)
+        )
+    }
+
+    /// Whether this Aura prints the exception that keeps it attached through
+    /// protection. Only an Aura granting protection needs it, and it exempts
+    /// that Aura alone rather than weakening the protection itself.
+    pub(super) fn remains_attached_through_protection(&self, aura: &Permanent) -> bool {
+        self.has_applied_rule(aura, AppliedRuleDef::RemainsAttachedThroughProtection)
     }
 
     /// Whether a static effect forbids Auras on this permanent. This is not a
     /// targeting restriction like hexproof: it also makes an Aura that somehow
     /// arrived anyway fall off.
-    /// Whether this Aura prints the exception that keeps it attached through
-    /// protection. Only an Aura granting protection needs it, and it exempts
-    /// that Aura alone rather than weakening the protection itself.
-    pub(super) fn remains_attached_through_protection(&self, aura: &Permanent) -> bool {
-        self.visit_static_applied_effects(aura, |applied| {
-            if Self::applied_effect_contains(
-                applied.effect,
-                AppliedEffectDef::RemainsAttachedThroughProtection,
-            ) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        })
-        .is_break()
-    }
-
     pub(super) fn cannot_be_enchanted(&self, permanent: &Permanent) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            if Self::applied_effect_contains(applied.effect, AppliedEffectDef::CannotBeEnchanted) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        })
-        .is_break()
+        self.has_applied_rule(permanent, AppliedRuleDef::CannotBeEnchanted)
     }
 
     /// Whether a static ability keeps the turn-based untap action from
@@ -452,7 +669,7 @@ impl Game {
                         .is_some_and(|effect| {
                             Self::static_effect_contains_applied_effect(
                                 effect,
-                                AppliedEffectDef::DoesNotUntapDuringUntapStep,
+                                AppliedEffectDef::Rule(AppliedRuleDef::DoesNotUntapDuringUntapStep),
                             )
                         })
             })
@@ -460,13 +677,8 @@ impl Game {
         {
             return true;
         }
-        self.visit_static_applied_effects(permanent, |applied| {
-            if applied.source != permanent.card.id
-                && Self::applied_effect_contains(
-                    applied.effect,
-                    AppliedEffectDef::DoesNotUntapDuringUntapStep,
-                )
-            {
+        self.visit_applied_rules(permanent, |applied| {
+            if applied.rule == AppliedRuleDef::DoesNotUntapDuringUntapStep {
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -489,7 +701,7 @@ impl Game {
                         .is_some_and(|effect| {
                             Self::static_effect_contains_applied_effect(
                                 effect,
-                                AppliedEffectDef::MayChooseNotToUntap,
+                                AppliedEffectDef::Rule(AppliedRuleDef::MayChooseNotToUntap),
                             )
                         })
             })
@@ -497,13 +709,8 @@ impl Game {
         {
             return true;
         }
-        self.visit_static_applied_effects(permanent, |applied| {
-            if applied.source != permanent.card.id
-                && Self::applied_effect_contains(
-                    applied.effect,
-                    AppliedEffectDef::MayChooseNotToUntap,
-                )
-            {
+        self.visit_applied_rules(permanent, |applied| {
+            if applied.rule == AppliedRuleDef::MayChooseNotToUntap {
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -521,12 +728,9 @@ impl Game {
                 .iter()
                 .copied()
                 .any(|effect| Self::static_effect_contains_applied_effect(effect, expected)),
-            EffectDef::Apply {
+            EffectDef::StaticApply {
                 recipient: EffectRecipientDef::Source,
                 effect,
-                duration:
-                    EffectDurationDef::WhileSourceRemainsInZone
-                    | EffectDurationDef::UntilSourceLeavesZone,
             } => Self::applied_effect_contains(effect, expected),
             _ => false,
         }
@@ -537,13 +741,11 @@ impl Game {
     /// `cannot_be_enchanted` remains the state-based check for Auras that are
     /// already attached.
     pub(super) fn cannot_become_enchanted(&self, permanent: &Permanent) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            if Self::applied_effect_contains(applied.effect, AppliedEffectDef::CannotBeEnchanted)
-                || Self::applied_effect_contains(
-                    applied.effect,
-                    AppliedEffectDef::CannotBecomeEnchanted,
-                )
-            {
+        self.visit_applied_rules(permanent, |applied| {
+            if matches!(
+                applied.rule,
+                AppliedRuleDef::CannotBeEnchanted | AppliedRuleDef::CannotBecomeEnchanted
+            ) {
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -556,17 +758,7 @@ impl Game {
     /// permanent. Callers still allow a no-op assignment to its current
     /// controller.
     pub(super) fn cannot_change_controller(&self, permanent: &Permanent) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            if Self::applied_effect_contains(
-                applied.effect,
-                AppliedEffectDef::CannotChangeController,
-            ) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        })
-        .is_break()
+        self.has_applied_rule(permanent, AppliedRuleDef::CannotChangeController)
     }
 
     /// Whether an Aura may stay attached to `host`: the host has to still be
@@ -585,16 +777,34 @@ impl Game {
         if self.effective_rules(aura).is_none() {
             return false;
         }
-        let aura_colors = self.permanent_colors(aura);
         let Some(rules) = self.effective_rules(aura) else {
             return false;
         };
+        // An Aura that never announces a host as it is cast declares its
+        // restriction outright, because there is no target slot to read one
+        // from.
+        if let Some(object) = rules.enchant() {
+            return self.trigger_object_matches(
+                object,
+                &self.trigger_event_object(host),
+                aura.card.id,
+                false,
+            );
+        }
         let Some(target) = rules.ability_clauses().iter().find_map(|ability| {
             let target = Self::immediate_attachment_target(ability.declarative_effect()?)?;
-            let DeclarativeAbilityDef::Spell(spell) = ability.definition else {
-                return None;
-            };
-            spell.targets().get(target.index())
+            // A bestowed permanent's restriction is printed on the bestow
+            // clause rather than on a spell clause: bestow is what turned it
+            // into an Aura, so bestow is what says what it may enchant.
+            match ability.definition {
+                DeclarativeAbilityDef::Spell(spell) => spell.targets().get(target.index()),
+                DeclarativeAbilityDef::AlternativeCast(alternative)
+                    if alternative.kind == crate::card::AlternativeCastKindDef::Bestow =>
+                {
+                    alternative.targets.get(target.index())
+                }
+                _ => None,
+            }
         }) else {
             return false;
         };
@@ -634,11 +844,18 @@ impl Game {
                         // what an Aura granting protection from its own color
                         // has to do to survive its own effect.
                         && (self.remains_attached_through_protection(aura)
-                            || !self.is_protected_from_colors(host, aura_colors))
+                            || !self.is_protected_from_characteristics(
+                                host,
+                                &self.trigger_event_object(aura),
+                                false,
+                            ))
             }
             AbilityTargetPredicate::AnyTarget
             | AbilityTargetPredicate::PlayerOrPlaneswalker(_)
             | AbilityTargetPredicate::ControlledByTargetOf { .. }
+            | AbilityTargetPredicate::OwnedByTargetPlayer { .. }
+            // An Aura attaches to a permanent, so a stack slot never names one.
+            | AbilityTargetPredicate::StackObject { .. }
             | AbilityTargetPredicate::Player(_) => false,
         }
     }
@@ -648,8 +865,11 @@ impl Game {
         let ability = object.ability.as_ref()?;
         let primary = match ability.resolver {
             StackAbilityResolver::Declarative(effect)
+            | StackAbilityResolver::DeclarativeIgnoringTargetFizzle(effect)
             | StackAbilityResolver::DeclarativeWithCustomFollowup { effect, .. } => Some(effect),
-            StackAbilityResolver::Custom(_) | StackAbilityResolver::CardOwned(_) => None,
+            StackAbilityResolver::Custom(_)
+            | StackAbilityResolver::CardOwned(_)
+            | StackAbilityResolver::CastOffer(_) => None,
         };
         primary
             .into_iter()
@@ -679,263 +899,62 @@ impl Game {
         affected: &Permanent,
         prospective: Option<&Permanent>,
     ) -> bool {
-        match recipient {
-            EffectRecipientDef::Source => source.card.id == affected.card.id,
-            EffectRecipientDef::AttachedPermanent => source.attached_to == Some(affected.card.id),
-
-            EffectRecipientDef::MatchingObjects {
-                object,
-                zones,
-                controller,
-            } => {
-                zones.contains(&ZoneKind::Battlefield)
-                    && self.player_relation_matches(
-                        affected.controller,
-                        controller,
+        match recipient.0 {
+            EffectRecipientSetDef::Objects(ObjectSetDef::One(ObjectRefDef::Source)) => {
+                source.card.id == affected.card.id
+            }
+            EffectRecipientSetDef::Objects(ObjectSetDef::One(ObjectRefDef::AttachedToSource)) => {
+                source.attached_to == Some(affected.card.id)
+            }
+            EffectRecipientSetDef::Objects(ObjectSetDef::Query(query)) => {
+                query.zones.contains(&ZoneKind::Battlefield)
+                    && self.query_player_constraints_match(
+                        Some(affected.controller),
+                        affected.card.owner,
+                        query,
                         source.controller,
                         TriggerContext::empty(),
+                        None,
                     )
-                    && self.trigger_object_matches(
-                        object,
-                        &prospective.map_or_else(
-                            || self.trigger_event_object(affected),
-                            |prospective| {
-                                self.trigger_event_object_with_prospective(affected, prospective)
-                            },
-                        ),
-                        source.card.id,
-                        false,
+                    && self.static_object_predicate_matches(
+                        query.object,
+                        source,
+                        affected,
+                        prospective,
                     )
             }
             // None of these name a permanent a static effect could apply to;
-            // a static effect has no chosen target either.
-            EffectRecipientDef::ChosenPermanent(_)
-            | EffectRecipientDef::ControllerOfTarget(_)
-            | EffectRecipientDef::ObjectsControlledByTarget { .. }
-            | EffectRecipientDef::ObjectsOwnedByTarget { .. }
-            | EffectRecipientDef::CardsOwnedByTarget { .. }
-            | EffectRecipientDef::Controller
-            | EffectRecipientDef::Opponent
-            | EffectRecipientDef::EachPlayer
-            | EffectRecipientDef::Target(_)
-            | EffectRecipientDef::ObjectsSharingNameWithTarget(_)
-            | EffectRecipientDef::TriggeringObject
-            | EffectRecipientDef::ControllerOfTriggeringObject
-            | EffectRecipientDef::ControllerOfAttachedPermanent
-            | EffectRecipientDef::EventPlayer => false,
-        }
-    }
-
-    /// Resolves an ordinary activated clause by its printed order. Legacy
-    /// aggregate definitions fall back to their historic primary identity;
-    /// migrated multi-ability cards retain the exact clause chosen by the
-    /// action (for example, Factory's animate and pump abilities).
-    #[cfg(test)]
-    pub(super) fn activated_ability_origin(
-        &self,
-        permanent: &Permanent,
-        index: usize,
-    ) -> AbilityOrigin {
-        let mut activated_index = 0;
-        self.find_effective_ability(permanent, |effective| {
-            if !effective.ability.is_executable()
-                || !matches!(
-                    effective.ability.definition,
-                    DeclarativeAbilityDef::Activated(_)
+            // a static effect has no chosen target either, and the mixed
+            // recipient belongs to a resolving damage clause.
+            EffectRecipientSetDef::LegalTargets(_)
+            | EffectRecipientSetDef::PlayersAndCreaturesTheyControl(_)
+            | EffectRecipientSetDef::Objects(
+                ObjectSetDef::One(
+                    ObjectRefDef::Binding(_)
+                    | ObjectRefDef::ResolvingObject
+                    | ObjectRefDef::AbilityGrantSource
+                    | ObjectRefDef::Target(_)
+                    | ObjectRefDef::SourceOfTargetedStackObject(_)
+                    | ObjectRefDef::TriggeringObject
+                    | ObjectRefDef::DamagedObject,
                 )
-            {
-                return false;
-            }
-            let matches = activated_index == index;
-            activated_index += 1;
-            matches
-        })
-        .map_or(
-            AbilityOrigin::Printed {
-                definition: Self::effective_rules_source(permanent).0,
-                part: Self::effective_rules_source(permanent).1,
-                ability: AbilityId::PRIMARY,
-            },
-            |effective| effective.origin,
-        )
-    }
-
-    pub(super) fn permanent_types(&self, permanent: &Permanent) -> Option<CardTypeSet> {
-        let mut types = self.effective_rules(permanent)?.types();
-        if let Some(copy) = &permanent.copy_effect {
-            types = types.union(copy.added_types);
+                | ObjectSetDef::Binding(_)
+                | ObjectSetDef::MatchingBinding { .. }
+                | ObjectSetDef::LegalTargets(_)
+                | ObjectSetDef::PermanentsTargetedBy(_)
+                | ObjectSetDef::LinkedExiles(_)
+                | ObjectSetDef::CardsDrawnThisTurnInHand(_)
+                | ObjectSetDef::BottomOfGraveyard(_)
+                | ObjectSetDef::SharingNameWith(_)
+                | ObjectSetDef::SharingNameWithBinding { .. }
+                | ObjectSetDef::TopOfGraveyardMatching { .. },
+            )
+            | EffectRecipientSetDef::Players(_) => false,
         }
-        if let Some(animation) = self.effective_animation(permanent) {
-            types = types.union(animation.types);
-        }
-        Some(types)
-    }
-
-    /// The colours a permanent actually is. An animation that repaints it
-    /// replaces the printed colours rather than adding to them, and a Lace
-    /// resolved onto it replaces whatever it was before that.
-    pub(super) fn effective_colors(&self, permanent: &Permanent, rules: &CardRules) -> [bool; 5] {
-        permanent
-            .color_override
-            .or_else(|| {
-                self.effective_animation(permanent)
-                    .and_then(|animation| animation.colors)
-            })
-            .map_or_else(|| rules.colors(), ColorSet::to_flags)
-    }
-
-    /// Every colour question about a permanent goes through here, so a
-    /// repainted one answers the same way to protection, to Aura legality,
-    /// and to anything else that asks.
-    pub(super) fn permanent_colors(&self, permanent: &Permanent) -> [bool; 5] {
-        let Some(rules) = self.effective_rules(permanent) else {
-            return [false; 5];
-        };
-        self.effective_colors(permanent, rules)
-    }
-
-    pub(super) fn is_protected_from_colors(
-        &self,
-        permanent: &Permanent,
-        source_colors: [bool; 5],
-    ) -> bool {
-        [
-            ManaColor::White,
-            ManaColor::Blue,
-            ManaColor::Black,
-            ManaColor::Red,
-            ManaColor::Green,
-        ]
-        .into_iter()
-        .any(|color| {
-            source_colors[color
-                .color_index()
-                .expect("the iteration contains only colors")]
-                && self.permanent_has_executable_keyword(
-                    permanent,
-                    KeywordAbility::ProtectionFrom(color),
-                )
-        })
-    }
-
-    pub(super) fn permanent_can_be_targeted_by(
-        &self,
-        permanent: &Permanent,
-        controller: PlayerId,
-        source: GameObjectId,
-    ) -> bool {
-        !(self.is_protected_from_colors(permanent, self.object_colors(source))
-            || self.permanent_has_executable_keyword(permanent, KeywordAbility::Shroud)
-            || permanent.controller != controller
-                && self.permanent_has_executable_keyword(permanent, KeywordAbility::Hexproof)
-            || self.cannot_become_enchanted(permanent) && self.source_attaches_itself(source))
-    }
-
-    /// Whether the object doing the targeting is an Aura spell: one whose
-    /// spell clause attaches the permanent the spell becomes. "Can't be
-    /// enchanted" is a targeting restriction for those and nothing else, so a
-    /// Shock aimed at the same permanent is unaffected.
-    pub(super) fn source_attaches_itself(&self, source: GameObjectId) -> bool {
-        let Some(definition) = self
-            .object_definition(source)
-            .and_then(|definition| self.catalog.get(definition))
-        else {
-            return false;
-        };
-        definition.parts.iter().any(|part| {
-            part.rules.ability_clauses().iter().any(|ability| {
-                ability.is_executable()
-                    && matches!(ability.definition, DeclarativeAbilityDef::Spell(_))
-                    && ability
-                        .declarative_effect()
-                        .is_some_and(Self::effect_attaches)
-            })
-        })
-    }
-
-    pub(super) fn effect_attaches(effect: EffectDef) -> bool {
-        match effect {
-            EffectDef::Attach { .. } => true,
-            EffectDef::Sequence(effects) => effects.iter().copied().any(Self::effect_attaches),
-            EffectDef::May { effect, .. } => Self::effect_attaches(*effect),
-            _ => false,
-        }
-    }
-
-    /// The card definition behind a game object, wherever it currently is.
-    pub(super) fn object_definition(&self, object: GameObjectId) -> Option<CardDefinitionId> {
-        self.battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == object)
-            .map(|permanent| permanent.card.definition)
-            .or_else(|| {
-                self.stack
-                    .iter()
-                    .find(|stack| stack.id == object)
-                    .map(|stack| stack.card.definition)
-            })
-            .or_else(|| {
-                self.card_in_nonbattlefield_zone(object)
-                    .map(|(_, card)| card.definition)
-            })
-            .or_else(|| {
-                self.players
-                    .iter()
-                    .flat_map(|player| player.outside_game.iter())
-                    .find(|card| card.id == object)
-                    .map(|card| card.definition)
-            })
-    }
-
-    /// The expansion a game object's card was first printed in. A token has
-    /// no printing, so it belongs to no expansion.
-    pub(super) fn object_debut_set(&self, object: GameObjectId) -> Option<CardSet> {
-        let definition = self.object_definition(object)?;
-        self.catalog.get(definition).map(|card| card.debut_set)
-    }
-
-    pub(super) fn object_colors(&self, object: GameObjectId) -> [bool; 5] {
-        if let Some(permanent) = self
-            .battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == object)
-        {
-            return self.permanent_colors(permanent);
-        }
-        if let Some(stack) = self.stack.iter().find(|stack| stack.id == object) {
-            return stack.colors.map_or_else(
-                || {
-                    self.stack_trigger_event_object(stack)
-                        .map_or([false; 5], |event| event.colors)
-                },
-                ColorSet::to_flags,
-            );
-        }
-        if let Some(retired) = self.retired_objects.get(&object) {
-            return match retired {
-                RetiredObject::Permanent { permanent, .. } => self.permanent_colors(permanent),
-                RetiredObject::Stack(stack) => self
-                    .stack_trigger_event_object(stack)
-                    .map_or([false; 5], |event| event.colors),
-                RetiredObject::Card(card) => self
-                    .catalog
-                    .get(card.definition)
-                    .map_or([false; 5], |definition| definition.rules.colors()),
-            };
-        }
-        self.card_in_nonbattlefield_zone(object)
-            .map(|(_, card)| card)
-            .or_else(|| {
-                self.players
-                    .iter()
-                    .flat_map(|player| player.outside_game.iter())
-                    .find(|card| card.id == object)
-            })
-            .and_then(|card| self.catalog.get(card.definition))
-            .map_or([false; 5], |definition| definition.rules.colors())
-    }
-    pub(super) fn combat_is_protected(&self, blocker: &Permanent, attacker: &Permanent) -> bool {
-        let blocker_colors = self.permanent_colors(blocker);
-        self.is_protected_from_colors(attacker, blocker_colors)
     }
 }
+
+include!("continuous_effects/characteristics.rs");
+include!("continuous_effects/graveyard_sources.rs");
+include!("continuous_effects/static_predicates.rs");
+include!("continuous_effects/player_auras.rs");

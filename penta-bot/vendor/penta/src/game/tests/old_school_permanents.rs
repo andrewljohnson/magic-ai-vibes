@@ -75,7 +75,7 @@ fn tetravus_trades_counters_for_tetravites_that_remember_which_one_made_them() {
     let tetravites = game
         .battlefield
         .iter()
-        .filter(|permanent| permanent.card.definition == cards::TETRAVITE_TOKEN)
+        .filter(|permanent| is_token_with(permanent, tokens::tetravite()))
         .collect::<Vec<_>>();
     assert_eq!(tetravites.len(), 2, "one Tetravite per counter");
     assert!(
@@ -98,7 +98,7 @@ fn an_aura_cannot_target_a_tetravite() {
     // something the Aura discovers after it has already arrived and attached.
     let mut game = ready_game();
     game.battlefield
-        .push(creature(10_000, cards::TETRAVITE_TOKEN, PlayerId::One));
+        .push(token_permanent(10_000, tokens::tetravite(), PlayerId::One));
     game.battlefield
         .push(creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One));
     let aura = card(10_002, cards::VOLCANIC_STRENGTH, PlayerId::One);
@@ -162,7 +162,7 @@ fn tetravus_takes_back_only_the_tetravites_it_made() {
 
     // Two of its own, and one that belongs to a Tetravus that is not here.
     for (id, creator) in [(10_001, 10_000), (10_002, 10_000), (10_003, 10_999)] {
-        let mut token = creature(id, cards::TETRAVITE_TOKEN, PlayerId::One);
+        let mut token = token_permanent(id, tokens::tetravite(), PlayerId::One);
         token.created_by = Some(GameObjectId(creator));
         game.battlefield.push(token);
     }
@@ -189,7 +189,7 @@ fn tetravus_takes_back_only_the_tetravites_it_made() {
     let remaining = game
         .battlefield
         .iter()
-        .filter(|permanent| permanent.card.definition == cards::TETRAVITE_TOKEN)
+        .filter(|permanent| is_token_with(permanent, tokens::tetravite()))
         .map(|permanent| permanent.card.id)
         .collect::<Vec<_>>();
     assert_eq!(
@@ -202,7 +202,7 @@ fn tetravus_takes_back_only_the_tetravites_it_made() {
 #[test]
 fn an_aura_cannot_stay_on_a_tetravite() {
     let mut game = ready_game();
-    let token = creature(10_000, cards::TETRAVITE_TOKEN, PlayerId::One);
+    let token = token_permanent(10_000, tokens::tetravite(), PlayerId::One);
     let bear = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One);
     game.battlefield.push(token);
     game.battlefield.push(bear);
@@ -225,7 +225,7 @@ fn an_aura_cannot_stay_on_a_tetravite() {
 fn an_assassin_that_connects_ends_the_game_no_matter_the_life_total() {
     let mut game = ready_game();
     game.step = Step::CombatDamage;
-    let mut assassin = creature(10_000, cards::ASSASSIN_TOKEN_1_1_BLACK, PlayerId::One);
+    let mut assassin = token_permanent(10_000, assassin_token(), PlayerId::One);
     assassin.attacking = true;
     game.battlefield.push(assassin);
     game.players[1].life = 40;
@@ -251,10 +251,10 @@ fn an_assassin_that_connects_ends_the_game_no_matter_the_life_total() {
 fn a_blocked_assassin_never_triggers() {
     let mut game = ready_game();
     game.step = Step::CombatDamage;
-    let mut assassin = creature(10_000, cards::ASSASSIN_TOKEN_1_1_BLACK, PlayerId::One);
+    let mut assassin = token_permanent(10_000, assassin_token(), PlayerId::One);
     assassin.attacking = true;
     let mut wall = creature(10_001, cards::WALL_OF_STONE, PlayerId::Two);
-    wall.blocking = Some(GameObjectId(10_000));
+    wall.blocking = vec![GameObjectId(10_000)];
     game.battlefield.extend([assassin, wall]);
 
     game.deal_combat_damage();
@@ -282,15 +282,17 @@ fn vraska_destroys_a_nonland_permanent_and_ultimates_into_three_assassins() {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 1),
         targets: activated_targets(Target::Permanent(GameObjectId(10_001))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let at_the_land = Action::ActivateAbility {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 1),
         targets: activated_targets(Target::Permanent(GameObjectId(10_002))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let actions = game.legal_actions(PlayerId::One);
     assert!(actions.contains(&destroy), "the angel is a legal target");
@@ -330,8 +332,9 @@ fn vraskas_ultimate_makes_three_assassins() {
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 2),
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -340,7 +343,7 @@ fn vraskas_ultimate_makes_three_assassins() {
     assert_eq!(
         game.battlefield
             .iter()
-            .filter(|permanent| permanent.card.definition == cards::ASSASSIN_TOKEN_1_1_BLACK)
+            .filter(|permanent| is_token_with(permanent, assassin_token()))
             .count(),
         3
     );
@@ -354,6 +357,7 @@ fn vraskas_ultimate_makes_three_assassins() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn jace_lets_an_opponent_split_the_top_three_and_takes_the_pile_he_likes() {
     let mut game = ready_game();
     let mut jace = creature(10_000, cards::JACE_ARCHITECT_OF_THOUGHT, PlayerId::One);
@@ -377,8 +381,9 @@ fn jace_lets_an_opponent_split_the_top_three_and_takes_the_pile_he_likes() {
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 1),
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -393,8 +398,8 @@ fn jace_lets_an_opponent_split_the_top_three_and_takes_the_pile_he_likes() {
         break;
     }
 
-    // The opponent separates the three revealed cards: the Angel alone
-    // against the other two.
+    // The opponent separates the three revealed cards: the Angel and Lions
+    // against the Bolt.
     let split = game.observe(PlayerId::Two).decision.expect("they split");
     assert_eq!(split.options.len(), 3, "only the top three were revealed");
     let angel = split
@@ -407,28 +412,38 @@ fn jace_lets_an_opponent_split_the_top_three_and_takes_the_pile_he_likes() {
         })
         .expect("the angel was revealed")
         .id;
+    let lions = split
+        .options
+        .iter()
+        .find(|option| {
+            option
+                .card
+                .is_some_and(|(id, _)| id == GameObjectId(10_002))
+        })
+        .expect("the lions were revealed")
+        .id;
     game.apply(
         PlayerId::Two,
         Action::ChooseDecision {
             decision: split.id,
-            options: vec![angel],
+            options: vec![angel, lions],
         },
     )
     .unwrap();
 
-    // Jace's controller takes the two-card pile.
+    // Jace's controller takes the one-card pile.
     let choice = game.observe(PlayerId::One).decision.expect("he chooses");
-    let bigger = choice
+    let bolt = choice
         .options
         .iter()
-        .find(|option| option.label.contains("Savannah Lions"))
-        .expect("one pile holds the other two")
+        .find(|option| option.label.contains("Lightning Bolt"))
+        .expect("one pile holds the Bolt")
         .id;
     game.apply(
         PlayerId::One,
         Action::ChooseDecision {
             decision: choice.id,
-            options: vec![bigger],
+            options: vec![bolt],
         },
     )
     .unwrap();
@@ -441,17 +456,21 @@ fn jace_lets_an_opponent_split_the_top_three_and_takes_the_pile_he_likes() {
             .iter()
             .map(|card| card.definition)
             .collect::<Vec<_>>(),
-        vec![cards::SAVANNAH_LIONS, cards::LIGHTNING_BOLT],
+        vec![cards::LIGHTNING_BOLT],
         "the chosen pile went to hand"
     );
+    let mut bottom = game.players[0].library[..2]
+        .iter()
+        .map(|card| card.definition)
+        .collect::<Vec<_>>();
+    bottom.sort_unstable();
+    let mut expected = vec![cards::SERRA_ANGEL, cards::SAVANNAH_LIONS];
+    expected.sort_unstable();
+    assert_eq!(bottom, expected, "both losing cards went to the bottom");
     assert_eq!(
-        game.players[0]
-            .library
-            .iter()
-            .map(|card| card.definition)
-            .collect::<Vec<_>>(),
-        vec![cards::SERRA_ANGEL, cards::PLAINS],
-        "the angel went under the one card that was left"
+        game.players[0].library[2].definition,
+        cards::PLAINS,
+        "the card outside the split remains above both losing cards"
     );
     let jace = game
         .battlefield
@@ -474,8 +493,9 @@ fn jaces_first_ability_taxes_attackers_until_his_controller_comes_back_around() 
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 0),
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -521,7 +541,7 @@ fn jaces_first_ability_taxes_attackers_until_his_controller_comes_back_around() 
     game.start_next_turn();
     assert_eq!(game.active_player, PlayerId::One);
     assert!(
-        game.floating_triggers.is_empty(),
+        game.installed_triggers.is_empty(),
         "his next turn began, so the ability stopped listening"
     );
 }
@@ -534,7 +554,15 @@ fn pendelhaven_only_pumps_something_that_is_still_a_one_one_when_it_resolves() {
     // A 1/1 and a 2/1: only the first is a legal target.
     game.battlefield
         .push(creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One));
-    game.battlefield[1].power_bonus = -1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_001),
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(-1),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
     game.battlefield
         .push(creature(10_002, cards::SAVANNAH_LIONS, PlayerId::One));
 
@@ -542,15 +570,17 @@ fn pendelhaven_only_pumps_something_that_is_still_a_one_one_when_it_resolves() {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 0),
         targets: activated_targets(Target::Permanent(GameObjectId(10_001))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let at_the_two_one = Action::ActivateAbility {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 0),
         targets: activated_targets(Target::Permanent(GameObjectId(10_002))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let actions = game.legal_actions(PlayerId::One);
     assert!(actions.contains(&pump), "the 1/1 is a legal target");
@@ -563,7 +593,15 @@ fn pendelhaven_only_pumps_something_that_is_still_a_one_one_when_it_resolves() {
     // The ability is on the stack. Growing the target before it resolves
     // makes the target illegal, and the whole ability does nothing.
     assert_eq!(game.stack.len(), 1, "it waits on the stack");
-    game.battlefield[1].power_bonus += 1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_001),
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(1),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
     drain_pending(&mut game);
 
     let lions = game
@@ -585,7 +623,15 @@ fn pendelhaven_pumps_a_one_one_that_stays_one() {
         .push(creature(10_000, cards::PENDELHAVEN, PlayerId::One));
     game.battlefield
         .push(creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One));
-    game.battlefield[1].power_bonus = -1;
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_001),
+        &[AppliedEffectDef::modify_power_toughness(
+            ValueDef::Constant(-1),
+            ValueDef::Constant(0),
+        )],
+        ContinuousEffectExpiration::Never,
+    );
 
     game.apply(
         PlayerId::One,
@@ -593,8 +639,9 @@ fn pendelhaven_pumps_a_one_one_that_stays_one() {
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 0),
             targets: activated_targets(Target::Permanent(GameObjectId(10_001))),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -635,8 +682,9 @@ fn glasses_of_urza_waits_on_the_stack_before_revealing_a_hand() {
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 0),
             targets: activated_targets(Target::Player(PlayerId::Two)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -671,8 +719,9 @@ fn dragon_whelp_only_burns_itself_out_on_the_fourth_activation() {
         source: GameObjectId(10_000),
         ability: activated_ability_for(game, GameObjectId(10_000), 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     for _ in 0..3 {
         game.players[0].mana_pool.red = 1;
@@ -688,7 +737,7 @@ fn dragon_whelp_only_burns_itself_out_on_the_fourth_activation() {
         .expect("still here");
     assert_eq!(game.power(whelp), Some(5), "2/3 pumped three times");
     assert!(
-        game.delayed_triggers.is_empty(),
+        game.installed_triggers.is_empty(),
         "three activations schedule nothing"
     );
 
@@ -697,7 +746,7 @@ fn dragon_whelp_only_burns_itself_out_on_the_fourth_activation() {
     game.apply(PlayerId::One, action).unwrap();
     drain_pending(&mut game);
     assert_eq!(
-        game.delayed_triggers.len(),
+        game.installed_triggers.len(),
         1,
         "the fourth one signs its own death warrant"
     );
@@ -733,8 +782,9 @@ fn dragon_whelps_activation_count_resets_with_the_turn() {
             source: GameObjectId(10_000),
             ability: activated_ability_for(&game, GameObjectId(10_000), 0),
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         };
         game.apply(PlayerId::One, action).unwrap();
         drain_pending(&mut game);
@@ -751,14 +801,15 @@ fn dragon_whelps_activation_count_resets_with_the_turn() {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     game.apply(PlayerId::One, action).unwrap();
     drain_pending(&mut game);
 
     assert!(
-        game.delayed_triggers.is_empty(),
+        game.installed_triggers.is_empty(),
         "a new turn makes it the first activation again, not the fourth"
     );
 }
@@ -783,8 +834,9 @@ fn stone_giant_throws_only_what_it_can_lift_and_the_landing_kills_it() {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 0),
         targets: activated_targets(Target::Permanent(target)),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     let actions = game.legal_actions(PlayerId::One);
     assert!(
@@ -815,6 +867,14 @@ fn stone_giant_throws_only_what_it_can_lift_and_the_landing_kills_it() {
         "it is in the air"
     );
 
+    let lions = game
+        .battlefield
+        .iter_mut()
+        .find(|permanent| permanent.card.id == GameObjectId(10_001))
+        .expect("still the same permanent");
+    lions.controller = PlayerId::Two;
+    lions.temporary_keywords.push(KeywordAbility::Hexproof);
+
     game.step = Step::End;
     game.begin_step_triggers();
     drain_pending(&mut game);
@@ -823,7 +883,7 @@ fn stone_giant_throws_only_what_it_can_lift_and_the_landing_kills_it() {
             .battlefield
             .iter()
             .any(|permanent| permanent.card.id == GameObjectId(10_001)),
-        "and the end step is where it lands"
+        "the delayed reference is not a new target, so later control and hexproof do not save it"
     );
     assert!(
         game.battlefield
@@ -848,15 +908,16 @@ fn maze_of_ith_stops_the_damage_without_calling_off_the_attack() {
     game.battlefield.push(angel);
     // A blocker, so there is damage in both directions to prevent.
     let mut lions = creature(10_002, cards::SAVANNAH_LIONS, PlayerId::Two);
-    lions.blocking = Some(GameObjectId(10_001));
+    lions.blocking = vec![GameObjectId(10_001)];
     game.battlefield.push(lions);
 
     let maze = Action::ActivateAbility {
         source: GameObjectId(10_000),
         ability: activated_ability_for(&game, GameObjectId(10_000), 0),
         targets: activated_targets(Target::Permanent(GameObjectId(10_001))),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(
         game.legal_actions(PlayerId::Two).contains(&maze),

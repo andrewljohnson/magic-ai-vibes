@@ -1,5 +1,13 @@
+//! Engine behaviour tests.
+//!
+//! The shared fixtures live in `fixtures`, re-exported here so every test
+//! module keeps reaching them through `super::*`.
+
 use super::*;
-use crate::card::abilities;
+use crate::card::{
+    ChoiceVisibilityDef, ChooseDef, EffectPaymentDef, ObjectChoiceBindingDef, PayOrDef,
+    PlayerSetDef, abilities, tokens,
+};
 use crate::mana_cost;
 use crate::poc::{self, cards};
 use crate::{
@@ -7,460 +15,531 @@ use crate::{
     AdditionalCostId, AlternativeCastManaCostDef, AlternativeCostDef, AlternativeCostId,
     BattlefieldEntryModificationDef, CardComposition, CardDefinition, CardEffectStatus,
     CardInstanceId, CardPart, CardPartId, CardPrinting, CardRules, CardStructure, CastChoices,
-    DoubleFacedKind, EffectExecutionDef, ManaSpendEffectDef, ModeDef, ModeSetDef, PlayOptionDef,
-    PlayOptionId, PlayerRelation, ReplacementEffectDef, ReplacementEventDef, SpellForm,
-    StackObjectId, TargetIndex, TargetPredicate, TargetSelection, TargetSlotDef, TargetSlotId,
-    ZonePlacement,
+    DoubleFacedKind, EffectExecutionDef, ManaSpendEffectDef, ModeDef, ModeSetDef,
+    ObjectBindingIndex, ObjectSetDef, PlayOptionDef, PlayOptionId, PlayerRelation,
+    ReplacementEffectDef, ReplacementEventDef, SpellForm, StackObjectId, TargetIndex,
+    TargetPredicate, TargetSelection, TargetSlotDef, TargetSlotId, ZonePlacement,
 };
 
-static TEST_FLYING_ABILITY: [AbilityDef; 1] = [abilities::flying()];
-static TEST_FLYING_TRAMPLE_ABILITIES: [AbilityDef; 2] = [abilities::flying(), abilities::trample()];
-static CARD_COST_FLASHBACK: AbilityDef = abilities::flashback_for_card_mana_cost();
-const TEST_OPPONENT_LAND_ENTRY_TEXT: &str = "Lands your opponents control enter tapped.";
-static TEST_OPPONENT_LANDS_ENTER_TAPPED_ABILITY: [AbilityDef; 1] = [AbilityDef::replacement_for(
-    TEST_OPPONENT_LAND_ENTRY_TEXT,
-    ReplacementEventDef::ObjectEntersBattlefield {
-        object: ObjectPredicateDef::HasType(CardType::Land),
-        controller: PlayerRelation::Opponent,
-    },
-    EffectDef::Replacement(ReplacementEffectDef::ModifyBattlefieldEntry(
-        BattlefieldEntryModificationDef::Tapped,
-    )),
-)];
-static TEST_EXTERNAL_PAYMENT_COST: [CostDef; 1] = [CostDef::PayLife(2)];
-static TEST_EXTERNAL_ENTER_TAPPED: [ReplacementEffectDef; 1] =
-    [ReplacementEffectDef::ModifyBattlefieldEntry(
-        BattlefieldEntryModificationDef::Tapped,
-    )];
-static TEST_EXTERNAL_PAYMENT: [ReplacementEffectDef; 1] = [ReplacementEffectDef::OptionalPayment {
-    payment: PaymentDef::new(PlayerRelation::You, &TEST_EXTERNAL_PAYMENT_COST),
-    if_paid: &[],
-    if_declined: &TEST_EXTERNAL_ENTER_TAPPED,
-}];
-static TEST_EXTERNAL_CONTEXT_ABILITY: [AbilityDef; 1] = [AbilityDef::replacement_for(
-    "Lands your opponents control enter tapped unless you control a Plains and pay 2 life.",
-    ReplacementEventDef::ObjectEntersBattlefield {
-        object: ObjectPredicateDef::HasType(CardType::Land),
-        controller: PlayerRelation::Opponent,
-    },
-    EffectDef::Replacement(ReplacementEffectDef::Conditional {
-        condition: ConditionDef::Exists(ObjectQueryDef {
-            object: ObjectPredicateDef::HasAnyBasicLandType(&[BasicLandType::Plains]),
-            zones: &[ZoneKind::Battlefield],
-            controller: PlayerRelation::You,
-        }),
-        if_true: &TEST_EXTERNAL_PAYMENT,
-        if_false: &TEST_EXTERNAL_ENTER_TAPPED,
-    }),
-)];
-static TEST_GRANTED_ENTRY_REPLACEMENT: AbilityDef =
-    abilities::enters_tapped("This permanent enters tapped.");
-static TEST_SELF_GRANTED_ENTRY_ABILITY: [AbilityDef; 1] = [AbilityDef::static_ability(
-    "This permanent has \"This permanent enters tapped.\"",
-    EffectDef::Apply {
-        recipient: EffectRecipientDef::Source,
-        effect: AppliedEffectDef::GrantAbility(&TEST_GRANTED_ENTRY_REPLACEMENT),
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
-    },
-)];
-static TEST_SELF_PLAINS_ABILITY: [AbilityDef; 1] = [AbilityDef::static_ability(
-    "This land is a Plains in addition to its other types.",
-    EffectDef::Apply {
-        recipient: EffectRecipientDef::Source,
-        effect: AppliedEffectDef::AddLandTypes(&[BasicLandType::Plains]),
-        duration: EffectDurationDef::WhileSourceRemainsInZone,
-    },
-)];
-static TEST_PLAINS_ENTER_TAPPED_ABILITY: [AbilityDef; 1] = [AbilityDef::replacement_for(
-    "Plains your opponents control enter tapped.",
-    ReplacementEventDef::ObjectEntersBattlefield {
-        object: ObjectPredicateDef::HasAnyBasicLandType(&[BasicLandType::Plains]),
-        controller: PlayerRelation::Opponent,
-    },
-    EffectDef::Replacement(ReplacementEffectDef::ModifyBattlefieldEntry(
-        BattlefieldEntryModificationDef::Tapped,
-    )),
-)];
-static TEST_OPPONENT_ENCHANTMENTS_ENTER_TAPPED_ABILITY: [AbilityDef; 1] =
-    [AbilityDef::replacement_for(
-        "Enchantments your opponents control enter tapped.",
-        ReplacementEventDef::ObjectEntersBattlefield {
-            object: ObjectPredicateDef::HasType(CardType::Enchantment),
-            controller: PlayerRelation::Opponent,
-        },
-        EffectDef::Replacement(ReplacementEffectDef::ModifyBattlefieldEntry(
-            BattlefieldEntryModificationDef::Tapped,
-        )),
-    )];
+mod fixtures;
+pub(super) use fixtures::*;
 
-pub(super) fn ready_game() -> Game {
-    ready_game_with_seed(0)
-}
+mod token_fixtures;
+pub(super) use token_fixtures::*;
 
-/// The same board with a chosen seed, for the effects that consult the
-/// replay-stable randomiser.
-pub(super) fn ready_game_with_seed(seed: u64) -> Game {
-    let deck = poc::mono_red_atog();
-    let mut game = Game::new(poc::catalog().unwrap(), [deck.clone(), deck], seed).unwrap();
-    game.pregame = None;
-    game.step = Step::PrecombatMain;
-    game.active_player = PlayerId::One;
-    game.priority = PlayerId::One;
-    game.battlefield.clear();
-    game.stack.clear();
-    game.pending_decisions.clear();
-    game.pending_combat_attackers.clear();
-    game.combat_damage_stage = CombatDamageStage::NotStarted;
-    game.combat_blocked_attackers.clear();
-    for player in &mut game.players {
-        player.hand.clear();
-        player.graveyard.clear();
-        player.exile.clear();
-        player.outside_game.clear();
-        player.life = i16::from(rules::STARTING_LIFE);
-        player.mana_pool = ManaPool::default();
-        player.mana.clear();
-    }
-    game
-}
-
-pub(super) fn card(id: u32, definition: CardDefinitionId, owner: PlayerId) -> CardInstance {
-    CardInstance {
-        id: CardInstanceId(id),
-        definition,
-        owner,
-        backing: ObjectBacking::Cards(vec![PhysicalCardId(id)]),
-        characteristics: CharacteristicSource::Card(definition),
-    }
-}
-
-pub(super) fn creature(id: u32, definition: CardDefinitionId, controller: PlayerId) -> Permanent {
-    Permanent::entering(
-        card(id, definition, controller),
-        CardPartId::PRIMARY,
-        controller,
-        0,
-    )
-}
-
-fn copied_characteristics(definition: CardDefinitionId) -> CopiableCharacteristics {
-    CopiableCharacteristics {
-        base: (definition, CardPartId::PRIMARY),
-        added_types: CardTypeSet::empty(),
-        added_abilities: Vec::new(),
-    }
-}
-
-fn cast_choices(targets: Vec<Target>, x: u16) -> CastChoices {
-    let choices = CastChoices::default().with_x(x);
-    if targets.is_empty() {
-        choices
-    } else {
-        choices.with_targets(vec![TargetSelection::new(TargetSlotId(0), targets)])
-    }
-}
-
-fn cast_action(
-    card: GameObjectId,
-    targets: Vec<Target>,
-    sacrifices: Vec<GameObjectId>,
-    x: u16,
-) -> Action {
-    Action::CastSpell {
-        card,
-        choices: cast_choices(targets, x),
-        sacrifices,
-    }
-}
-
-fn activated_targets(target: Target) -> Vec<TargetSelection> {
-    vec![TargetSelection::single(TargetSlotId(0), target)]
-}
-
-const fn primary_ability(definition: CardDefinitionId) -> AbilityOrigin {
-    AbilityOrigin::Printed {
-        definition,
-        part: CardPartId::PRIMARY,
-        ability: crate::AbilityId::PRIMARY,
-    }
-}
-
-pub(super) fn mana_ability_for(
-    game: &Game,
-    source: GameObjectId,
-    color: ManaColor,
-) -> AbilityOrigin {
-    game.battlefield
-        .iter()
-        .find(|permanent| permanent.card.id == source)
-        .into_iter()
-        .flat_map(|permanent| game.mana_ability_activations(permanent))
-        .find(|activation| activation.color == color)
-        .expect("source has an effective mana ability for the requested color")
-        .ability
-}
-
-fn activated_ability_for(game: &Game, source: GameObjectId, index: usize) -> AbilityOrigin {
-    let permanent = game
-        .battlefield
-        .iter()
-        .find(|permanent| permanent.card.id == source)
-        .expect("source is on the battlefield");
-    game.activated_ability_origin(permanent, index)
-}
-
-fn synchronize_single_part_definition(definition: &mut CardDefinition) {
-    let composition = CardComposition::single(definition.name.clone(), definition.rules);
-    definition.parts = composition.parts;
-    definition.structure = composition.structure;
-    definition.play_options = composition.play_options;
-}
-
-fn spell(id: u32, definition: CardDefinitionId, controller: PlayerId, x: u16) -> StackObject {
-    StackObject {
-        id: StackObjectId(id),
-        kind: StackObjectKind::Spell,
-        card: card(id, definition, controller),
-        source: None,
-        ability: None,
-        controller,
-        signature: Some(CastSignature::from_validated_choices(
-            SpellForm::Part(CardPartId::PRIMARY),
-            cast_choices(Vec::new(), x),
-        )),
-        chosen_permanents: Vec::new(),
-        applied_effects: Vec::new(),
-        text_changes: Vec::new(),
-        colors: None,
-        cast_via_flashback: false,
-        is_copy: false,
-    }
-}
-
-fn spell_with_targets(
-    id: u32,
-    definition: CardDefinitionId,
-    controller: PlayerId,
-    targets: Vec<Target>,
-    x: u16,
-) -> StackObject {
-    let mut object = spell(id, definition, controller, x);
-    object.signature = Some(CastSignature::from_validated_choices(
-        SpellForm::Part(CardPartId::PRIMARY),
-        cast_choices(targets, x),
-    ));
-    object
-}
-
-/// Takes the split an unassigned attacker would have made anyway: lethal to
-/// each blocker in order, the rest over the top. A lone blocker used to get
-/// this for free; trample now makes it a real choice, so a test that only
-/// cares about the damage totals asks for the obvious one.
-fn take_default_combat_assignment(game: &mut Game) {
-    while let Some(action) = game
-        .legal_actions(game.priority)
-        .into_iter()
-        .find(|action| matches!(action, Action::AssignCombatDamage { .. }))
-    {
-        let Action::AssignCombatDamage { attacker, .. } = &action else {
-            unreachable!("filtered to assignments");
-        };
-        let blockers: Vec<_> = game
-            .battlefield
-            .iter()
-            .filter(|permanent| permanent.blocking == Some(*attacker))
-            .map(|permanent| permanent.card.id)
-            .collect();
-        let split = game.default_damage_split(*attacker, &blockers);
-        let wanted = Action::AssignCombatDamage {
-            attacker: *attacker,
-            assignments: split
-                .into_iter()
-                .map(|(recipient, amount)| CombatDamageAssignment { recipient, amount })
-                .collect(),
-        };
-        let player = game.priority;
-        game.apply(player, wanted)
-            .expect("the default split is legal");
-    }
-}
-
-fn pass_priority_pair(game: &mut Game) {
-    let first = game.priority;
-    game.apply(first, Action::PassPriority).unwrap();
-    game.apply(first.opponent(), Action::PassPriority).unwrap();
-}
-
-/// Passes priority, one player at a time, until the stack empties or a
-/// decision interrupts. Resolving a trigger that asks a question stops the
-/// round mid-way, which `pass_priority_pair` cannot express.
-fn pass_until_decision(game: &mut Game) {
-    for _ in 0..8 {
-        if !game.pending_decisions.is_empty() || game.stack.is_empty() {
-            return;
-        }
-        let player = game.priority;
-        game.apply(player, Action::PassPriority).unwrap();
-    }
-}
-
-/// Runs the game forward -- passing priority, answering any decision that is
-/// not the one being waited for -- until `prompt` is asked. Triggers that go
-/// on the stack can put an ordering choice in front of the interesting one.
-fn advance_to_prompt(game: &mut Game, player: PlayerId, prompt: &str) -> DecisionObservation {
-    for _ in 0..24 {
-        if let Some(decision) = game.observe(player).decision {
-            if decision.prompt == prompt {
-                return decision;
-            }
-            choose_all_offered(game, player);
-            continue;
-        }
-        if let Some(other) = game
-            .decision_player()
-            .filter(|other| *other != player && game.observe(*other).decision.is_some())
-        {
-            choose_all_offered(game, other);
-            continue;
-        }
-        let holder = game.priority;
-        game.apply(holder, Action::PassPriority).unwrap();
-    }
-    panic!("{prompt} was never asked");
-}
-
-fn choose_all_offered(game: &mut Game, player: PlayerId) {
-    let decision = game
-        .observe(player)
-        .decision
-        .expect("a decision is waiting");
-    let action = Action::ChooseDecision {
-        decision: decision.id,
-        options: decision
-            .options
-            .iter()
-            .take(decision.minimum)
-            .map(|option| option.id)
-            .collect(),
+fn protection_keyword(color: ManaColor) -> KeywordAbility {
+    let DeclarativeAbilityDef::Keyword(keyword) =
+        abilities::protection_from_color(color).definition
+    else {
+        unreachable!("protection constructor always returns a keyword ability")
     };
-    game.apply(player, action).unwrap();
+    keyword
 }
 
-fn choose_decision_by_label(game: &mut Game, player: PlayerId, label: &str) {
-    let decision = game
-        .observe(player)
-        .decision
-        .expect("the expected choice is pending");
-    let option = decision
-        .options
-        .iter()
-        .find(|option| option.label == label)
-        .unwrap_or_else(|| panic!("decision does not offer {label}"))
-        .id;
-    game.apply(
-        player,
-        Action::ChooseDecision {
-            decision: decision.id,
-            options: vec![option],
-        },
-    )
-    .expect("the named decision option is legal");
-}
+mod declarative_draw_enchantments;
 
 mod ability_resolution;
 mod activation_costs_and_turns;
+mod activation_prohibitions;
 mod activation_timing;
 mod additional_costs;
 mod alternative_costs;
+mod alternative_mana;
+mod animate_artifact;
+mod arabian_lands;
+mod armageddon_clock;
+mod aspect_of_wolf;
+mod assigns_no_combat_damage;
 mod attachment_targets;
+mod attack_deterrents;
 mod attack_restrictions;
+mod attacked_last_turn;
+mod attacking_walls;
+mod aura_control;
 mod aura_death;
 mod aura_tap_triggers;
 mod aura_upkeep;
+mod avr_stale_audits;
 mod banding;
+mod banding_assignment;
+mod banding_blocked;
+mod banding_formation;
+mod banding_with_other;
+mod blaze_of_glory;
+mod blessing_and_flame;
+mod blink_under_your_control;
+mod block_restriction_cards;
+mod blocker_status;
+mod blocking_after_death;
 mod blocking_prevention;
+mod blocking_relation;
 mod blocking_relationship;
+mod board_conditioned_statics;
+mod board_sized_counter;
+mod bonds_of_faith;
+mod buyback;
+mod candelabra_of_tawnos;
 mod cannot_attack;
 mod cannot_block;
 mod casting_and_targets;
 mod casting_modes;
+mod casting_windows;
 mod chaos_orb;
+mod chosen_colors;
+mod cocoon;
 mod coin_flips;
 mod combat;
 mod combat_and_life;
+mod combat_constraints;
 mod combat_keywords;
+mod combat_relation_cards;
+mod combat_rescues;
+mod conditional_anthems;
 mod continuous_and_zones;
 mod control_duration;
+mod convoke;
 mod copy_effects;
+mod copy_transform;
 mod counted_bodies;
+mod counted_statics;
 mod counter_conditions;
 mod countering_and_mana;
+mod creature_bond;
+mod cyclone;
+mod damage_dealers;
 mod damage_dealt_by;
+mod damage_history;
+mod damage_limits;
+mod damage_redirection;
+mod damaged_by_this_creature;
 mod decisions_and_effects;
+mod declarative_attack_restrictions;
+mod declarative_block_restrictions;
+mod deep_spawn;
 mod delayed_triggers;
+mod deranged_assistant;
+mod derelor;
 mod detain;
+mod dgm_stale_audits;
+mod discard_cost;
+mod disharmony;
+mod divine_reckoning;
+mod dka_stale_audits;
+mod elder_spawn;
+mod empty_library_wins;
+mod emrakul;
+mod energy_tap;
 mod entry_replacements;
 mod equipment;
+mod equipment_cards;
+mod equipment_expansion_batch_one;
+mod equipment_expansion_batch_three;
+mod equipment_expansion_batch_two;
+mod erg_raiders;
 mod evolve;
+mod evolve_scavenge_cards;
 mod exalted;
 mod exile_source_costs;
 mod extra_turns;
+mod face_down;
+mod fateful_hour;
 mod fetch_tapped;
 mod filtered_player_prevention;
+mod gatecrash_keyrunes;
+mod gatecrash_stale_audits;
+mod ghouls;
+mod giant_shark;
+mod gloom;
+mod granted_ability_cards;
+mod graveyard_effect_cards;
+mod greatest_power;
+mod guardian_angel;
 mod guardian_beast;
+mod gyre_sage;
+mod held_tapped;
+mod howling_mine;
 mod identity_and_mana;
+mod instill_energy;
+mod into_the_wilds;
+mod isd_delver_of_secrets;
+mod isd_m14_deck_cards;
+mod isd_memorys_journey;
+mod isd_token_cards;
+mod jade_statue;
+mod keymaster_rogue;
+mod killing_glare;
 mod laces;
 mod land_and_ability_layers;
 mod land_characteristics;
+mod land_type_conditioned_statics;
 mod landwalk;
+mod life_and_death_amounts;
+mod living_artifact;
+mod looking_at_another_library;
+mod ludevics_test_subject;
+mod m13_more_stale;
+mod m13_stale_audits;
+mod m14_stale_audits;
 mod mana_ability_costs;
 mod mana_and_costs;
+mod mana_planning_life;
+mod mana_symbol_cards;
+mod mana_triggers;
 mod mana_vault;
 mod meekstone;
+mod menace;
+mod mentor_of_the_meek;
+mod mikaeus_the_lunarch;
+mod mill_until_land;
+mod mindshrieker;
+mod miracle;
+mod mirror_mad_phantasm;
+mod mishras_war_machine;
 mod modal_effects;
 mod morbid;
+mod morbid_entry;
+mod multi_block;
+mod must_block;
+mod named_card_mechanics;
 mod old_school_interactions;
 mod old_school_permanents;
 mod old_school_spells;
 mod old_school_upkeep;
+mod omniscience;
+mod one_sided_block_triggers;
+mod open_activation;
+mod osai_vultures;
+mod paralyze;
+mod part_water;
+mod play_from_hand;
+mod player_curses;
 mod poison;
 mod populate;
+mod populate_cards;
 mod power_blocking;
+mod power_blocking_restrictions;
+mod premodern_bw;
 mod premodern_cards;
+mod premodern_cycling;
+mod premodern_free_spells;
+mod premodern_gat;
+mod premodern_goblins;
+mod premodern_hermit;
+mod premodern_hosers;
+mod premodern_kicker;
 mod premodern_lands;
+mod premodern_landstill;
 mod premodern_library_selection;
 mod premodern_permanents;
+mod premodern_pyrokinesis;
+mod premodern_replenish;
+mod premodern_sligh;
 mod premodern_split_and_lock;
+mod premodern_stasis;
 mod premodern_zone_and_denial;
 mod prevention;
 mod prevention_modes;
+mod primordial_ooze;
+mod prohibition_cards;
+mod protection_predicates;
+mod quota_and_aura_upkeep;
 mod rabid_wombat;
 mod rampage;
+mod random_discard;
 mod regeneration;
+mod relic_bind;
+mod reliquary_tower;
 mod removal_and_keywords;
 mod replacements_and_presentation;
+mod resolution_destinations;
+mod revealed_hands;
 mod ring_of_maruf;
+mod rings;
+mod rise_from_the_grave;
+mod rooftop_storm;
+mod rules_partial_sweep;
+mod rules_partial_sweep_dgm;
+mod runic_repetition;
+mod sacrifice_costs;
+mod sacrificed_toughness;
 mod scavenge;
 mod search_and_reveal;
+mod second_spell_each_turn;
+mod sentinel;
 mod shroud_grants;
+mod silence_and_sturmgeist;
 mod silenced_sources;
+mod sized_searches;
+mod soulbond;
+mod spell_colors;
+mod spell_cost_reduction;
 mod spore;
+mod spore_cloud;
 mod stale_followups;
 mod stat_counters;
 mod state_triggers_and_life;
 mod static_animation;
 mod static_keyword_predicates;
+mod storage_lands;
+mod street_spasm;
+mod subtype_protection;
+mod switched_stats;
+mod target_toughness;
 mod targeted_answers;
 mod targeting_characteristics;
+mod thread_safety;
+mod token_status_cards;
+mod toughness_payouts;
+mod transmogrant;
+mod traumatize;
+mod trigger_event_matchers;
 mod triggers_and_stack;
 mod triumphs;
 mod turn_and_loyalty;
 mod tutors_and_fetch_lands;
 mod unblocked_attackers;
+mod unbounded_targets;
 mod unleash;
+mod untap_caps;
+mod untap_skip_spells;
 mod untap_skips;
+mod untap_source_costs;
+mod until_end_of_combat;
+mod urza_lands;
+mod venarian_gold;
+
+mod vintage_cube_abhorrent_oculus;
+mod vintage_cube_adeline;
+mod vintage_cube_adventure;
+mod vintage_cube_aether_spellbomb;
+mod vintage_cube_agathas_soul_cauldron;
+mod vintage_cube_ajani;
+mod vintage_cube_amped_raptor;
+mod vintage_cube_archon_of_cruelty;
+mod vintage_cube_arrival;
+mod vintage_cube_artifacts;
+mod vintage_cube_baleful_strix;
+mod vintage_cube_baloth_prime;
+mod vintage_cube_barrowgoyf;
+mod vintage_cube_bitter_triumph;
+mod vintage_cube_bloodbraid_challenger;
+mod vintage_cube_bolass_citadel;
+mod vintage_cube_bountiful_landscape;
+mod vintage_cube_brainstorm;
+mod vintage_cube_brainsurge;
+mod vintage_cube_brazen_borrower;
+mod vintage_cube_breach;
+mod vintage_cube_brightglass_gearhulk;
+mod vintage_cube_cankerbloom;
+mod vintage_cube_caryatid;
+mod vintage_cube_cathar_commando;
+mod vintage_cube_caustic_bronco;
+mod vintage_cube_chainsaw;
+mod vintage_cube_chandra;
+mod vintage_cube_chrome_mox;
+mod vintage_cube_collective_brutality;
+mod vintage_cube_colonnade;
+mod vintage_cube_concealing_curtains;
+mod vintage_cube_consult_star_charts;
+mod vintage_cube_coveted_jewel;
+mod vintage_cube_creatures;
+mod vintage_cube_crucible;
+mod vintage_cube_cryptic_command;
+mod vintage_cube_currency_converter;
+mod vintage_cube_cut_down;
+mod vintage_cube_dack;
+mod vintage_cube_damn;
+mod vintage_cube_dark_confidant;
+mod vintage_cube_delayed_blast_fireball;
+mod vintage_cube_descendant_of_storms;
+mod vintage_cube_detectives_phoenix;
+mod vintage_cube_displacer_kitten;
+mod vintage_cube_dreadhorde_arcanist;
+mod vintage_cube_duelist;
+mod vintage_cube_echo_of_eons;
+mod vintage_cube_eldrazi;
+mod vintage_cube_elite_spellbinder;
+mod vintage_cube_elspeth;
+mod vintage_cube_elspeth_storm_slayer;
+mod vintage_cube_elvish_reclaimer;
+mod vintage_cube_emperor_of_bones;
+mod vintage_cube_endurance;
+mod vintage_cube_enduring_innocence;
+mod vintage_cube_ephemerate;
+mod vintage_cube_ertai_resurrected;
+mod vintage_cube_eternal_witness;
+mod vintage_cube_exhume;
+mod vintage_cube_expedition_map;
+mod vintage_cube_exploration;
+mod vintage_cube_faerie_mastermind;
+mod vintage_cube_fanatic_of_rhonas;
+mod vintage_cube_fatal_push;
+mod vintage_cube_fear_of_missing_out;
+mod vintage_cube_fiery_confluence;
+mod vintage_cube_figure_of_destiny;
+mod vintage_cube_flash;
+mod vintage_cube_flickerwisp;
+mod vintage_cube_force_of_negation;
+mod vintage_cube_forth_eorlingas;
+mod vintage_cube_gadgeteer;
+mod vintage_cube_galvanic_blast;
+mod vintage_cube_gau;
+mod vintage_cube_get_lost;
+mod vintage_cube_ghost_vacuum;
+mod vintage_cube_giver_of_runes;
+mod vintage_cube_glimmer_lens;
+mod vintage_cube_glorybringer;
+mod vintage_cube_goblin_rabblemaster;
+mod vintage_cube_goldspan_dragon;
+mod vintage_cube_graveyard;
+mod vintage_cube_green_suns_zenith;
+mod vintage_cube_gut;
+mod vintage_cube_hand_attack;
+mod vintage_cube_harvester_of_misery;
+mod vintage_cube_haywire_mite;
+mod vintage_cube_headliner_scarlett;
+mod vintage_cube_horizon_land;
+mod vintage_cube_infect;
+mod vintage_cube_inti;
+mod vintage_cube_invigorate;
+mod vintage_cube_ivora;
+mod vintage_cube_jace_the_mind_sculptor;
+mod vintage_cube_jacked_rabbit;
+mod vintage_cube_jitte;
+mod vintage_cube_kaito;
+mod vintage_cube_kaldra_compleat;
+mod vintage_cube_kappa_cannoneer;
+mod vintage_cube_karn_scion_of_urza;
+mod vintage_cube_laelia;
+mod vintage_cube_lands;
+mod vintage_cube_lavaspur_boots;
+mod vintage_cube_ledger_shredder;
+mod vintage_cube_legion_extruder;
+mod vintage_cube_legolas_reflexes;
+mod vintage_cube_leyline_binding;
+mod vintage_cube_library;
+mod vintage_cube_lion_sash;
+mod vintage_cube_loot_pathfinder;
+mod vintage_cube_loran;
+mod vintage_cube_lorien;
+mod vintage_cube_lose_focus;
+mod vintage_cube_luminarch_aspirant;
+mod vintage_cube_lurrus;
+mod vintage_cube_magda;
+mod vintage_cube_malcolm;
+mod vintage_cube_mana;
+mod vintage_cube_manamorphose;
+mod vintage_cube_manifold_key;
+mod vintage_cube_mastery;
+mod vintage_cube_memory_lapse;
+mod vintage_cube_metamorphosis_fanatic;
+mod vintage_cube_mine_collapse;
+mod vintage_cube_mishras_bauble;
+mod vintage_cube_monarch;
+mod vintage_cube_monstrous_rage;
+mod vintage_cube_more_spells;
+mod vintage_cube_mox_opal;
+mod vintage_cube_multiversal_passage;
+mod vintage_cube_mystic_confluence;
+mod vintage_cube_natural_order;
+mod vintage_cube_necromancy;
+mod vintage_cube_nights_whisper;
+mod vintage_cube_ninjutsu;
+mod vintage_cube_nissa;
+mod vintage_cube_no_more_lies;
+mod vintage_cube_noble_hierarch;
+mod vintage_cube_oath_of_druids;
+mod vintage_cube_occult_epiphany;
+mod vintage_cube_ocelot_pride;
+mod vintage_cube_oko;
+mod vintage_cube_oliphaunt;
+mod vintage_cube_omnath;
+mod vintage_cube_once_upon_a_time;
+mod vintage_cube_oracle;
+mod vintage_cube_orcish_bowmasters;
+mod vintage_cube_ouroboroid;
+mod vintage_cube_overlord;
+mod vintage_cube_paradoxical_outcome;
+mod vintage_cube_path;
+mod vintage_cube_phantasmal_image;
+mod vintage_cube_phelia;
+mod vintage_cube_phlage;
+mod vintage_cube_pillage_the_bog;
+mod vintage_cube_plagon;
+mod vintage_cube_ponder;
+mod vintage_cube_portable_hole;
+mod vintage_cube_portal_to_phyrexia;
+mod vintage_cube_preacher_of_the_schism;
+mod vintage_cube_prismatic_ending;
+mod vintage_cube_psychic_frog;
+mod vintage_cube_quantum_riddler;
+mod vintage_cube_ragavan;
+mod vintage_cube_relic;
+mod vintage_cube_robber_of_the_rich;
+mod vintage_cube_saheeli;
+mod vintage_cube_screaming_nemesis;
+mod vintage_cube_scythecat_cub;
+mod vintage_cube_seasoned_pyromancer;
+mod vintage_cube_senseis_divining_top;
+mod vintage_cube_sentinel_nameless_city;
+mod vintage_cube_shelldock_isle;
+mod vintage_cube_sheltering_landscape;
+mod vintage_cube_shieldbreaker;
+mod vintage_cube_shifting_woodland;
+mod vintage_cube_six;
+mod vintage_cube_smugglers_copter;
+mod vintage_cube_spells;
+mod vintage_cube_static_prison;
+mod vintage_cube_stoneforge;
+mod vintage_cube_stormchasers_talent;
+mod vintage_cube_subtlety;
+mod vintage_cube_sunfall;
+mod vintage_cube_surveil_land;
+mod vintage_cube_sword_of_the_meek;
+mod vintage_cube_talisman_of_conviction;
+mod vintage_cube_talisman_of_progress;
+mod vintage_cube_talon_gates_of_madara;
+mod vintage_cube_tamiyo;
+mod vintage_cube_tamiyo_inquisitive_student;
+mod vintage_cube_tear_asunder;
+mod vintage_cube_teferi_time_raveler;
+mod vintage_cube_tendrils;
+mod vintage_cube_territorial_kavu;
+mod vintage_cube_tersa_lightshatter;
+mod vintage_cube_the_mightstone_and_weakstone;
+mod vintage_cube_thieving_skydiver;
+mod vintage_cube_thoughtseize;
+mod vintage_cube_thundertrap_trainer;
+mod vintage_cube_time_spiral;
+mod vintage_cube_tireless_tracker;
+mod vintage_cube_titania;
+mod vintage_cube_touch_spirit_realm;
+mod vintage_cube_troll_of_khazad_dum;
+mod vintage_cube_ugin_eye_of_the_storms;
+mod vintage_cube_ulvenwald_oddity;
+mod vintage_cube_underworld_breach;
+mod vintage_cube_unearth;
+mod vintage_cube_ursine;
+mod vintage_cube_urza;
+mod vintage_cube_urzas_bauble;
+mod vintage_cube_vampire_hexmage;
+mod vintage_cube_verge;
+mod vintage_cube_virtue_of_loyalty;
+mod vintage_cube_voice_of_victory;
+mod vintage_cube_vote;
+mod vintage_cube_walk_in_closet;
+mod vintage_cube_walking_ballista;
+mod vintage_cube_wandering_emperor;
+mod vintage_cube_witch_enchanter;
+mod vintage_cube_witherbloom_apprentice;
+mod vintage_cube_worldspine_wurm;
+mod vintage_cube_wrenn_and_six;
+mod vintage_cube_yawgmoths_will;
+mod vintage_cube_zirda;
 mod wards;
 mod while_source_tapped;
+mod word_of_binding;
+mod xenic_poltergeist;
 mod zone_effects;
 mod zone_move_replacements;
 
@@ -468,7 +547,7 @@ use copy_effects::{
     copied_grant_origin, copied_grant_source_game, resolve_copy_artifact, sole_granted_origin,
 };
 use countering_and_mana::{acceptance_attempt_counterspell, acceptance_cast_action_targeting};
-use delayed_triggers::drain_pending;
+use delayed_triggers::{drain_pending, installing_object};
 use modal_effects::cast_mode;
 use old_school_spells::game_with_test_fused_split;
 use removal_and_keywords::dust_to_dust_targets;

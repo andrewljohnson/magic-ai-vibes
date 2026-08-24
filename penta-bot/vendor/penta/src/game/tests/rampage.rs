@@ -21,7 +21,7 @@ fn rampage_board(walker: CardDefinitionId, blockers: usize) -> Game {
             cards::SAVANNAH_LIONS,
             PlayerId::Two,
         );
-        blocker.blocking = Some(GameObjectId(10_000));
+        blocker.blocking = vec![GameObjectId(10_000)];
         game.battlefield.push(blocker);
     }
     game

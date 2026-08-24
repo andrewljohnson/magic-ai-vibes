@@ -23,6 +23,7 @@ fn mana_actions(
                 source: from,
                 ability,
                 color,
+                ..
             } if from == source => Some((ability, color)),
             _ => None,
         })
@@ -39,6 +40,9 @@ fn activate(game: &mut Game, player: PlayerId, source: GameObjectId) {
             source,
             ability,
             color,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .expect("the mana ability activates");
@@ -145,6 +149,9 @@ fn implements_of_sacrifice_offers_each_color_twice_over() {
             source: implements_id,
             ability: offered[0].0,
             color: ManaColor::Black,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .expect("the mana ability activates");
@@ -175,6 +182,58 @@ fn the_payment_planner_does_not_reach_through_a_filter() {
     );
 }
 
+/// Standing Stones stacks three cost kinds on one mana ability: mana, a tap,
+/// and a life payment. All three are spent, and the colour is still chosen.
+#[test]
+fn standing_stones_spends_mana_a_tap_and_a_life() {
+    let mut game = ready_game();
+    game.turns_started[PlayerId::One.index()] = 1;
+    let stones = creature(10_000, cards::STANDING_STONES, PlayerId::One);
+    let stones_id = stones.card.id;
+    game.battlefield.push(stones);
+
+    assert!(
+        mana_actions(&game, PlayerId::One, stones_id).is_empty(),
+        "an empty pool cannot pay the {{1}}"
+    );
+
+    game.players[PlayerId::One.index()].mana_pool.colorless = 1;
+    // CR 118.4: a player may pay life down to zero, so one life is enough to
+    // pay one -- losing to a state-based action afterwards is their problem.
+    game.players[PlayerId::One.index()].life = 1;
+    assert_eq!(mana_actions(&game, PlayerId::One, stones_id).len(), 5);
+
+    game.players[PlayerId::One.index()].life = 20;
+    let offered = mana_actions(&game, PlayerId::One, stones_id);
+    assert_eq!(offered.len(), 5, "one activation per colour");
+
+    let before = game.players[PlayerId::One.index()].life;
+    game.apply(
+        PlayerId::One,
+        Action::ActivateManaAbility {
+            source: stones_id,
+            ability: offered[0].0,
+            color: ManaColor::Blue,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
+        },
+    )
+    .expect("the mana ability activates");
+    drain_pending(&mut game);
+
+    let pool = game.players[PlayerId::One.index()].mana_pool;
+    assert_eq!((pool.colorless, pool.blue), (0, 1), "one in, one out");
+    assert_eq!(game.players[PlayerId::One.index()].life, before - 1);
+    assert!(
+        game.battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == stones_id)
+            .expect("still there")
+            .tapped
+    );
+}
+
 #[test]
 fn every_filtering_identity_reports_complete_coverage() {
     let catalog = poc::catalog().expect("catalog builds");
@@ -183,6 +242,7 @@ fn every_filtering_identity_reports_complete_coverage() {
         cards::APPRENTICE_WIZARD,
         cards::COAL_GOLEM,
         cards::IMPLEMENTS_OF_SACRIFICE,
+        cards::STANDING_STONES,
     ] {
         let card = catalog.get(definition).expect("the card is cataloged");
         assert_eq!(

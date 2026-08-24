@@ -69,6 +69,27 @@ fn the_attackers_own_island_does_not_satisfy_the_clause() {
 }
 
 #[test]
+fn losing_the_restriction_ability_removes_the_attack_prohibition() {
+    let (mut game, attacker) = island_attacker(None);
+    assert!(
+        !can_attack(&game, attacker),
+        "the printed restriction applies"
+    );
+
+    attach_constant_resolved_characteristics(
+        &mut game,
+        attacker,
+        &[AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any)],
+        ContinuousEffectExpiration::Never,
+    );
+
+    assert!(
+        can_attack(&game, attacker),
+        "a resolved loses-all-abilities effect removes the static restriction"
+    );
+}
+
+#[test]
 fn every_newly_unblocked_island_creature_reports_complete_coverage() {
     let catalog = poc::catalog().expect("catalog builds");
     for definition in [

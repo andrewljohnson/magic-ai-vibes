@@ -51,8 +51,9 @@ fn tormods_crypt_exiles_only_the_target_players_graveyard() {
             source,
             ability: activated_ability_for(&game, source, 0),
             targets: activated_targets(Target::Player(PlayerId::Two)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();

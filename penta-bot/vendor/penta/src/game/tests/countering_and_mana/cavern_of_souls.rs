@@ -39,7 +39,9 @@ fn acceptance_play_cavern_choosing(game: &mut Game, creature_type: &str) -> Game
         .observe(PlayerId::One)
         .battlefield
         .into_iter()
-        .find(|candidate| candidate.definition == cards::CAVERN_OF_SOULS)
+        .find(|candidate| {
+            candidate.characteristics.card_definition() == Some(cards::CAVERN_OF_SOULS)
+        })
         .expect("Cavern entered after its creature type was chosen");
     assert_eq!(
         permanent.chosen_creature_type.as_deref(),
@@ -107,14 +109,16 @@ fn cavern_of_souls_requires_and_records_a_creature_type_choice() {
     let cavern = observed
         .battlefield
         .iter()
-        .find(|permanent| permanent.definition == cards::CAVERN_OF_SOULS)
+        .find(|permanent| {
+            permanent.characteristics.card_definition() == Some(cards::CAVERN_OF_SOULS)
+        })
         .expect("Cavern enters after the choice");
     assert_eq!(cavern.chosen_creature_type.as_deref(), Some("Angel"));
 }
 
 #[test]
 fn cavern_choices_ignore_noncreature_subtypes_on_creature_cards() {
-    let definition_id = CardDefinitionId(19_085);
+    let definition_id = CardDefinitionId::new(19_085);
     let mut equipment_creature = CardDefinition::new(
         definition_id,
         "Test equipment creature",
@@ -179,6 +183,9 @@ fn cavern_colored_mana_cannot_pay_for_a_nonmatching_creature() {
             source: cavern,
             ability,
             color: ManaColor::White,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -213,6 +220,9 @@ fn cavern_mana_spent_on_a_matching_creature_makes_it_uncounterable() {
             source: cavern,
             ability,
             color: ManaColor::White,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -227,7 +237,7 @@ fn cavern_mana_spent_on_a_matching_creature_makes_it_uncounterable() {
             .applied_effects
             .iter()
             .any(|effect| {
-                effect.effect == AppliedEffectDef::CannotBeCountered
+                effect.effect == AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)
                     && effect.source.is_some_and(|source| source.object == cavern)
             })
     );
@@ -253,6 +263,9 @@ fn generic_payment_prefers_eligible_cavern_mana_with_a_spell_rider() {
             source: cavern,
             ability,
             color: ManaColor::Blue,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -267,7 +280,7 @@ fn generic_payment_prefers_eligible_cavern_mana_with_a_spell_rider() {
         .last()
         .expect("Restoration Angel is on the stack");
     assert!(spell.applied_effects.iter().any(|effect| {
-        effect.effect == AppliedEffectDef::CannotBeCountered
+        effect.effect == AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)
             && effect.source.is_some_and(|source| source.object == cavern)
     }));
     assert_eq!(game.players[0].mana_pool.blue, 0);
@@ -287,6 +300,9 @@ fn cavern_mana_keeps_its_chosen_type_and_rider_after_cavern_leaves() {
             source: cavern,
             ability,
             color: ManaColor::White,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();
@@ -302,7 +318,7 @@ fn cavern_mana_keeps_its_chosen_type_and_rider_after_cavern_leaves() {
             .applied_effects
             .iter()
             .any(|effect| {
-                effect.effect == AppliedEffectDef::CannotBeCountered
+                effect.effect == AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)
                     && effect.source.is_some_and(|source| source.object == cavern)
             })
     );
@@ -346,7 +362,7 @@ fn automatic_payment_uses_cavern_when_its_rider_benefits_the_spell() {
             .applied_effects
             .iter()
             .any(|effect| {
-                effect.effect == AppliedEffectDef::CannotBeCountered
+                effect.effect == AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)
                     && effect.source.is_some_and(|source| source.object == cavern)
             })
     );
@@ -395,6 +411,9 @@ fn caverns_colorless_mana_is_unrestricted_and_has_no_countering_rider() {
             source: cavern,
             ability,
             color: ManaColor::Colorless,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
         },
     )
     .unwrap();

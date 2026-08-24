@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AbilityLocator, AbilityOriginSnapshot, AppliedEffectLocator, BasicLandTypeSnapshot,
-    ManaSourceSnapshot, TargetSelectionSnapshot, TriggerContextSnapshot,
+    DecisionCardOriginSnapshot, EffectResolutionContextSnapshot, FaceDownCharacteristicsSnapshot,
+    ManaSourceSnapshot, ObjectCharacteristicsSnapshot, ObjectKindSnapshot, TargetSelectionSnapshot,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -15,14 +16,36 @@ use super::{
 #[allow(clippy::struct_excessive_bools)]
 pub(in crate::game::state_checkpoint) struct StackSnapshot {
     pub(in crate::game::state_checkpoint) object_id: u32,
+    pub(in crate::game::state_checkpoint) kind: StackObjectKindSnapshot,
     pub(in crate::game::state_checkpoint) owner: usize,
+    pub(in crate::game::state_checkpoint) object_kind: ObjectKindSnapshot,
     pub(in crate::game::state_checkpoint) ability_payload: Option<StackAbilitySnapshot>,
     pub(in crate::game::state_checkpoint) requires_retired_object: bool,
     pub(in crate::game::state_checkpoint) has_runtime_overrides: bool,
     pub(in crate::game::state_checkpoint) applied_effects: Vec<AppliedStackEffectSnapshot>,
     pub(in crate::game::state_checkpoint) text_changes: Vec<BasicLandTypeChangeSnapshot>,
     pub(in crate::game::state_checkpoint) colors: Option<[bool; 5]>,
+    /// Which colours paid for this spell, for converge. Additive: a payload
+    /// written before converge existed carries none, and reconstructs as a
+    /// spell nothing was spent on.
+    #[serde(default, skip_serializing_if = "no_colors_spent")]
+    pub(in crate::game::state_checkpoint) colors_of_mana_spent: [bool; 5],
+    /// Additive payment count used by Compleated. Older checkpoints restore
+    /// an ordinary mana-paid spell.
+    #[serde(default, skip_serializing_if = "super::is_zero_u16")]
+    pub(in crate::game::state_checkpoint) phyrexian_symbols_paid_with_life: u16,
     pub(in crate::game::state_checkpoint) cast_via_flashback: bool,
+    /// Additive: a payload written before the flag existed restores as
+    /// false, which is what an ordinary sorcery-speed cast means anyway.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(in crate::game::state_checkpoint) cast_at_instant_speed: bool,
+    /// Which zone this spell was cast from, by its stable label. Additive:
+    /// a checkpoint written before the zone was recorded restores as
+    /// nothing, which is what a permanent nobody cast carries anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::game::state_checkpoint) cast_from_zone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::game::state_checkpoint) face_down: Option<FaceDownCharacteristicsSnapshot>,
     pub(in crate::game::state_checkpoint) is_copy: bool,
 }
 
@@ -37,19 +60,32 @@ pub(in crate::game::state_checkpoint) struct BasicLandTypeChangeSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(in crate::game::state_checkpoint) struct StackAbilitySnapshot {
     pub(in crate::game::state_checkpoint) ability_locator: Option<AbilityLocator>,
+    pub(in crate::game::state_checkpoint) target_definition_locator: Option<AbilityLocator>,
     pub(in crate::game::state_checkpoint) origin: AbilityOriginSnapshot,
+    pub(in crate::game::state_checkpoint) presentation: ObjectCharacteristicsSnapshot,
     pub(in crate::game::state_checkpoint) target_selections: Vec<TargetSelectionSnapshot>,
-    pub(in crate::game::state_checkpoint) context: TriggerContextSnapshot,
+    pub(in crate::game::state_checkpoint) context: EffectResolutionContextSnapshot,
     pub(in crate::game::state_checkpoint) mode_effects: Vec<ScopedEffectSnapshot>,
     pub(in crate::game::state_checkpoint) x: u16,
+    /// Where the ability's source card sits when it is somewhere the viewer
+    /// cannot read -- a library, or somebody else's hand, which is where a
+    /// Miracle's revealed card is while its trigger waits.
+    ///
+    /// The importer mints those zones from the supplied hypothesis, so the
+    /// source's own object id means nothing there and the position is what
+    /// binds the two. Additive: absent for every source on a battlefield, in
+    /// a graveyard, or otherwise already public.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::game::state_checkpoint) source_origin: Option<DecisionCardOriginSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)]
 pub(in crate::game::state_checkpoint) struct DetachedStackSnapshot {
     pub(in crate::game::state_checkpoint) object_id: u32,
     pub(in crate::game::state_checkpoint) kind: StackObjectKindSnapshot,
-    pub(in crate::game::state_checkpoint) definition: u16,
+    pub(in crate::game::state_checkpoint) object_kind: ObjectKindSnapshot,
     pub(in crate::game::state_checkpoint) owner: usize,
     pub(in crate::game::state_checkpoint) source: Option<u32>,
     pub(in crate::game::state_checkpoint) ability_payload: Option<StackAbilitySnapshot>,
@@ -60,7 +96,27 @@ pub(in crate::game::state_checkpoint) struct DetachedStackSnapshot {
     pub(in crate::game::state_checkpoint) applied_effects: Vec<AppliedStackEffectSnapshot>,
     pub(in crate::game::state_checkpoint) text_changes: Vec<BasicLandTypeChangeSnapshot>,
     pub(in crate::game::state_checkpoint) colors: Option<[bool; 5]>,
+    /// Which colours paid for this spell, for converge. Additive: a payload
+    /// written before converge existed carries none, and reconstructs as a
+    /// spell nothing was spent on.
+    #[serde(default, skip_serializing_if = "no_colors_spent")]
+    pub(in crate::game::state_checkpoint) colors_of_mana_spent: [bool; 5],
+    /// Additive payment count used by Compleated. Older checkpoints restore
+    /// an ordinary mana-paid spell.
+    #[serde(default, skip_serializing_if = "super::is_zero_u16")]
+    pub(in crate::game::state_checkpoint) phyrexian_symbols_paid_with_life: u16,
     pub(in crate::game::state_checkpoint) cast_via_flashback: bool,
+    /// Additive: a payload written before the flag existed restores as
+    /// false, which is what an ordinary sorcery-speed cast means anyway.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(in crate::game::state_checkpoint) cast_at_instant_speed: bool,
+    /// Which zone this spell was cast from, by its stable label. Additive:
+    /// a checkpoint written before the zone was recorded restores as
+    /// nothing, which is what a permanent nobody cast carries anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::game::state_checkpoint) cast_from_zone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(in crate::game::state_checkpoint) face_down: Option<FaceDownCharacteristicsSnapshot>,
     pub(in crate::game::state_checkpoint) is_copy: bool,
 }
 
@@ -71,12 +127,13 @@ pub(in crate::game::state_checkpoint) struct AppliedStackEffectSnapshot {
     pub(in crate::game::state_checkpoint) effect: AppliedEffectLocator,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::game::state_checkpoint) enum StackObjectKindSnapshot {
     Spell,
     ActivatedAbility,
     TriggeredAbility,
+    ReplacementEffect,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -102,7 +159,7 @@ pub(in crate::game::state_checkpoint) enum SpellFormSnapshot {
     Combined { part_ids: Vec<u8> },
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(in crate::game::state_checkpoint) struct ManaCostSnapshot {
     pub(in crate::game::state_checkpoint) generic: u16,
@@ -111,7 +168,15 @@ pub(in crate::game::state_checkpoint) struct ManaCostSnapshot {
     pub(in crate::game::state_checkpoint) black: u16,
     pub(in crate::game::state_checkpoint) red: u16,
     pub(in crate::game::state_checkpoint) green: u16,
+    /// Additive: a checkpoint written before `{C}` existed restores as zero,
+    /// which is what every cost without one carries anyway.
+    #[serde(default, skip_serializing_if = "super::is_zero_u16")]
+    pub(in crate::game::state_checkpoint) colorless: u16,
     pub(in crate::game::state_checkpoint) hybrid: Vec<u16>,
+    /// Flexible symbols added after ordinary two-color hybrid. Older
+    /// checkpoints carry none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(in crate::game::state_checkpoint) additional_flexible: Vec<u16>,
     pub(in crate::game::state_checkpoint) variable_x: bool,
     pub(in crate::game::state_checkpoint) x_multiplier: u16,
 }
@@ -121,4 +186,13 @@ pub(in crate::game::state_checkpoint) struct ManaCostSnapshot {
 pub(in crate::game::state_checkpoint) struct ScopedEffectSnapshot {
     pub(in crate::game::state_checkpoint) path: Vec<usize>,
     pub(in crate::game::state_checkpoint) target_base: usize,
+}
+
+/// Elides the common case: nothing but a converge spell records what paid
+/// for it, so every other stack object writes no field at all.
+// serde hands this a reference, and clippy would rather it were a value;
+// the wrapper is the cheapest way to satisfy both.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn no_colors_spent(colors: &[bool; 5]) -> bool {
+    colors.iter().all(|spent| !*spent)
 }

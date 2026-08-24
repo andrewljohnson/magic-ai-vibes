@@ -1,12 +1,40 @@
+use super::continuous_effects::StaticEffectKind;
 use super::{
-    AbilityDef, AbilityId, AbilityOrigin, Action, ActionError, CardBehavior, CardType,
-    CharacteristicContext, CombatDamageStage, CounterKind, DecisionVisibility, EmblemObservation,
-    Game, GameEvent, GameObjectId, GameResult, KeywordAbility, ManaColor, PermanentObservation,
-    PlayerId, PlayerObservation, Pregame, StackObservation, Step, WinReason, ZoneKind,
-    combinations, public_cards,
+    AbilityDef, AbilityOrigin, Action, ActionError, ActivationChoices, CardCounterObservation,
+    CardStructure, CardType, CharacteristicContext, CombatDamageStage, ControlFlow, CounterKind,
+    CounterObservation, DecisionVisibility, DoubleFacedKind, EmblemObservation, Game, GameEvent,
+    GameObjectId, GameResult, ManaActivationChoices, ObjectCharacteristics, ObjectKind, Permanent,
+    PermanentObservation, PhysicalFaceObservation, PhysicalFaceSide, PlayerId, PlayerObservation,
+    Pregame, StackObservation, Step, WinReason, ZoneKind, combinations, public_cards,
 };
 
 impl Game {
+    fn observed_card_counters(&self, viewer: PlayerId) -> Vec<CardCounterObservation> {
+        self.players[viewer.index()]
+            .hand
+            .iter()
+            .chain(self.players.iter().flat_map(|player| &player.graveyard))
+            .chain(
+                self.players
+                    .iter()
+                    .flat_map(|player| &player.exile)
+                    .filter(|card| card.owner == viewer || !self.exiled_card_is_face_down(card.id)),
+            )
+            .filter(|card| !card.counters.is_empty())
+            .map(|card| CardCounterObservation {
+                object: card.id,
+                counters: card
+                    .counters
+                    .iter()
+                    .map(|(kind, count)| CounterObservation {
+                        name: kind.name().to_owned(),
+                        count,
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
     #[must_use]
     pub const fn result(&self) -> Option<GameResult> {
         self.result
@@ -18,7 +46,7 @@ impl Game {
     pub fn regular_combat_damage_pending(&self) -> bool {
         self.result.is_none()
             && self.step == Step::CombatDamage
-            && self.pending_combat_attackers.is_empty()
+            && self.pending_combat_assignments.is_empty()
             && matches!(
                 &self.combat_damage_stage,
                 CombatDamageStage::FirstStrike { .. }
@@ -39,7 +67,7 @@ impl Game {
         if let Some(decision) = self.pending_decisions.first() {
             return Some(decision.observation.player);
         }
-        if let Some(attacker) = self.pending_combat_attackers.first().copied() {
+        if let Some(attacker) = self.pending_combat_assignments.first().copied() {
             return Some(self.combat_damage_assigner(attacker));
         }
         if let Some(pregame) = self.pregame {
@@ -145,10 +173,18 @@ impl Game {
                         decision: decision.observation.id,
                     });
                 }
+                // "You may cast that card" is answered by casting it, not by
+                // answering the decision, so the cast stands beside the
+                // decline rather than behind it.
+                if let Some(offer) = decision.continuation.cast_offer()
+                    && offer.player == player
+                {
+                    self.add_offered_cast_actions(offer, &mut actions);
+                }
             }
             return actions;
         }
-        if let Some(attacker) = self.pending_combat_attackers.first().copied() {
+        if let Some(attacker) = self.pending_combat_assignments.first().copied() {
             if player == self.combat_damage_assigner(attacker) {
                 actions.extend(self.combat_assignment_actions(attacker));
             }
@@ -203,7 +239,6 @@ impl Game {
         }
         if self.step == Step::DeclareAttackers && !self.attackers_declared {
             if player == self.active_player {
-                let moat_active = self.count_behavior(CardBehavior::Moat) > 0;
                 // A creature that attacks each combat if able is only
                 // required to when it actually can, so the same conditions
                 // that offer it as an attacker are what make it compulsory.
@@ -211,23 +246,27 @@ impl Game {
                     permanent.controller == player
                         && !permanent.tapped
                         && !permanent.attacking
-                        && self.can_attack_with_moat(permanent, moat_active)
-                        && self.permanent_has_executable_keyword(
-                            permanent,
-                            KeywordAbility::AttacksEachCombatIfAble,
-                        )
+                        && self.must_attack_if_able(permanent)
                 });
-                if !a_creature_must_attack {
+                if !a_creature_must_attack && self.attack_declaration_is_payable(player) {
                     actions.push(Action::FinishDeclaringAttackers);
                 }
-                actions.extend(self.attacker_actions(player, moat_active));
+                actions.extend(self.attacker_actions(player));
+                actions.extend(self.band_actions(player));
+                actions.extend(self.exert_actions(player));
             }
             return actions;
         }
         if self.step == Step::DeclareBlockers && !self.blockers_declared {
             if player == self.active_player.opponent() {
-                actions.push(Action::FinishDeclaringBlockers);
-                actions.extend(self.blocker_actions(player));
+                let blocks = self.blocker_actions(player);
+                if !self.block_requirement_outstanding(&blocks)
+                    && !self.menace_is_unsatisfied(player)
+                    && self.block_declaration_is_payable(player)
+                {
+                    actions.push(Action::FinishDeclaringBlockers);
+                }
+                actions.extend(blocks);
             }
             return actions;
         }
@@ -237,12 +276,13 @@ impl Game {
 
         actions.push(Action::PassPriority);
         self.add_mana_actions(player, &mut actions);
-        if self.channel_active[player.index()] && self.players[player.index()].life > 1 {
-            actions.push(Action::PayLifeForMana);
-        }
         self.add_land_actions(player, &mut actions);
         self.add_spell_actions(player, &mut actions);
         self.add_ability_actions(player, &mut actions);
+        self.add_face_up_actions(player, &mut actions);
+        self.add_foretell_actions(player, &mut actions);
+        self.add_plot_actions(player, &mut actions);
+        self.add_unlock_door_actions(player, &mut actions);
         actions
     }
 
@@ -296,6 +336,18 @@ impl Game {
     }
 
     fn apply_legal_action(&mut self, player: PlayerId, action: Action) {
+        // Declaration members arrive as separate UI actions, but CR 508.1
+        // and 509.1 make each completed set one turn-based action. Do not let
+        // state-based actions or state triggers inspect a partial set.
+        let declaration_is_still_open = matches!(
+            &action,
+            Action::DeclareAttacker { .. }
+                // Exerting is part of the declaration that is still open, so
+                // the trigger it captures waits for the rest of it the way
+                // every other attack trigger does.
+                | Action::ExertAttacker { .. }
+                | Action::DeclareBlocker { .. }
+        );
         match action {
             Action::KeepHand => self.keep_hand(player),
             Action::TakeMulligan => self.take_mulligan(player),
@@ -306,35 +358,65 @@ impl Game {
             }
             Action::CancelDecision { decision } => self.cancel_decision(decision),
             Action::ChooseUntap { permanents } => self.choose_untap(player, &permanents),
+            Action::TurnFaceUp { permanent } => self.turn_face_up(player, permanent),
+            Action::Foretell { card } => self.foretell(player, card),
+            Action::Plot { card } => self.plot(player, card),
+            Action::UnlockDoor { room, door } => self.unlock_door(player, room, door),
             Action::PassPriority => self.pass_priority(player),
             Action::PlayLand { card, option } => self.play_land(player, card, option),
             Action::ActivateManaAbility {
                 source,
                 ability,
                 color,
+                counters_removed,
+                cost_object,
+                combination,
             } => {
-                self.activate_mana_source(player, source, ability, color);
+                self.activate_mana_source(
+                    player,
+                    source,
+                    ability,
+                    color,
+                    ManaActivationChoices {
+                        counters_removed,
+                        cost_object,
+                        combination,
+                    },
+                );
             }
             Action::PayLifeForMana => {
-                self.players[player.index()].life -= 1;
-                self.add_unrestricted_mana(player, ManaColor::Colorless, 1);
-                self.consecutive_passes = 0;
+                unreachable!("the legacy Channel action is never legal")
             }
             Action::CastSpell {
                 card,
                 choices,
                 sacrifices,
-            } => self.cast_spell(player, card, &choices, &sacrifices),
+            } => {
+                self.cast_spell(player, card, &choices, &sacrifices);
+            }
             Action::ActivateAbility {
                 source,
                 ability,
                 targets,
-                cost_object,
+                cost_objects,
                 x,
-            } => self.activate_ability(player, source, ability, targets, cost_object, x),
+                modes,
+            } => self.activate_ability(
+                player,
+                source,
+                ability,
+                ActivationChoices {
+                    targets,
+                    cost_objects: &cost_objects,
+                    x,
+                    modes: &modes,
+                },
+            ),
             Action::DeclareAttacker { attacker, defender } => {
                 self.declare_attacker(attacker, defender);
             }
+            Action::BandAttackers { first, second } => self.form_band(first, second),
+            Action::ExertAttacker { attacker } => self.exert_attacker(player, attacker),
             Action::FinishDeclaringAttackers => self.finish_declaring_attackers(),
             Action::DeclareBlocker { blocker, attacker } => {
                 self.declare_blocker(blocker, attacker);
@@ -349,7 +431,7 @@ impl Game {
                 reason: WinReason::OpponentConceded,
             }),
         }
-        if self.result.is_none() {
+        if self.result.is_none() && !declaration_is_still_open {
             self.finish_rules_procedure();
         }
     }
@@ -409,35 +491,195 @@ impl Game {
     pub(super) fn observed_emblems(&self) -> Vec<EmblemObservation> {
         self.emblems
             .iter()
-            .map(|emblem| EmblemObservation {
-                id: emblem.card.id,
-                controller: emblem.controller,
-                name: self.catalog.get(emblem.card.definition).map_or_else(
-                    || "Unknown emblem".to_owned(),
-                    |definition| definition.name.clone(),
-                ),
-                source_ability: emblem.emblem_source.unwrap_or(AbilityOrigin::Printed {
-                    definition: emblem.card.definition,
-                    part: emblem.presented,
-                    ability: AbilityId::PRIMARY,
-                }),
-                ability_texts: self
-                    .catalog
-                    .get(emblem.card.definition)
-                    .and_then(|definition| definition.part(emblem.presented))
-                    .into_iter()
-                    .flat_map(|part| part.rules.ability_clauses().iter())
-                    .map(|ability| ability.text.to_owned())
-                    .collect(),
+            .map(|emblem| {
+                let ObjectCharacteristics::Emblem { emblem: authored } =
+                    Self::effective_rules_source(emblem)
+                else {
+                    unreachable!("an emblem has creator-owned emblem characteristics")
+                };
+                EmblemObservation {
+                    id: emblem.card.id,
+                    controller: emblem.controller,
+                    name: authored.name().to_owned(),
+                    source_ability: emblem
+                        .emblem_source
+                        .expect("a created emblem records its creating ability"),
+                    ability_texts: authored
+                        .abilities()
+                        .iter()
+                        .map(|ability| ability.text.to_owned())
+                        .collect(),
+                }
             })
             .collect()
     }
 
     #[must_use]
+    /// Physical topology is public while the permanent is face up, even when
+    /// a copy effect supplies unrelated effective characteristics.
+    fn physical_face_observation(&self, permanent: &Permanent) -> Option<PhysicalFaceObservation> {
+        if permanent.face_down.is_some() {
+            return None;
+        }
+        let (kind, front, back) = match permanent.card.definition {
+            ObjectKind::Card(definition) => {
+                let CardStructure::DoubleFaced { front, back, kind } =
+                    &self.catalog.get(definition)?.structure
+                else {
+                    return None;
+                };
+                (*kind, *front, *back)
+            }
+            ObjectKind::Token => {
+                if let Some(faces) = &permanent.double_faced_token_copy {
+                    (faces.kind, faces.front_part, faces.back_part)
+                } else {
+                    let token = permanent.token_characteristics?;
+                    let front = token.primary_part_id();
+                    (
+                        DoubleFacedKind::Transforming,
+                        front,
+                        token.other_face(front)?,
+                    )
+                }
+            }
+            ObjectKind::Emblem | ObjectKind::Ability => return None,
+        };
+        let side = if permanent.presented == front {
+            PhysicalFaceSide::Front
+        } else if permanent.presented == back {
+            PhysicalFaceSide::Back
+        } else {
+            return None;
+        };
+        Some(PhysicalFaceObservation { kind, side })
+    }
+
+    /// One permanent as `viewer` sees it. Split out of `observe` because the
+    /// per-permanent view is long on its own and reads better beside the
+    /// hidden-information rule it enforces.
+    fn observe_permanent(&self, permanent: &Permanent, viewer: PlayerId) -> PermanentObservation {
+        let types = self.permanent_types(permanent).unwrap_or_default();
+        let stats = self.creature_stats(permanent);
+        let (power, toughness) = stats.map_or((None, None), |stats| {
+            (Some(stats.power), Some(stats.toughness))
+        });
+        let flying = self.has_flying(permanent);
+        // A face-down permanent's mechanism-owned body is public information
+        // and its physical card is private: its controller may look at the
+        // card, and nobody else may.
+        let characteristics = match permanent.face_down {
+            Some(face_down) if permanent.controller != viewer => {
+                ObjectCharacteristics::face_down(face_down)
+            }
+            Some(_) => Self::unmasked_rules_source(permanent),
+            None => Self::effective_rules_source(permanent),
+        };
+        PermanentObservation {
+            id: permanent.card.id,
+            characteristics,
+            token: permanent.card.definition.is_token(),
+            has_individual_state: self.permanent_has_individual_state(permanent),
+            controller: permanent.controller,
+            types,
+            face_down: permanent.face_down.is_some(),
+            physical_face: self.physical_face_observation(permanent),
+            phased_out: self
+                .phased_out
+                .iter()
+                .any(|phased| phased.card.id == permanent.card.id),
+            chosen_creature_type: permanent.chosen_creature_type.clone(),
+            chosen_basic_land_type: permanent.chosen_basic_land_type,
+            chosen_card_name: permanent.chosen_card_name.clone(),
+            tapped: permanent.tapped,
+            power,
+            toughness,
+            damage: permanent.damage,
+            counters: permanent
+                .counters
+                .iter()
+                .map(|(kind, count)| CounterObservation {
+                    name: kind.name().to_owned(),
+                    count,
+                })
+                .collect(),
+            loyalty: types
+                .contains(CardType::Planeswalker)
+                .then(|| permanent.counters(CounterKind::Loyalty)),
+            loyalty_ability_used_this_turn: permanent.activated_loyalty_this_turn,
+            attack_defender: permanent.attack_defender,
+            attacking: permanent.attacking,
+            blocked_this_combat: permanent.blocked,
+            blocking: permanent.blocking.clone(),
+            blocking_this_combat: permanent.is_blocking_this_combat(),
+            attacking_band: permanent.attacking_band,
+            flying,
+            can_attack: stats.is_some() && self.can_attack(permanent),
+            entered_this_turn: self.turns_started[permanent.controller.index()]
+                == permanent.entered_controller_turn,
+        }
+    }
+
+    /// Whether this permanent carries a relationship or live effect whose
+    /// identity matters even when the compact card presentation happens to
+    /// match another permanent. This is deliberately conservative: keeping
+    /// two cards apart is harmless, while merging unlike game objects hides
+    /// which one an action, trigger, or attachment belongs to.
+    fn permanent_has_individual_state(&self, permanent: &Permanent) -> bool {
+        let id = permanent.card.id;
+        let attached = permanent.attached_to.is_some()
+            || self
+                .battlefield
+                .iter()
+                .any(|candidate| candidate.attached_to == Some(id));
+        let stored_effect = permanent
+            .resolved_continuous_effects
+            .iter()
+            .any(|effect| self.resolved_continuous_effect_is_active(effect));
+        let stateful = attached
+            || stored_effect
+            || permanent.detained_until_turn_of.is_some()
+            || permanent.skipped_untap_steps > 0
+            || permanent.control_reverts_to.is_some()
+            || permanent.control_source.is_some()
+            || permanent.destroy_at_end
+            || !permanent.temporary_keywords.is_empty()
+            || !permanent.keywords_until_upkeep_of.is_empty()
+            || !permanent.activations_this_turn.is_empty()
+            || !permanent.exhausted.is_empty()
+            || !permanent.triggers_this_turn.is_empty()
+            || !permanent.resolutions_this_turn.is_empty()
+            || !permanent.counters.is_empty()
+            || permanent.reconfigured_timestamp.is_some()
+            || permanent.exile_instead_of_dying
+            || permanent.copy_effect.is_some()
+            || permanent.copy_expiration.is_some()
+            || permanent.copied_from.is_some()
+            || !permanent.text_changes.is_empty()
+            || permanent.regeneration_shields > 0
+            || permanent.exerted
+            || permanent.saddled
+            || !permanent.damage_sources.is_empty()
+            || permanent.paired_with.is_some()
+            || permanent.created_by.is_some()
+            || permanent.chosen_player.is_some();
+        if stateful {
+            return true;
+        }
+
+        self.visit_static_applied_effects(permanent, StaticEffectKind::Any, |effect| {
+            if effect.source == id {
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
+        })
+        .is_break()
+    }
+
     pub fn observe(&self, viewer: PlayerId) -> PlayerObservation {
         let player = &self.players[viewer.index()];
         let opponent = &self.players[viewer.opponent().index()];
-        let moat_active = self.count_behavior(CardBehavior::Moat) > 0;
         PlayerObservation {
             viewer,
             turn: self.turn,
@@ -447,7 +689,25 @@ impl Game {
             step: self.step,
             regular_combat_damage_pending: self.regular_combat_damage_pending(),
             life_totals: [self.players[0].life, self.players[1].life],
-            poison_counters: [self.players[0].poison, self.players[1].poison],
+            poison_counters: [
+                self.players[0].counters.count(CounterKind::Poison),
+                self.players[1].counters.count(CounterKind::Poison),
+            ],
+            energy_counters: [
+                self.players[0].counters.count(CounterKind::Energy),
+                self.players[1].counters.count(CounterKind::Energy),
+            ],
+            counters: [PlayerId::One, PlayerId::Two].map(|player| {
+                self.players[player.index()]
+                    .counters
+                    .iter()
+                    .map(|(kind, count)| CounterObservation {
+                        name: kind.name().to_owned(),
+                        count,
+                    })
+                    .collect()
+            }),
+            monarch: self.monarch,
             mana_pools: [self.players[0].mana_pool, self.players[1].mana_pool],
             hand: player
                 .hand
@@ -457,51 +717,35 @@ impl Game {
             opponent_hand_size: opponent.hand.len(),
             last_seen_hand: self.last_seen_hands[viewer.index()].clone(),
             library_sizes: [self.players[0].library.len(), self.players[1].library.len()],
+            revealed_library_top: self
+                .player_rule_applies(viewer, crate::card::AppliedRuleDef::MayLookAtTopOfLibrary)
+                .then(|| player.library.last().map(|card| (card.id, card.definition)))
+                .flatten(),
             graveyards: [
                 public_cards(&self.players[0].graveyard),
                 public_cards(&self.players[1].graveyard),
             ],
+            // A foretold card lies face down, so the opponent's is left out
+            // of the list entirely and counted instead -- the same way a
+            // hand is a size rather than a list. Your own are listed: you
+            // know what you exiled.
             exiles: [
-                public_cards(&self.players[0].exile),
-                public_cards(&self.players[1].exile),
+                self.observed_exile(PlayerId::One, viewer),
+                self.observed_exile(PlayerId::Two, viewer),
             ],
+            face_down_exile_sizes: [
+                self.face_down_exile_size(PlayerId::One),
+                self.face_down_exile_size(PlayerId::Two),
+            ],
+            card_counters: self.observed_card_counters(viewer),
+            // Phased-out permanents come last and carry a flag: they are
+            // visible to both players, and only the rules treat them as
+            // absent. Reconstruction relies on this order.
             battlefield: self
                 .battlefield
                 .iter()
-                .map(|permanent| {
-                    let types = self.permanent_types(permanent).unwrap_or_default();
-                    let stats = self.creature_stats(permanent);
-                    let (power, toughness) = stats.map_or((None, None), |stats| {
-                        (Some(stats.power), Some(stats.toughness))
-                    });
-                    let flying = self.has_flying(permanent);
-                    PermanentObservation {
-                        id: permanent.card.id,
-                        definition: permanent.card.definition,
-                        presented: permanent.presented,
-                        controller: permanent.controller,
-                        types,
-                        chosen_creature_type: permanent.chosen_creature_type.clone(),
-                        chosen_card_name: permanent.chosen_card_name.clone(),
-                        tapped: permanent.tapped,
-                        power,
-                        toughness,
-                        damage: permanent.damage,
-                        loyalty: types
-                            .contains(CardType::Planeswalker)
-                            .then(|| permanent.counters(CounterKind::Loyalty)),
-                        loyalty_ability_used_this_turn: permanent.activated_loyalty_this_turn,
-                        attack_defender: permanent.attack_defender,
-                        attacking: permanent.attacking,
-                        blocked_this_combat: permanent.blocked,
-                        blocking: permanent.blocking,
-                        flying,
-                        can_attack: stats.is_some()
-                            && self.can_attack_creature(permanent, moat_active, flying),
-                        entered_this_turn: self.turns_started[permanent.controller.index()]
-                            == permanent.entered_controller_turn,
-                    }
-                })
+                .chain(self.phased_out.iter())
+                .map(|permanent| self.observe_permanent(permanent, viewer))
                 .collect(),
             emblems: self.observed_emblems(),
             stack: self
@@ -513,11 +757,18 @@ impl Game {
                     source: object.source,
                     ability: object.ability_origin(),
                     ability_text: object.ability_text().map(str::to_owned),
-                    definition: object.presentation_definition(),
+                    // A spell cast face down has its mechanism-owned public
+                    // values; only its controller knows which card it is.
+                    characteristics: match object.face_down {
+                        Some(face_down) if object.controller != viewer => {
+                            ObjectCharacteristics::face_down(face_down)
+                        }
+                        Some(_) | None => object.presentation(),
+                    },
                     controller: object.controller,
                     counterable: self.can_be_countered(object),
                     signature: object.signature.clone(),
-                    targets: object.targets(),
+                    targets: object.declared_targets(),
                     chosen_permanents: object.chosen_permanents.clone(),
                     x: object.x(),
                 })
@@ -543,9 +794,17 @@ impl Game {
         source: GameObjectId,
         origin: AbilityOrigin,
     ) -> Option<AbilityDef> {
+        if let Some(ongoing) = self
+            .ongoing_effects
+            .iter()
+            .find(|ongoing| ongoing.source.object == source && ongoing.source.ability == origin)
+        {
+            return Some(ongoing.ability);
+        }
         if let Some(permanent) = self
             .battlefield
             .iter()
+            .chain(self.emblems.iter())
             .find(|permanent| permanent.card.id == source)
         {
             return self

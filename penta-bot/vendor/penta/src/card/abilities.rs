@@ -4,17 +4,23 @@
 //! intrinsic rule, or grant site assigns identity when it attaches the clause.
 
 use super::model::{
-    AbilityCostDef, AbilityCostList, AbilityCoverageDef, AbilityDef, AbilityTargetDef,
-    AbilityTargetPredicate, ActivationTimingDef, AddManaEffectDef, AlternativeCastKindDef,
-    AnimationDef, AppliedEffectDef, BasicLandType, BattlefieldEntryModificationDef, CardType,
-    CardTypeSet, ConditionDef, CostDef, CounterKind, DeclarativeAbilityDef, EffectDef,
-    EffectDurationDef, EffectRecipientDef, KeywordAbility, ManaColor, ManaCost, ObjectPredicateDef,
-    ObjectQueryDef, PaymentDef, PlayerRelation, ReplacementAbilityDef, ReplacementEffectDef,
-    ReplacementEventDef, ScaledValueDef, ShieldCoverageDef, TriggerEventDef, TurnStepDef, ValueDef,
-    ZoneKind,
+    AbilityCostDef, AbilityCostList, AbilityDef, AbilityTargetDef, AbilityTargetPredicate,
+    ActivationTimingDef, AddManaEffectDef, AlternativeCastKindDef, AppliedEffectDef,
+    AppliedRuleDef, BandingQuality, BasicLandType, BattlefieldEntryModificationDef,
+    CardChoiceSourceDef, CardType, CardTypeSet, ChoiceVisibilityDef, ChooseDef, ColorSet,
+    ComparisonDef, ConditionDef, CounterKind, DamageEventMatcherDef, DamagePreventionDef,
+    DamageRecipientMatcherDef, DiscardFollowUpDef, DiscardSelectionDef, EffectDef,
+    EffectPaymentDef, EffectRecipientDef, InstalledTriggerDef, InstalledTriggerLifetimeDef,
+    KeywordAbility, ManaColor, ManaCost, ObjectChoiceBindingDef, ObjectCountConditionDef,
+    ObjectPredicateDef, ObjectQueryDef, ObjectRefDef, ObjectSetDef,
+    OptionalAdditionalCostAbilityDef, OptionalAdditionalCostKindDef, PartitionItemsDef, PayOrDef,
+    PlayerRefDef, PlayerRelation, PlayerSetDef, ReplacementAbilityDef, ReplacementConditionDef,
+    ReplacementEffectDef, ReplacementEventDef, ResolvedEffectDurationDef, SacrificedAmountDef,
+    ScaledValueDef, SpellAdditionalCostDef, SpellResolutionDestinationDef, SplitIntoPilesDef,
+    TokenCopyExceptionsDef, TriggerConditionDef, TriggerEventDef, TurnStepDef, ValueDef, ZoneKind,
+    ZonePlacement,
 };
-use crate::ids::{ChoiceIndex, TargetIndex};
-
+use crate::ids::{ObjectBindingIndex, ObjectSetBindingIndex, TargetIndex};
 /// The target an "Enchant creature" Aura spell chooses.
 pub static ENCHANT_CREATURE_TARGET: [AbilityTargetDef; 1] =
     [AbilityTargetDef::exactly_one_permanent(
@@ -33,17 +39,54 @@ pub static ENCHANT_ENCHANTMENT_TARGET: [AbilityTargetDef; 1] =
         ObjectPredicateDef::HasType(CardType::Enchantment),
     )];
 
-/// An Aura's "at the beginning of the upkeep of enchanted <thing>'s
-/// controller" trigger. The host's controller is the one whose upkeep this
-/// watches, which is not the Aura's controller once a host changes hands.
+/// A source permanent's own enters-the-battlefield trigger.
 #[must_use]
-pub const fn enchanted_controller_upkeep(text: &'static str, effect: EffectDef) -> AbilityDef {
-    AbilityDef::triggered(
+pub const fn enters_trigger(text: &'static str, effect: EffectDef) -> AbilityDef {
+    enters_trigger_with_targets(text, &[], effect)
+}
+
+/// A targeted source permanent's own enters-the-battlefield trigger.
+#[must_use]
+pub const fn enters_trigger_with_targets(
+    text: &'static str,
+    targets: &'static [AbilityTargetDef],
+    effect: EffectDef,
+) -> AbilityDef {
+    AbilityDef::triggered_with_targets(
         text,
-        TriggerEventDef::StepBegins {
-            step: TurnStepDef::Upkeep,
-            player: PlayerRelation::ControllerOfAttachedPermanent,
-        },
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::Source,
+            None,
+            Some(ZoneKind::Battlefield),
+        ),
+        targets,
+        effect,
+    )
+}
+
+/// A source permanent's own battlefield-to-graveyard trigger. The helper is
+/// named for the common creature wording, but it also fits noncreature
+/// permanents that trigger when put into a graveyard from the battlefield.
+#[must_use]
+pub const fn dies_trigger(text: &'static str, effect: EffectDef) -> AbilityDef {
+    dies_trigger_with_targets(text, &[], effect)
+}
+
+/// A targeted source permanent's own battlefield-to-graveyard trigger.
+#[must_use]
+pub const fn dies_trigger_with_targets(
+    text: &'static str,
+    targets: &'static [AbilityTargetDef],
+    effect: EffectDef,
+) -> AbilityDef {
+    AbilityDef::triggered_with_targets(
+        text,
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::Source,
+            Some(ZoneKind::Battlefield),
+            Some(ZoneKind::Graveyard),
+        ),
+        targets,
         effect,
     )
 }
@@ -67,24 +110,16 @@ pub const fn aura_spell(text: &'static str, targets: &'static [AbilityTargetDef]
     )
 }
 
-/// Mishra's Factory's 2/2 Assembly-Worker artifact creature. The card's
-/// animation still resolves through its legacy immediate path, which reads
-/// this definition rather than restating the creature it becomes.
-pub static MISHRAS_FACTORY_ANIMATION: AnimationDef = AnimationDef::new(2, 2)
-    .with_types(CardTypeSet::single(CardType::Creature).with(CardType::Artifact))
-    .with_subtypes(&["Assembly-Worker"]);
-
 /// "Attacks each combat if able." Cards state this in their own words rather
 /// than as a printed keyword, so the text is supplied by the caller.
 #[must_use]
 pub const fn attacks_each_combat_if_able(text: &'static str) -> AbilityDef {
     keyword(text, KeywordAbility::AttacksEachCombatIfAble)
 }
+
 const ENTER_TAPPED: [ReplacementEffectDef; 1] = [ReplacementEffectDef::ModifyBattlefieldEntry(
     BattlefieldEntryModificationDef::Tapped,
 )];
-const PAY_TWO_LIFE: [CostDef; 1] = [CostDef::PayLife(2)];
-
 const fn keyword(text: &'static str, keyword: KeywordAbility) -> AbilityDef {
     AbilityDef::keyword(text, keyword)
 }
@@ -97,6 +132,18 @@ pub const fn flying() -> AbilityDef {
 #[must_use]
 pub const fn trample() -> AbilityDef {
     keyword("Trample", KeywordAbility::Trample)
+}
+
+/// Myriad's reusable attack trigger. In the current two-player engine there
+/// is no opponent other than the defending player, so its explicit procedure
+/// resolves without creating a token.
+#[must_use]
+pub const fn myriad() -> AbilityDef {
+    AbilityDef::triggered(
+        "Myriad (Whenever this creature attacks, for each opponent other than defending player, you may create a token copy that's tapped and attacking that player or a planeswalker they control. Exile the tokens at end of combat.)",
+        TriggerEventDef::attacks(ObjectPredicateDef::Source),
+        EffectDef::CreateMyriadTokens,
+    )
 }
 
 #[must_use]
@@ -121,11 +168,18 @@ pub const fn double_strike() -> AbilityDef {
 
 #[must_use]
 pub const fn banding() -> AbilityDef {
-    keyword("Banding", KeywordAbility::Banding).with_coverage(AbilityCoverageDef::partial(
-        "Blocking with banding moves the attacker's combat damage assignment to the \
-         defending player, which is implemented. Attacking in a band is not: bands are \
-         neither declared nor blocked as a group.",
-    ))
+    keyword("Banding", KeywordAbility::Banding)
+}
+
+/// "Bands with other X", the banding variant CR 702.21j narrows to a quality.
+/// The text names the quality, because it is what the printed clause says.
+#[must_use]
+pub const fn bands_with_other(quality: BandingQuality) -> AbilityDef {
+    let text = match quality {
+        BandingQuality::LegendaryCreatures => "Bands with other legendary creatures",
+        BandingQuality::WolvesOfTheHunt => "Bands with other creatures named Wolves of the Hunt",
+    };
+    keyword(text, KeywordAbility::BandsWithOther(quality))
 }
 
 #[must_use]
@@ -158,6 +212,42 @@ pub const fn hexproof() -> AbilityDef {
     keyword("Hexproof", KeywordAbility::Hexproof)
 }
 
+/// Devoid (CR 702.114): "This card has no color." A characteristic-defining
+/// ability rather than a behaviour, so the colourlessness comes from the
+/// card's empty printed colour set and this clause is what names it.
+#[must_use]
+pub const fn devoid() -> AbilityDef {
+    keyword("Devoid (This card has no color.)", KeywordAbility::Devoid)
+}
+
+/// Split second (CR 702.19): while this spell is on the stack, nobody may
+/// cast a spell or activate anything that is not a mana ability.
+#[must_use]
+pub const fn split_second() -> AbilityDef {
+    keyword(
+        "Split second (As long as this spell is on the stack, players can't cast spells or \
+         activate abilities that aren't mana abilities.)",
+        KeywordAbility::SplitSecond,
+    )
+}
+
+/// Compleated (CR 702.150): this permanent enters with two fewer loyalty
+/// counters if life was paid for a Phyrexian mana symbol while casting it.
+#[must_use]
+pub const fn compleated(text: &'static str) -> AbilityDef {
+    keyword(text, KeywordAbility::Compleated)
+}
+
+/// Infect (CR 702.90): "This creature deals damage to creatures in the form
+/// of -1/-1 counters and to players in the form of poison counters."
+#[must_use]
+pub const fn infect() -> AbilityDef {
+    keyword(
+        "Infect (This creature deals damage to creatures in the form of -1/-1 counters and to players in the form of poison counters.)",
+        KeywordAbility::Infect,
+    )
+}
+
 #[must_use]
 pub const fn shroud() -> AbilityDef {
     keyword("Shroud", KeywordAbility::Shroud)
@@ -166,6 +256,16 @@ pub const fn shroud() -> AbilityDef {
 #[must_use]
 pub const fn intimidate() -> AbilityDef {
     keyword("Intimidate", KeywordAbility::Intimidate)
+}
+
+/// "Menace (This creature can't be blocked except by two or more
+/// creatures.)"
+#[must_use]
+pub const fn menace() -> AbilityDef {
+    keyword(
+        "Menace (This creature can't be blocked except by two or more creatures.)",
+        KeywordAbility::Menace,
+    )
 }
 
 #[must_use]
@@ -206,11 +306,40 @@ pub const fn rampage(amount: usize, text: &'static str) -> AbilityDef {
         TriggerEventDef::BecomesBlocked(ObjectPredicateDef::Source),
         EffectDef::Apply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::ModifyPowerToughness {
-                power: ValueDef::Scaled(scale),
-                toughness: ValueDef::Scaled(scale),
-            },
-            duration: EffectDurationDef::UntilEndOfTurn,
+            effect: AppliedEffectDef::modify_power_toughness(
+                ValueDef::Scaled(scale),
+                ValueDef::Scaled(scale),
+            ),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
+        },
+    )
+}
+
+/// A noncreature spell its controller cast, which is what prowess watches.
+static A_NONCREATURE_SPELL_YOU_CAST: ObjectPredicateDef = ObjectPredicateDef::All(&[
+    ObjectPredicateDef::NoncreatureSpell,
+    ObjectPredicateDef::ControlledBy(PlayerRelation::You),
+]);
+
+/// "Prowess (Whenever you cast a noncreature spell, this creature gets +1/+1
+/// until end of turn.)"
+///
+/// Written out as the triggered ability it abbreviates rather than as a
+/// keyword: nothing in the rules reads "has prowess" the way combat reads
+/// flying, so the clause is the whole of it.
+#[must_use]
+pub const fn prowess() -> AbilityDef {
+    AbilityDef::triggered(
+        "Prowess (Whenever you cast a noncreature spell, this creature gets +1/+1 until end of \
+         turn.)",
+        TriggerEventDef::SpellCast(A_NONCREATURE_SPELL_YOU_CAST),
+        EffectDef::Apply {
+            recipient: EffectRecipientDef::Source,
+            effect: AppliedEffectDef::modify_power_toughness(
+                ValueDef::Constant(1),
+                ValueDef::Constant(1),
+            ),
+            duration: ResolvedEffectDurationDef::UntilEndOfTurn,
         },
     )
 }
@@ -244,19 +373,6 @@ pub const fn forestwalk() -> AbilityDef {
     landwalk(BasicLandType::Forest)
 }
 
-#[must_use]
-pub const fn protection_from(color: ManaColor) -> AbilityDef {
-    let text = match color {
-        ManaColor::White => "Protection from white",
-        ManaColor::Blue => "Protection from blue",
-        ManaColor::Black => "Protection from black",
-        ManaColor::Red => "Protection from red",
-        ManaColor::Green => "Protection from green",
-        ManaColor::Colorless => "Protection from colorless",
-    };
-    keyword(text, KeywordAbility::ProtectionFrom(color))
-}
-
 /// "Whenever this creature deals damage to a player, that player gets N
 /// poison counters." Every printed form of this watches damage of any kind,
 /// not only combat damage, and the card supplies its own reminder text.
@@ -264,10 +380,7 @@ pub const fn protection_from(color: ManaColor) -> AbilityDef {
 pub const fn poisonous_damage(amount: i32, text: &'static str) -> AbilityDef {
     AbilityDef::triggered(
         text,
-        TriggerEventDef::DamageDealtToPlayer {
-            source: ObjectPredicateDef::Source,
-            player: PlayerRelation::Any,
-        },
+        TriggerEventDef::damage_to_player(ObjectPredicateDef::Source, PlayerRelation::Any),
         EffectDef::AddPoisonCounters {
             recipient: EffectRecipientDef::EventPlayer,
             amount: ValueDef::Constant(amount),
@@ -280,11 +393,11 @@ pub const fn poisonous_damage(amount: i32, text: &'static str) -> AbilityDef {
 /// built from a parameter cannot be promoted to `'static`, so the five are
 /// named here rather than rebuilt per card.
 static WARD_PROTECTIONS: [AbilityDef; 5] = [
-    protection_from(ManaColor::White),
-    protection_from(ManaColor::Blue),
-    protection_from(ManaColor::Black),
-    protection_from(ManaColor::Red),
-    protection_from(ManaColor::Green),
+    protection_from_color(ManaColor::White),
+    protection_from_color(ManaColor::Blue),
+    protection_from_color(ManaColor::Black),
+    protection_from_color(ManaColor::Red),
+    protection_from_color(ManaColor::Green),
 ];
 
 static WARD_CLAUSES: [[EffectDef; 2]; 5] = [
@@ -297,30 +410,30 @@ static WARD_CLAUSES: [[EffectDef; 2]; 5] = [
 
 const fn ward_clauses(color: usize) -> [EffectDef; 2] {
     [
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::AttachedPermanent,
-            effect: AppliedEffectDef::GrantAbility(&WARD_PROTECTIONS[color]),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_ability(&WARD_PROTECTIONS[color]),
         },
         // Without this the Aura would be an illegal attachment the moment it
         // granted protection from its own colour, which is exactly what the
         // printed exception exists to stop.
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::RemainsAttachedThroughProtection,
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::Rule(AppliedRuleDef::RemainsAttachedThroughProtection),
         },
     ]
 }
 
-/// One Ward's whole granted clause. The card supplies its own rules text,
-/// which names the colour and prints the exception in one sentence.
+/// One Ward Aura's whole granted clause -- the Alpha cycle of Auras named
+/// "<colour> Ward", which have nothing to do with the ward keyword. The card
+/// supplies its own rules text, which names the colour and prints the
+/// exception in one sentence.
 ///
 /// # Panics
 ///
-/// Panics when `color` is colorless, which no Ward is printed with.
+/// Panics when `color` is colorless, which no Ward Aura is printed with.
 #[must_use]
-pub const fn ward(color: ManaColor, text: &'static str) -> AbilityDef {
+pub const fn ward_aura_protection(color: ManaColor, text: &'static str) -> AbilityDef {
     let clauses = match color {
         ManaColor::White => &WARD_CLAUSES[0],
         ManaColor::Blue => &WARD_CLAUSES[1],
@@ -334,6 +447,19 @@ pub const fn ward(color: ManaColor, text: &'static str) -> AbilityDef {
 
 /// A printed flashback clause. Its attached ability identity becomes the
 /// spell play option's alternative-cost identity.
+/// Foretell: an alternative cast taken from exile, where the special action
+/// that costs {2} put the card. The reminder text is generated from the cost
+/// the card prints, the same way flashback's is.
+#[must_use]
+pub const fn foretell(mana_cost: ManaCost) -> AbilityDef {
+    AbilityDef::alternative_cast(
+        mana_cost,
+        AlternativeCastKindDef::Foretell,
+        None,
+        EffectDef::None,
+    )
+}
+
 #[must_use]
 pub const fn flashback(mana_cost: ManaCost) -> AbilityDef {
     AbilityDef::alternative_cast(
@@ -383,6 +509,76 @@ pub const fn overload(
     )
 }
 
+/// Evoke: an alternative cost that comes due once the creature has arrived.
+/// The permission is the alternative cast; the sacrifice is a separate
+/// triggered ability, because it happens after the spell has already
+/// resolved and the creature's own enters triggers have gone on the stack
+/// alongside it.
+#[must_use]
+pub const fn evoke_sacrifice(text: &'static str) -> AbilityDef {
+    AbilityDef::triggered_if(
+        text,
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::Source,
+            None,
+            Some(ZoneKind::Battlefield),
+        ),
+        &EVOKED,
+        EffectDef::Sacrifice {
+            object: EffectRecipientDef::Source,
+        },
+    )
+}
+
+static EVOKED: TriggerConditionDef =
+    TriggerConditionDef::SourceCastWith(AlternativeCastKindDef::AlternativeCost);
+
+/// A kicker: "Kicker {cost} (You may pay an additional {cost} as you cast
+/// this spell.)", together with what the spell does when it was paid.
+///
+/// `mana_cost` is the whole kicked total, not the surcharge -- a kicked spell
+/// is a spell cast for more mana with different instructions, which is what
+/// an alternative cast already models. The caller supplies the printed
+/// reminder text, because that text names the surcharge instead.
+#[must_use]
+pub const fn kicker(
+    mana_cost: ManaCost,
+    stack_text: &'static str,
+    targets: &'static [AbilityTargetDef],
+    effect: EffectDef,
+) -> AbilityDef {
+    AbilityDef::alternative_cast_with_targets(
+        mana_cost,
+        AlternativeCastKindDef::Kicked,
+        Some(stack_text),
+        targets,
+        effect,
+    )
+}
+
+/// Echo (CR 702.29): "At the beginning of your upkeep, if this came under
+/// your control since the beginning of your last upkeep, sacrifice it unless
+/// you pay its echo cost."
+///
+/// The intervening-if is what makes the cost come due exactly once. The
+/// caller supplies the printed text, because the reminder repeats the cost.
+#[must_use]
+pub const fn echo(text: &'static str, cost: ManaCost) -> AbilityDef {
+    AbilityDef::triggered_if(
+        text,
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::Upkeep,
+            player: PlayerRelation::You,
+        },
+        &TriggerConditionDef::SourceArrivedSinceControllersLastUpkeep,
+        EffectDef::PayOr(PayOrDef::unless_mana(cost, &SACRIFICE_SOURCE)),
+    )
+}
+
+static SACRIFICE_SOURCE: EffectDef = EffectDef::Sacrifice {
+    object: EffectRecipientDef::Source,
+};
+
 /// A Bloodrush ability activated from the card carrying it in hand. The
 /// mechanic always discards that card in addition to paying its mana cost;
 /// the card supplies its exact rules text, target declaration, and effect.
@@ -407,7 +603,8 @@ pub const fn bloodrush(
 
 /// Populate's copy step, made once its choice has landed.
 static POPULATE_COPY: EffectDef = EffectDef::CreateTokenCopyOf {
-    object: EffectRecipientDef::ChosenPermanent(ChoiceIndex::PRIMARY),
+    object: EffectRecipientDef::object(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY)),
+    exceptions: TokenCopyExceptionsDef::NONE,
 };
 
 /// Populate: choose a creature token you control, then create a copy of it.
@@ -415,13 +612,21 @@ static POPULATE_COPY: EffectDef = EffectDef::CreateTokenCopyOf {
 /// player with no creature tokens simply does nothing.
 #[must_use]
 pub const fn populate() -> EffectDef {
-    EffectDef::ChoosePermanent {
-        choice: ChoiceIndex::PRIMARY,
-        chooser: EffectRecipientDef::Controller,
-        object: ObjectPredicateDef::All(&POPULATE_CANDIDATE),
-        controller: PlayerRelation::You,
+    EffectDef::Choose(ChooseDef {
+        binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+        unchosen: None,
+        chooser: PlayerRefDef::EffectController,
+        candidates: ObjectSetDef::Query(ObjectQueryDef::controlled_by(
+            ObjectPredicateDef::All(&POPULATE_CANDIDATE),
+            &[ZoneKind::Battlefield],
+            PlayerSetDef::One(PlayerRefDef::EffectController),
+        )),
+        exclude: None,
+        minimum: 1,
+        maximum: 1,
+        visibility: ChoiceVisibilityDef::Public,
         then: &POPULATE_COPY,
-    }
+    })
 }
 
 static POPULATE_CANDIDATE: [ObjectPredicateDef; 2] = [
@@ -429,31 +634,39 @@ static POPULATE_CANDIDATE: [ObjectPredicateDef; 2] = [
     ObjectPredicateDef::Token,
 ];
 
-/// The target an equip ability chooses: a creature its controller controls.
-static EQUIP_TARGET: [AbilityTargetDef; 1] = [AbilityTargetDef::exactly_one(
-    AbilityTargetPredicate::Object {
-        object: ObjectPredicateDef::HasType(CardType::Creature),
-        zones: &[ZoneKind::Battlefield],
-        controller: Some(PlayerRelation::You),
-        owner: None,
-    },
-)];
-
-/// Equip. Attaching is what the ability does, and it is sorcery-speed, which
-/// is the whole difference between this and an Aura arriving from the stack.
-/// Reminder text carries the cost, so each card supplies its own literal.
+/// Connive, on the permanent doing it: draw a card, then discard a card, and
+/// take a +1/+1 counter for the discard if what went was not a land.
+///
+/// The counter count is how many of the discarded cards were nonland rather
+/// than a yes-or-no, which for a connive-one is the same 0 or 1 the printed
+/// clause means and which is already what connive N says for larger numbers.
 #[must_use]
-pub const fn equip(mana_cost: ManaCost, text: &'static str) -> AbilityDef {
-    AbilityDef::activated_with_cost_list_and_targets(
-        text,
-        AbilityCostList::one(AbilityCostDef::Mana(mana_cost)),
-        &EQUIP_TARGET,
-        EffectDef::Attach {
-            object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
-        },
-    )
-    .with_activation_timing(ActivationTimingDef::SorcerySpeed)
+pub const fn connive() -> EffectDef {
+    EffectDef::Sequence(&CONNIVE_STEPS)
 }
+
+static CONNIVE_STEPS: [EffectDef; 2] = [
+    EffectDef::DrawCards {
+        recipient: EffectRecipientDef::Controller,
+        amount: ValueDef::Constant(1),
+    },
+    EffectDef::Discard {
+        recipient: EffectRecipientDef::Controller,
+        amount: ValueDef::Constant(1),
+        selection: DiscardSelectionDef::RecipientChooses,
+        then: Some(CONNIVE_COUNTERS),
+    },
+];
+
+static CONNIVE_COUNTERS: DiscardFollowUpDef = DiscardFollowUpDef {
+    counted: ObjectPredicateDef::Not(&ObjectPredicateDef::HasType(CardType::Land)),
+    bound: None,
+    effect: &EffectDef::AddCounters {
+        object: EffectRecipientDef::Source,
+        kind: CounterKind::PlusOnePlusOne,
+        amount: ValueDef::MatchedCount,
+    },
+};
 
 /// Scavenge, whose printed cost is the card's own exile from its owner's
 /// graveyard and whose counter count is the exiled card's power. Reminder
@@ -483,10 +696,9 @@ static SCAVENGE_TARGET: &[AbilityTargetDef] = &[AbilityTargetDef::exactly_one_pe
 pub const fn cannot_be_countered() -> AbilityDef {
     AbilityDef::static_ability(
         "This spell can't be countered.",
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::CannotBeCountered,
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered),
         },
     )
     .with_source_zones(&[ZoneKind::Stack])
@@ -510,40 +722,64 @@ pub const fn tap_for(mana: ManaColor) -> AbilityDef {
     )
 }
 
-/// The two mana abilities shared by the allied- and enemy-color painlands.
-#[must_use]
-pub const fn pain_land(
-    colored_text: &'static str,
-    colors: &'static [ManaColor],
-) -> [AbilityDef; 2] {
-    [
-        tap_for(ManaColor::Colorless),
-        AbilityDef::activated_mana(
-            colored_text,
-            &[AbilityCostDef::TapSource],
-            EffectDef::AddMana(AddManaEffectDef::choice(colors).with_damage_to_controller(1)),
-        ),
-    ]
-}
-
-/// The shared replacement clause printed on shock lands.
-#[must_use]
-pub const fn shock_land_enters() -> AbilityDef {
-    AbilityDef::as_enters(
-        "As this land enters, you may pay 2 life. If you don't, it enters tapped.",
-        ReplacementEffectDef::OptionalPayment {
-            payment: PaymentDef::new(PlayerRelation::You, &PAY_TWO_LIFE),
-            if_paid: &[],
-            if_declined: &ENTER_TAPPED,
-        },
-    )
-}
-
 /// An unconditional battlefield-entry replacement shared by permanents that
 /// enter tapped.
 #[must_use]
 pub const fn enters_tapped(text: &'static str) -> AbilityDef {
     AbilityDef::as_enters(text, ENTER_TAPPED[0])
+}
+
+/// "Cycling {cost} ({cost}, Discard this card: Draw a card.)"
+///
+/// Cycling is an activated ability that exists only while the card is in
+/// hand, which is what keeps it off the battlefield version of the same
+/// permanent. Nothing else about it is special: the discard is a cost, so it
+/// happens on activation rather than on resolution, and the draw is what goes
+/// on the stack. The caller supplies the printed text because the reminder
+/// repeats the cost.
+#[must_use]
+pub const fn cycling(text: &'static str, cost: ManaCost) -> AbilityDef {
+    AbilityDef::activated_with_cost_list_and_targets(
+        text,
+        AbilityCostList::two(AbilityCostDef::Mana(cost), AbilityCostDef::DiscardSource),
+        &[],
+        EffectDef::DrawCards {
+            recipient: EffectRecipientDef::Controller,
+            amount: ValueDef::Constant(1),
+        },
+    )
+    .with_source_zones(&[ZoneKind::Hand])
+}
+
+/// "<Type>cycling {cost}" -- the same ability as [`cycling`], except that
+/// what it buys is a search rather than a draw. Failing to find is allowed,
+/// so the minimum is zero: the discard has already been paid either way.
+#[must_use]
+pub const fn typecycling(
+    text: &'static str,
+    cost: ManaCost,
+    object: ObjectPredicateDef,
+) -> AbilityDef {
+    AbilityDef::activated_with_cost_list_and_targets(
+        text,
+        AbilityCostList::two(AbilityCostDef::Mana(cost), AbilityCostDef::DiscardSource),
+        &[],
+        EffectDef::SearchZone {
+            player: EffectRecipientDef::Controller,
+            source: ZoneKind::Library,
+            object,
+            minimum: 0,
+            maximum: ValueDef::Constant(1),
+            reveal: true,
+            destination: ZoneKind::Hand,
+            placement: ZonePlacement::Top,
+            shuffle: true,
+            enters_tapped: false,
+            binding: None,
+            then: None,
+        },
+    )
+    .with_source_zones(&[ZoneKind::Hand])
 }
 
 /// "{cost}: Regenerate this creature." -- by far the most common printed
@@ -574,20 +810,32 @@ pub const fn circle_of_protection(
     AbilityDef::activated(
         text,
         costs,
-        EffectDef::ChooseDamageSource {
-            choice: ChoiceIndex::PRIMARY,
-            chooser: EffectRecipientDef::Controller,
-            object: source,
+        EffectDef::Choose(ChooseDef {
+            binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+            unchosen: None,
+            chooser: PlayerRefDef::EffectController,
+            candidates: ObjectSetDef::Query(ObjectQueryDef::new(
+                source,
+                &[ZoneKind::Battlefield, ZoneKind::Stack],
+            )),
+            exclude: Some(ObjectRefDef::ResolvingObject),
+            minimum: 1,
+            maximum: 1,
+            visibility: ChoiceVisibilityDef::Public,
             then: &SHIELD_AGAINST_THE_CHOSEN_SOURCE,
-        },
+        }),
     )
 }
 
-static SHIELD_AGAINST_THE_CHOSEN_SOURCE: EffectDef = EffectDef::PreventNextDamageFromSource {
-    object: EffectRecipientDef::Controller,
-    source: EffectRecipientDef::ChosenPermanent(ChoiceIndex::PRIMARY),
-    coverage: ShieldCoverageDef::All,
-    gain_life: false,
+static SHIELD_AGAINST_THE_CHOSEN_SOURCE: EffectDef = EffectDef::PreventDamage {
+    prevention: DamagePreventionDef::events(
+        DamageEventMatcherDef {
+            recipient: DamageRecipientMatcherDef::Recipients(EffectRecipientDef::Controller),
+            ..DamageEventMatcherDef::from(ObjectRefDef::Binding(ObjectBindingIndex::PRIMARY))
+        },
+        1,
+    ),
+    duration: ResolvedEffectDurationDef::UntilEndOfTurn,
 };
 
 /// The same shape as a Circle of Protection, for the printed cards that
@@ -598,386 +846,128 @@ pub const fn shield_against_a_chosen_source(
     source: ObjectPredicateDef,
     then: &'static EffectDef,
 ) -> EffectDef {
-    EffectDef::ChooseDamageSource {
-        choice: ChoiceIndex::PRIMARY,
-        chooser: EffectRecipientDef::Controller,
-        object: source,
+    EffectDef::Choose(ChooseDef {
+        binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+        unchosen: None,
+        chooser: PlayerRefDef::EffectController,
+        candidates: ObjectSetDef::Query(ObjectQueryDef::new(
+            source,
+            &[ZoneKind::Battlefield, ZoneKind::Stack],
+        )),
+        exclude: Some(ObjectRefDef::ResolvingObject),
+        minimum: 1,
+        maximum: 1,
+        visibility: ChoiceVisibilityDef::Public,
         then,
-    }
+    })
 }
 
-/// Exalted. It is written as a keyword but defined as a triggered ability, so
-/// each printed instance is its own clause and several on one board each
-/// trigger -- which is why this returns an ordinary trigger rather than a
-/// keyword. The permanent carrying it need not be a creature.
-#[must_use]
-pub const fn exalted() -> AbilityDef {
-    AbilityDef::triggered(
-        "Exalted (Whenever a creature you control attacks alone, that creature gets +1/+1 until \
-         end of turn.)",
-        TriggerEventDef::AttacksInGroup {
-            attacker: ObjectPredicateDef::ControlledBy(PlayerRelation::You),
-            minimum_total: 1,
-            maximum_total: Some(1),
-        },
-        EffectDef::Apply {
-            recipient: EffectRecipientDef::TriggeringObject,
-            effect: AppliedEffectDef::ModifyPowerToughness {
-                power: ValueDef::Constant(1),
-                toughness: ValueDef::Constant(1),
-            },
-            duration: EffectDurationDef::UntilEndOfTurn,
-        },
-    )
-}
-
-/// Battalion. Like exalted it is a keyword defined as a triggered ability, so
-/// it takes the effect its card prints rather than being one fixed clause.
-#[must_use]
-pub const fn battalion(text: &'static str, effect: EffectDef) -> AbilityDef {
-    AbilityDef::triggered(text, BATTALION_EVENT, effect)
-}
-
-/// "This creature and at least two other creatures attack" -- three in all,
-/// with this one among them.
-pub const BATTALION_EVENT: TriggerEventDef = TriggerEventDef::AttacksInGroup {
-    attacker: ObjectPredicateDef::Source,
-    minimum_total: 3,
-    maximum_total: None,
+static COUNTER_PRIMARY_TARGET: EffectDef = EffectDef::Counter {
+    object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+    zone: ZoneKind::Graveyard,
+    placement: ZonePlacement::Top,
+};
+static COUNTER_PRIMARY_TARGET_TO_EXILE: EffectDef = EffectDef::Counter {
+    object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+    zone: ZoneKind::Exile,
+    placement: ZonePlacement::Top,
+};
+static COUNTER_TRIGGERING_SPELL: EffectDef = EffectDef::Counter {
+    object: EffectRecipientDef::TriggeringObject,
+    zone: ZoneKind::Graveyard,
+    placement: ZonePlacement::Top,
 };
 
-/// Unleash. The engine implements both halves from the keyword: an optional
-/// +1/+1 counter offered as the permanent enters, and no blocking for as long
-/// as it carries one.
+const fn pay_or_counter(
+    payer: PlayerRefDef,
+    amount: ValueDef,
+    otherwise: &'static EffectDef,
+) -> EffectDef {
+    EffectDef::PayOr(PayOrDef {
+        payment: EffectPaymentDef::generic_mana(PlayerSetDef::One(payer), amount),
+        if_paid: None,
+        otherwise: Some(otherwise),
+        visibility: ChoiceVisibilityDef::Public,
+    })
+}
+
+/// Counter the primary targeted spell unless its controller pays generic mana.
 #[must_use]
-pub const fn unleash() -> AbilityDef {
-    keyword(
-        "Unleash (You may have this creature enter with a +1/+1 counter on it. It can't block as \
-         long as it has a +1/+1 counter on it.)",
-        KeywordAbility::Unleash,
+pub const fn counter_target_unless_paid(amount: ValueDef) -> EffectDef {
+    pay_or_counter(
+        PlayerRefDef::ControllerOf(ObjectRefDef::Target(TargetIndex::PRIMARY)),
+        amount,
+        &COUNTER_PRIMARY_TARGET,
     )
 }
 
-/// The optional entry clause unleash offers. It is a separate replacement
-/// ability because the keyword itself carries no effect body.
+/// Counter the primary targeted spell into exile unless its controller pays.
 #[must_use]
-pub const fn unleash_counter() -> AbilityDef {
-    AbilityDef::defined(
-        "You may have this creature enter with a +1/+1 counter on it.",
-        DeclarativeAbilityDef::Replacement(
-            ReplacementAbilityDef::new()
-                .with_event(ReplacementEventDef::SourceEntersBattlefield)
-                .optional(),
-        ),
-        EffectDef::Replacement(ReplacementEffectDef::ModifyBattlefieldEntry(
-            BattlefieldEntryModificationDef::AddCounters {
-                kind: CounterKind::PlusOnePlusOne,
-                amount: 1,
-            },
-        )),
+pub const fn counter_target_to_exile_unless_paid(amount: ValueDef) -> EffectDef {
+    pay_or_counter(
+        PlayerRefDef::ControllerOf(ObjectRefDef::Target(TargetIndex::PRIMARY)),
+        amount,
+        &COUNTER_PRIMARY_TARGET_TO_EXILE,
     )
 }
 
-/// The reminder text every detain clause prints, so the cards agree on it.
-pub const DETAIN_REMINDER: &str = "(Until your next turn, that permanent can't attack or block \
-                                   and its activated abilities can't be activated.)";
-
-/// Evolve. The comparison is against the source's own power and toughness at
-/// the moment the creature enters, which is what makes a growing creature
-/// stop evolving once it has outgrown what arrives.
+/// Counter the spell that caused a trigger unless its controller pays.
 #[must_use]
-pub const fn evolve() -> AbilityDef {
-    AbilityDef::triggered(
-        "Evolve (Whenever a creature you control enters, if that creature has greater power or \
-         toughness than this creature, put a +1/+1 counter on this creature.)",
-        TriggerEventDef::ZoneChanged {
-            object: ObjectPredicateDef::All(&EVOLVE_SUBJECT),
-            from: None,
-            to: Some(ZoneKind::Battlefield),
+pub const fn counter_triggering_spell_unless_paid(amount: ValueDef) -> EffectDef {
+    pay_or_counter(
+        PlayerRefDef::ControllerOf(ObjectRefDef::TriggeringObject),
+        amount,
+        &COUNTER_TRIGGERING_SPELL,
+    )
+}
+
+const CHOSEN_PILE_BINDING: ObjectSetBindingIndex = ObjectSetBindingIndex::PRIMARY;
+const UNCHOSEN_PILE_BINDING: ObjectSetBindingIndex = ObjectSetBindingIndex::new(1);
+
+/// The pile selected by the chooser in [`split_top_of_library_into_piles`].
+pub const CHOSEN_PILE: EffectRecipientDef =
+    EffectRecipientDef::objects(ObjectSetDef::Binding(CHOSEN_PILE_BINDING));
+
+/// The pile declined by the chooser in [`split_top_of_library_into_piles`].
+pub const UNCHOSEN_PILE: EffectRecipientDef =
+    EffectRecipientDef::objects(ObjectSetDef::Binding(UNCHOSEN_PILE_BINDING));
+
+/// Reveal cards from the effect controller's library, let an opponent divide
+/// them, and let the controller choose a pile before continuing.
+#[must_use]
+pub const fn split_top_of_library_into_piles(
+    count: ValueDef,
+    then: &'static EffectDef,
+) -> EffectDef {
+    EffectDef::SplitIntoPiles(SplitIntoPilesDef {
+        items: PartitionItemsDef::TopOfLibrary {
+            player: PlayerRefDef::EffectController,
+            count,
         },
-        EffectDef::AddCounters {
-            object: EffectRecipientDef::Source,
-            kind: CounterKind::PlusOnePlusOne,
-            amount: ValueDef::Constant(1),
-        },
-    )
+        divider: PlayerSetDef::Related(PlayerRelation::Opponent),
+        chooser: PlayerSetDef::One(PlayerRefDef::EffectController),
+        chosen: CHOSEN_PILE_BINDING,
+        unchosen: UNCHOSEN_PILE_BINDING,
+        then,
+    })
 }
-
-static EVOLVE_SUBJECT: [ObjectPredicateDef; 4] = [
-    ObjectPredicateDef::HasType(CardType::Creature),
-    ObjectPredicateDef::ControlledBy(PlayerRelation::You),
-    // A creature does not evolve itself as it arrives.
-    ObjectPredicateDef::Not(&ObjectPredicateDef::Source),
-    ObjectPredicateDef::AnyOf(&EVOLVE_BIGGER),
-];
-
-static EVOLVE_BIGGER: [ObjectPredicateDef; 2] = [
-    ObjectPredicateDef::PowerGreaterThan(ValueDef::SourcePower),
-    ObjectPredicateDef::ToughnessGreaterThan(ValueDef::SourceToughness),
-];
 
 /// The printed static "this creature can't be blocked".
 #[must_use]
 pub const fn cannot_be_blocked(text: &'static str) -> AbilityDef {
     AbilityDef::static_ability(
         text,
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::CannotBeBlocked,
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::Rule(AppliedRuleDef::CANNOT_BE_BLOCKED),
         },
     )
 }
 
-/// A shared checkland-style entry clause backed by the general object-query
-/// condition vocabulary.
-#[must_use]
-pub const fn check_land_enters(
-    text: &'static str,
-    land_types: &'static [BasicLandType],
-) -> AbilityDef {
-    enters_tapped_unless_you_control(text, ObjectPredicateDef::HasAnyBasicLandType(land_types))
-}
-
-/// An as-enters clause whose untapped branch depends on any controlled
-/// battlefield object matching `object`.
-#[must_use]
-pub const fn enters_tapped_unless_you_control(
-    text: &'static str,
-    object: ObjectPredicateDef,
-) -> AbilityDef {
-    AbilityDef::as_enters(
-        text,
-        ReplacementEffectDef::Conditional {
-            condition: ConditionDef::Exists(ObjectQueryDef {
-                object,
-                zones: &[ZoneKind::Battlefield],
-                controller: PlayerRelation::You,
-            }),
-            if_true: &[],
-            if_false: &ENTER_TAPPED,
-        },
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        banding, bloodrush, check_land_enters, double_strike, first_strike, flashback,
-        flashback_for_card_mana_cost, flying, intimidate, overload, pain_land, shock_land_enters,
-        tap_for,
-    };
-    use crate::card::{
-        AbilityCostDef, AbilityCostList, AbilityCoverageDef, AbilityDef, AddManaEffectDef,
-        AlternativeCastKindDef, AlternativeCastManaCostDef, BasicLandType, CardRules, ConditionDef,
-        CostDef, DeclarativeAbilityDef, EffectDef, KeywordAbility, ManaColor, ManaCost,
-        ObjectPredicateDef, PlayerRelation, ReplacementEffectDef, ZoneKind,
-    };
-    use crate::mana_cost;
-
-    #[test]
-    fn tap_for_builds_a_complete_executable_mana_ability() {
-        let cases = [
-            (ManaColor::White, "{T}: Add {W}."),
-            (ManaColor::Blue, "{T}: Add {U}."),
-            (ManaColor::Black, "{T}: Add {B}."),
-            (ManaColor::Red, "{T}: Add {R}."),
-            (ManaColor::Green, "{T}: Add {G}."),
-            (ManaColor::Colorless, "{T}: Add {C}."),
-        ];
-
-        for (mana, text) in cases {
-            let ability = tap_for(mana);
-            assert_eq!(ability.text, text);
-            assert_eq!(ability.coverage, AbilityCoverageDef::complete());
-            assert!(ability.is_executable());
-            assert!(matches!(
-                ability.definition,
-                DeclarativeAbilityDef::ActivatedMana(definition)
-                    if definition.costs.as_slice() == [AbilityCostDef::TapSource]
-            ));
-            assert_eq!(
-                ability.declarative_effect(),
-                Some(EffectDef::AddMana(AddManaEffectDef::one(mana)))
-            );
-        }
-    }
-
-    #[test]
-    fn pain_land_keeps_damage_on_only_the_colored_ability() {
-        let abilities = pain_land(
-            "{T}: Add {W} or {U}. This land deals 1 damage to you.",
-            &[ManaColor::White, ManaColor::Blue],
-        );
-
-        assert_eq!(
-            abilities[0].declarative_effect(),
-            Some(EffectDef::AddMana(AddManaEffectDef::one(
-                ManaColor::Colorless
-            )))
-        );
-        assert_eq!(
-            abilities[1].declarative_effect(),
-            Some(EffectDef::AddMana(
-                AddManaEffectDef::choice(&[ManaColor::White, ManaColor::Blue])
-                    .with_damage_to_controller(1)
-            ))
-        );
-    }
-
-    #[test]
-    fn common_land_entry_abilities_use_shared_conditions_and_costs() {
-        let shock = shock_land_enters();
-        assert!(matches!(
-            shock.declarative_effect(),
-            Some(EffectDef::Replacement(ReplacementEffectDef::OptionalPayment {
-                payment,
-                if_declined: [_],
-                ..
-            })) if payment.payer == PlayerRelation::You
-                && payment.costs == [CostDef::PayLife(2)]
-        ));
-
-        let check = check_land_enters(
-            "This land enters tapped unless you control a Mountain or a Plains.",
-            &[BasicLandType::Mountain, BasicLandType::Plains],
-        );
-        assert!(matches!(
-            check.declarative_effect(),
-            Some(EffectDef::Replacement(ReplacementEffectDef::Conditional {
-                condition: ConditionDef::Exists(query),
-                ..
-            })) if query.controller == PlayerRelation::You
-                && matches!(
-                    query.object,
-                    ObjectPredicateDef::HasAnyBasicLandType(types)
-                        if types == [BasicLandType::Mountain, BasicLandType::Plains]
-                )
-        ));
-    }
-
-    /// A card can print a keyword the engine only records. The distinction is
-    /// a property of the coverage model rather than of any particular keyword,
-    /// so the metadata-only case is built here instead of borrowing whichever
-    /// keyword happens to be unimplemented today.
-    #[test]
-    fn keyword_presence_is_distinct_from_executable_keyword_support() {
-        static RECORDED_ONLY: AbilityDef = AbilityDef::keyword("Shroud", KeywordAbility::Shroud)
-            .with_coverage(AbilityCoverageDef::metadata_only(
-                "Recorded for this test, not executed.",
-            ));
-        static KEYWORDS: [AbilityDef; 2] = [flying(), RECORDED_ONLY];
-        let rules =
-            CardRules::new_creature(ManaCost::default(), &[], 1, 1).with_abilities(&KEYWORDS);
-
-        assert!(rules.has_keyword(KeywordAbility::Flying));
-        assert!(rules.has_executable_keyword(KeywordAbility::Flying));
-        assert!(rules.has_keyword(KeywordAbility::Shroud));
-        assert!(!rules.has_executable_keyword(KeywordAbility::Shroud));
-    }
-
-    /// Banding is the one keyword the engine implements in part: blocking
-    /// with it works, attacking in a band does not.
-    #[test]
-    fn banding_is_executable_but_only_partially_covered() {
-        assert!(banding().is_executable());
-        assert_eq!(
-            banding().coverage.status,
-            crate::card::ImplementationStatus::Partial
-        );
-    }
-
-    #[test]
-    fn common_combat_keywords_are_complete_definitions() {
-        let cases = [
-            (first_strike(), KeywordAbility::FirstStrike),
-            (double_strike(), KeywordAbility::DoubleStrike),
-            (intimidate(), KeywordAbility::Intimidate),
-        ];
-
-        for (ability, expected) in cases {
-            assert_eq!(ability.coverage, AbilityCoverageDef::complete());
-            assert!(ability.is_executable());
-            assert_eq!(ability.definition, DeclarativeAbilityDef::Keyword(expected));
-        }
-        assert_eq!(intimidate().text, "Intimidate");
-    }
-
-    #[test]
-    fn alternative_cast_helpers_own_costs_and_render_canonical_text() {
-        let flashback = flashback(mana_cost!("{2}{U}"));
-        let overload = overload(
-            mana_cost!("{3}{R}{R}{R}"),
-            "Deal 4 damage to each creature you don't control.",
-            EffectDef::None,
-        );
-
-        assert!(matches!(
-            flashback.definition,
-            DeclarativeAbilityDef::AlternativeCast(definition)
-                if definition.kind == AlternativeCastKindDef::Flashback
-                    && definition.mana_cost
-                        == AlternativeCastManaCostDef::Fixed(mana_cost!("{2}{U}"))
-        ));
-        assert_eq!(
-            flashback.rules_text(),
-            "Flashback {2}{U} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
-        );
-        assert!(matches!(
-            overload.definition,
-            DeclarativeAbilityDef::AlternativeCast(definition)
-                if definition.kind == AlternativeCastKindDef::Overload
-                    && definition.mana_cost
-                        == AlternativeCastManaCostDef::Fixed(mana_cost!("{3}{R}{R}{R}"))
-                    && definition.stack_text
-                        == Some("Deal 4 damage to each creature you don't control.")
-        ));
-        assert_eq!(
-            overload.rules_text(),
-            "Overload {3}{R}{R}{R} (You may cast this spell for its overload cost. If you do, change \"target\" in its text to \"each.\")",
-        );
-
-        let granted = flashback_for_card_mana_cost();
-        assert!(matches!(
-            granted.definition,
-            DeclarativeAbilityDef::AlternativeCast(definition)
-                if definition.kind == AlternativeCastKindDef::Flashback
-                    && definition.mana_cost == AlternativeCastManaCostDef::ThisCardManaCost
-                    && definition.mana_cost.resolve(Some(mana_cost!("{1}{U}")))
-                        == Some(mana_cost!("{1}{U}"))
-        ));
-        let DeclarativeAbilityDef::AlternativeCast(definition) = granted.definition else {
-            unreachable!("the helper always builds an alternative-cast ability")
-        };
-        assert_eq!(definition.mana_cost.resolve(None), None);
-    }
-
-    #[test]
-    fn bloodrush_owns_its_hand_zone_and_discard_procedure() {
-        let effect = EffectDef::Special("Test Bloodrush effect");
-        let text = "Bloodrush — {R}{G}, Discard this card: Test Bloodrush effect.";
-        let ability = bloodrush(mana_cost!("{R}{G}"), text, &[], effect);
-        let DeclarativeAbilityDef::Activated(definition) = ability.definition else {
-            panic!("Bloodrush should be an activated ability")
-        };
-
-        assert_eq!(ability.text, text);
-        assert_eq!(definition.source_zones, [ZoneKind::Hand]);
-        assert_eq!(
-            definition.costs,
-            AbilityCostList::borrowed(&[
-                AbilityCostDef::Mana(mana_cost!("{R}{G}")),
-                AbilityCostDef::DiscardSource,
-            ]),
-            "inline and borrowed cost storage should compare by their costs",
-        );
-        assert_eq!(
-            definition.costs.as_slice(),
-            [
-                AbilityCostDef::Mana(mana_cost!("{R}{G}")),
-                AbilityCostDef::DiscardSource,
-            ],
-        );
-        assert_eq!(ability.declarative_effect(), Some(effect));
-    }
-}
+include!("abilities/lands.rs");
+include!("abilities/repeated_clauses.rs");
+include!("abilities/keyword_mechanics.rs");
+include!("abilities/convoke_buyback.rs");
+include!("abilities/attachment.rs");
+include!("abilities/named_cards.rs");
+include!("abilities/tests.rs");

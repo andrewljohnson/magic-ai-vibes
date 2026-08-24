@@ -17,6 +17,7 @@
 
 use penta::protocol::{protocol_actions, BotGame, Opponent};
 use penta::{Action, PlayerId, PlayerObservation, Step};
+use crate::extract::perm_def_or;
 
 use std::collections::HashMap;
 
@@ -231,7 +232,7 @@ fn own_board_power(obs: &PlayerObservation, seat: PlayerId, t: &Tables) -> f64 {
     let mut total = 0i64;
     for perm in &obs.battlefield {
         if perm.controller == seat {
-            total += t.power.get(&perm.definition.0).copied().unwrap_or(0);
+            total += t.power.get(&perm_def_or(perm)).copied().unwrap_or(0);
         }
     }
     total as f64

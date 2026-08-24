@@ -83,6 +83,10 @@ reference path.
 
 ## Where it stands
 
+**Current state:** a pure self-play AlphaZero line that beats the engine's
+built-in bot, being migrated to protocol 29 so it can play on the public
+server. See ROADMAP for what is in flight.
+
 | | win rate vs the engine's built-in bot |
 |---|---|
 | **parity with the built-in bot** | **50.0%** |

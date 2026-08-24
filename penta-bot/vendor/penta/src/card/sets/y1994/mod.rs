@@ -7,4 +7,4 @@ pub(super) mod promo_1994;
 pub(super) mod revised;
 pub(super) mod the_dark;
 
-pub(super) use super::{CardRecord, PrintingRecord};
+pub(super) use super::{CardRecord, PrintingAnchor, PrintingRecord};

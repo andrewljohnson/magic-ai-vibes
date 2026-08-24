@@ -86,10 +86,168 @@ fn a_spell_can_hand_out_the_prohibition_for_the_turn() {
     );
 }
 
+/// The Ghoul's restriction names a creature type rather than the whole
+/// blocker list, so it blocks anything that is not a Human.
+#[test]
+fn the_ghoul_blocks_everything_except_humans() {
+    let (game, _attacker, ghoul) = combat(cards::HUNTED_GHOUL);
+    assert!(can_block(&game, ghoul), "a Sedge Troll is no Human");
+}
+
+/// A creature the Cathar pointed at sits the combat out. Its trigger picks
+/// the target as it goes on the stack, not as the Cathar is cast.
+#[test]
+fn the_cathar_sits_one_blocker_down() {
+    let mut game = ready_game();
+    game.turns_started[PlayerId::One.index()] = 5;
+    let victim = creature(10_000, cards::SAVANNAH_LIONS, PlayerId::Two);
+    let victim_id = victim.card.id;
+    game.battlefield.push(victim);
+
+    let cathar = card(10_001, cards::FERVENT_CATHAR, PlayerId::One);
+    let cathar_id = cathar.id;
+    game.players[PlayerId::One.index()].hand.push(cathar);
+    let pool = &mut game.players[PlayerId::One.index()].mana_pool;
+    pool.red = 1;
+    pool.colorless = 2;
+
+    let action = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .find(|action| matches!(action, Action::CastSpell { card, .. } if *card == cathar_id))
+        .expect("the Cathar is castable");
+    game.apply(PlayerId::One, action)
+        .expect("the Cathar is cast");
+    drain_pending(&mut game);
+
+    // The Lions are the only creature the trigger could have named.
+    game.step = Step::DeclareBlockers;
+    let mut attacker = creature(10_002, cards::SEDGE_TROLL, PlayerId::One);
+    attacker.attacking = true;
+    attacker.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
+    game.battlefield.push(attacker);
+
+    assert!(!can_block(&game, victim_id), "it was told to stand down");
+}
+
+/// The Tern's restriction reads a keyword rather than a type, and reads it
+/// off the attacker as it is now.
+#[test]
+fn the_tern_blocks_only_fliers() {
+    let (game, _attacker, tern) = combat(cards::WELKIN_TERN);
+    assert!(!can_block(&game, tern), "a Sedge Troll is earthbound");
+
+    let mut game = ready_game();
+    game.step = Step::DeclareBlockers;
+    let mut flier = creature(10_000, cards::SERRA_ANGEL, PlayerId::One);
+    flier.attacking = true;
+    flier.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
+    game.battlefield.push(flier);
+    let tern = creature(10_001, cards::WELKIN_TERN, PlayerId::Two);
+    let tern_id = tern.card.id;
+    game.battlefield.push(tern);
+
+    assert!(can_block(&game, tern_id), "and an Angel is not");
+}
+
+/// Pacifism bars both declarations, which is how a card that says "can't
+/// attack or block" is expressed: two prohibitions, not one combat ban.
+#[test]
+fn pacifism_bars_both_declarations() {
+    let mut game = ready_game();
+    game.turns_started[PlayerId::One.index()] = 5;
+    let bear = creature(10_000, cards::GRIZZLY_BEARS, PlayerId::One);
+    let bear_id = bear.card.id;
+    game.battlefield.push(bear);
+    assert!(
+        game.can_attack(
+            game.battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == bear_id)
+                .expect("the Bears are there")
+        )
+    );
+
+    let mut aura = creature(10_001, cards::PACIFISM, PlayerId::Two);
+    aura.attached_to = Some(bear_id);
+    game.battlefield.push(aura);
+
+    assert!(
+        !game.can_attack(
+            game.battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == bear_id)
+                .expect("the Bears are there")
+        ),
+        "it cannot attack"
+    );
+
+    // And the same creature on the other side of a combat cannot block.
+    game.step = Step::DeclareBlockers;
+    let mut attacker = creature(10_002, cards::SEDGE_TROLL, PlayerId::Two);
+    attacker.attacking = true;
+    attacker.attack_defender = Some(AttackDefender::Player(PlayerId::One));
+    game.battlefield.push(attacker);
+    let blocks = game.legal_actions(PlayerId::One).into_iter().any(
+        |action| matches!(action, Action::DeclareBlocker { blocker, .. } if blocker == bear_id),
+    );
+    assert!(!blocks, "and it cannot block");
+}
+
+/// Crippling Blight shrinks and silences at once; Tormented Soul does the
+/// same to both sides of a block.
+#[test]
+fn the_other_two_prohibitions_land_as_well() {
+    let (game, _attacker, soul) = combat(cards::TORMENTED_SOUL);
+    assert!(!can_block(&game, soul));
+
+    let mut game = ready_game();
+    game.step = Step::DeclareBlockers;
+    let mut attacker = creature(10_000, cards::SEDGE_TROLL, PlayerId::One);
+    attacker.attacking = true;
+    attacker.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
+    let attacker_id = attacker.card.id;
+    game.battlefield.push(attacker);
+    let blight = creature(10_001, cards::CRIPPLING_BLIGHT, PlayerId::One);
+    let blight_id = blight.card.id;
+    game.battlefield.push(blight);
+    let victim = creature(10_002, cards::GRIZZLY_BEARS, PlayerId::Two);
+    let victim_id = victim.card.id;
+    game.battlefield.push(victim);
+    assert!(can_block(&game, victim_id), "free before the Aura");
+
+    game.battlefield
+        .iter_mut()
+        .find(|permanent| permanent.card.id == blight_id)
+        .expect("the Blight is there")
+        .attached_to = Some(victim_id);
+
+    assert!(!can_block(&game, victim_id));
+    assert_eq!(
+        game.power(
+            game.battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == victim_id)
+                .expect("the Bears are there")
+        ),
+        Some(1),
+        "and it is a point smaller"
+    );
+    assert_ne!(attacker_id, victim_id);
+}
+
 #[test]
 fn every_cannot_block_identity_reports_complete_coverage() {
     let catalog = poc::catalog().expect("catalog builds");
     for definition in [
+        cards::PACIFISM,
+        cards::CRIPPLING_BLIGHT,
+        cards::TORMENTED_SOUL,
+        cards::WELKIN_TERN,
+        cards::GOBLIN_SHORTCUTTER,
+        cards::HUNTED_GHOUL,
+        cards::FERVENT_CATHAR,
+        cards::MALICIOUS_INTENT,
         cards::SIGHTLESS_GHOUL,
         cards::MARKOV_WARLORD,
         cards::VAMPIRE_INTERLOPER,

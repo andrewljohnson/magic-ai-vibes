@@ -1,9 +1,9 @@
 use super::{
-    CardDefinitionId, CharacteristicSource, DecisionContinuation, DecisionKind,
-    DecisionObservation, DecisionOption, DecisionOrderSemantics, DecisionPreference,
-    DecisionVisibility, DecisionZone, EffectDef, EffectRecipientDef, Game, GameEvent, GameObjectId,
-    PendingDecision, PendingTrigger, StackAbilityPayload, StackObject, StackObjectKind, Target,
-    TargetSelection, TargetSlotId, TriggerPlacementBatch, ZoneKind,
+    AbilityTargetDef, CardPartId, DecisionContinuation, DecisionKind, DecisionObservation,
+    DecisionOption, DecisionOrderSemantics, DecisionPreference, DecisionVisibility, DecisionZone,
+    EffectDef, Game, GameEvent, GameObjectId, ObjectCharacteristics, PendingDecision,
+    PendingTrigger, StackAbilityPayload, StackObject, StackObjectKind, Target, TargetSelection,
+    TargetSlotId, TriggerPlacementBatch, ZoneKind,
 };
 
 impl Game {
@@ -52,6 +52,12 @@ impl Game {
     ) {
         while !triggers.is_empty() {
             let trigger = triggers.remove(0);
+            // The mode comes first: what it names decides both the effect
+            // and the targets there are left to choose (CR 603.3c).
+            if trigger.modes.is_some() {
+                self.queue_trigger_mode_decision(trigger, triggers, remaining);
+                return;
+            }
             if trigger.targets.len() < trigger.target_defs.len() {
                 self.queue_trigger_target_decision(trigger, triggers, remaining);
                 return;
@@ -68,12 +74,7 @@ impl Game {
         remaining: Vec<TriggerPlacementBatch>,
     ) {
         let target = trigger.target_defs[trigger.targets.len()];
-        let candidates = self.ability_targets_matching(
-            target.predicate,
-            trigger.controller,
-            trigger.source.object,
-            trigger.context,
-        );
+        let candidates = self.trigger_target_candidates(&trigger, target);
         if candidates.len() < usize::from(target.minimum) {
             // A triggered ability with no legal choice for a required target
             // is removed from the stack as the placement procedure completes.
@@ -117,19 +118,20 @@ impl Game {
                 },
             })
             .collect::<Vec<_>>();
-        let source_name = self
-            .catalog
-            .get(trigger.definition)
-            .map_or("Triggered ability", |card| card.name.as_str());
+        let source_name = self.presentation_name(trigger.presentation).map_or_else(
+            || "Triggered ability".to_owned(),
+            std::borrow::Cow::into_owned,
+        );
         let target_effect = match trigger.effect {
             EffectDef::May { effect, .. } => *effect,
             effect => effect,
         };
         let preference = if matches!(
             target_effect,
-            EffectDef::ExileLinkedToSource {
-                object: EffectRecipientDef::Target(slot),
-            } if slot.index() == trigger.targets.len()
+            EffectDef::ExileLinkedToSource { object }
+                if object
+                    .legal_target()
+                    .is_some_and(|slot| slot.index() == trigger.targets.len())
         ) {
             DecisionPreference::LinkedExileTargets
         } else {
@@ -145,6 +147,7 @@ impl Game {
                     player: trigger.controller,
                     kind: DecisionKind::TriggerPlacement,
                     order_semantics: None,
+                    source: Some(trigger.source.object),
                     prompt: format!("{source_name}: choose {}", target.label()),
                     visibility: DecisionVisibility::Public,
                     preference,
@@ -163,6 +166,200 @@ impl Game {
         );
     }
 
+    fn trigger_target_candidates(
+        &self,
+        trigger: &PendingTrigger,
+        target: AbilityTargetDef,
+    ) -> Vec<Target> {
+        let candidates = self
+            .targets_owned_by_target_player(
+                target.predicate,
+                &trigger.targets,
+                trigger.source.object,
+            )
+            .unwrap_or_else(|| {
+                self.ability_targets_matching(
+                    target.predicate,
+                    trigger.controller,
+                    trigger.source.object,
+                    trigger.context.trigger,
+                )
+            });
+        Self::without_excluded_source(&target, trigger.source.object, candidates)
+    }
+
+    /// Asks which mode a modal trigger was put onto the stack with. Only
+    /// modes the runtime can execute are offered, and a modal trigger with
+    /// none of them simply resolves as the nothing its own program is.
+    pub(super) fn queue_trigger_mode_decision(
+        &mut self,
+        mut trigger: PendingTrigger,
+        pending: Vec<PendingTrigger>,
+        remaining: Vec<TriggerPlacementBatch>,
+    ) {
+        let modal = trigger
+            .modes
+            .take()
+            .expect("asked only for a modal trigger");
+        let offered = modal
+            .modes
+            .iter()
+            .enumerate()
+            .filter(|(_, mode)| mode.is_executable())
+            .collect::<Vec<_>>();
+        // "Choose up to one" makes declining an answer in its own right, so
+        // a lone executable mode is still a question worth asking.
+        let required = usize::from(modal.minimum.min(1));
+        let Some((only, _)) = offered
+            .first()
+            .filter(|_| offered.len() == 1 && required == 1)
+        else {
+            if offered.is_empty() {
+                let mut continued = vec![trigger];
+                continued.extend(pending);
+                self.place_trigger_sequence(continued, remaining);
+                return;
+            }
+            let options = offered
+                .iter()
+                .map(|(index, mode)| DecisionOption {
+                    id: u32::try_from(*index).unwrap_or(u32::MAX),
+                    label: mode.text.to_owned(),
+                    card: None,
+                    members: Vec::new(),
+                    ability_text: Some(mode.text.to_owned()),
+                    zone: DecisionZone::None,
+                })
+                .collect::<Vec<_>>();
+            let source_name = self.presentation_name(trigger.presentation).map_or_else(
+                || "Triggered ability".to_owned(),
+                std::borrow::Cow::into_owned,
+            );
+            let id = self.next_decision_id;
+            self.next_decision_id = self.next_decision_id.saturating_add(1);
+            self.pending_decisions.insert(
+                0,
+                PendingDecision {
+                    observation: DecisionObservation {
+                        id,
+                        player: trigger.controller,
+                        kind: DecisionKind::TriggerPlacement,
+                        order_semantics: None,
+                        source: Some(trigger.source.object),
+                        prompt: if required == 1 {
+                            format!("{source_name}: choose one")
+                        } else {
+                            format!("{source_name}: choose up to one")
+                        },
+                        visibility: DecisionVisibility::Public,
+                        preference: DecisionPreference::Neutral,
+                        minimum: required,
+                        maximum: 1,
+                        cancellable: false,
+                        options,
+                    },
+                    continuation: DecisionContinuation::TriggerMode {
+                        trigger,
+                        pending,
+                        remaining,
+                        modes: modal,
+                    },
+                },
+            );
+            return;
+        };
+        // One executable mode is no choice at all.
+        Self::apply_trigger_mode(&mut trigger, modal, *only);
+        let mut continued = vec![trigger];
+        continued.extend(pending);
+        self.place_trigger_sequence(continued, remaining);
+    }
+
+    /// Takes the chosen mode's own text, effect, and targets onto the
+    /// trigger. From here it is an ordinary trigger carrying one program,
+    /// which is also what lets a checkpoint locate the mode again.
+    pub(super) fn apply_trigger_mode(
+        trigger: &mut PendingTrigger,
+        modal: crate::card::ModalSpellDef,
+        index: usize,
+    ) {
+        let Some(mode) = modal.modes.get(index) else {
+            return;
+        };
+        trigger.modes = None;
+        trigger.text = mode.text;
+        trigger.effect = mode.declarative_effect().unwrap_or(EffectDef::None);
+        trigger.resolver = Self::ability_resolver(trigger.source.ability, mode);
+        if let crate::card::DeclarativeAbilityDef::Spell(spell) = mode.definition {
+            trigger.target_defs.extend_from_slice(spell.targets());
+        }
+    }
+
+    /// Asks how a fixed total is split among targets already chosen. Every
+    /// target takes at least one, so with one target there is nothing to ask.
+    pub(super) fn queue_trigger_division_decision(
+        &mut self,
+        trigger: PendingTrigger,
+        pending: Vec<PendingTrigger>,
+        remaining: Vec<TriggerPlacementBatch>,
+        targets: Vec<Target>,
+        divisions: Vec<Vec<u16>>,
+    ) {
+        let source_name = self.presentation_name(trigger.presentation).map_or_else(
+            || "Triggered ability".to_owned(),
+            std::borrow::Cow::into_owned,
+        );
+        let labels = targets
+            .iter()
+            .map(|target| self.target_label(trigger.controller, *target))
+            .collect::<Vec<_>>();
+        let options = divisions
+            .iter()
+            .enumerate()
+            .map(|(index, amounts)| DecisionOption {
+                id: u32::try_from(index).unwrap_or(u32::MAX),
+                label: amounts
+                    .iter()
+                    .zip(&labels)
+                    .map(|(amount, label)| format!("{amount} to {label}"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                card: None,
+                members: Vec::new(),
+                ability_text: None,
+                zone: DecisionZone::None,
+            })
+            .collect::<Vec<_>>();
+        let id = self.next_decision_id;
+        self.next_decision_id = self.next_decision_id.saturating_add(1);
+        self.pending_decisions.insert(
+            0,
+            PendingDecision {
+                observation: DecisionObservation {
+                    id,
+                    player: trigger.controller,
+                    kind: DecisionKind::TriggerPlacement,
+                    order_semantics: None,
+                    source: Some(trigger.source.object),
+                    prompt: format!("{source_name}: divide the total"),
+                    visibility: DecisionVisibility::Public,
+                    preference: DecisionPreference::Neutral,
+                    minimum: 1,
+                    maximum: 1,
+                    cancellable: false,
+                    options,
+                },
+                continuation: DecisionContinuation::TriggerDivision {
+                    trigger,
+                    pending,
+                    remaining,
+                    targets,
+                    divisions,
+                },
+            },
+        );
+    }
+
     pub(super) fn queue_trigger_order_decision(
         &mut self,
         batch: TriggerPlacementBatch,
@@ -173,13 +370,12 @@ impl Game {
             .iter()
             .map(|trigger| {
                 let name = self
-                    .catalog
-                    .get(trigger.definition)
-                    .map_or("Triggered ability", |card| card.name.as_str());
+                    .presentation_name(trigger.presentation)
+                    .unwrap_or_else(|| "Triggered ability".into());
                 DecisionOption {
                     id: trigger.id,
                     label: format!("{name} triggered ability"),
-                    card: Some((trigger.source.object, trigger.definition)),
+                    card: Some((trigger.source.object, trigger.presentation)),
                     members: Vec::new(),
                     ability_text: Some(trigger.text.into()),
                     zone: DecisionZone::Battlefield,
@@ -199,6 +395,7 @@ impl Game {
                     player: batch.controller,
                     kind: DecisionKind::TriggerOrder,
                     order_semantics: Some(DecisionOrderSemantics::Resolution),
+                    source: None,
                     prompt: "Choose triggered ability resolution order".into(),
                     visibility: DecisionVisibility::Public,
                     preference: DecisionPreference::Neutral,
@@ -235,31 +432,33 @@ impl Game {
         self.place_trigger_sequence(push_order, remaining);
     }
 
-    pub(super) fn target_card(&self, target: Target) -> Option<(GameObjectId, CardDefinitionId)> {
+    pub(super) fn target_card(
+        &self,
+        target: Target,
+    ) -> Option<(GameObjectId, ObjectCharacteristics)> {
         match target {
             Target::Player(_) => None,
-            Target::Card(id) => self
-                .card_in_nonbattlefield_zone(id)
-                .map(|(_, card)| (id, card.definition)),
+            Target::Card(id) => self.card_in_nonbattlefield_zone(id).map(|(_, card)| {
+                (
+                    id,
+                    ObjectCharacteristics::card(card.definition, CardPartId::PRIMARY),
+                )
+            }),
             Target::Permanent(id) => self
                 .battlefield
                 .iter()
                 .find(|permanent| permanent.card.id == id)
-                .map(|permanent| (id, permanent.card.definition)),
+                .map(|permanent| (id, Self::effective_rules_source(permanent))),
             Target::Spell(id) => self
                 .stack
                 .iter()
                 .find(|object| object.id == id)
-                .map(|object| (id, object.card.definition)),
+                .map(|object| (id, object.presentation())),
         }
     }
 
     pub(super) fn put_trigger_on_stack(&mut self, trigger: PendingTrigger) {
-        let card = self.unbacked_object(
-            trigger.definition,
-            trigger.owner,
-            CharacteristicSource::Ability(trigger.definition),
-        );
+        let card = self.unbacked_ability_object(trigger.presentation, trigger.owner);
         let object = card.id;
         self.stack.push(StackObject {
             id: object,
@@ -269,15 +468,16 @@ impl Game {
             ability: Some(StackAbilityPayload {
                 origin: trigger.source.ability,
                 definition: None,
-                presentation_definition: trigger.definition,
+                presentation: trigger.presentation,
                 text: Some(trigger.text),
-                target_defs: trigger.target_defs.to_vec(),
+                target_defs: trigger.target_defs,
                 targets: trigger.targets,
                 context: trigger.context,
                 resolver: trigger.resolver,
                 condition: trigger.condition,
                 mode_effects: Vec::new(),
-                x: 0,
+                resolution_destination: None,
+                x: trigger.x,
             }),
             controller: trigger.controller,
             signature: None,
@@ -286,6 +486,11 @@ impl Game {
             text_changes: Vec::new(),
             colors: None,
             cast_via_flashback: false,
+            cast_at_instant_speed: false,
+            cast_from_zone: None,
+            face_down: None,
+            colors_of_mana_spent: crate::card::ColorSet::empty(),
+            phyrexian_symbols_paid_with_life: 0,
             is_copy: false,
         });
         self.events.push(GameEvent::TriggeredAbilityPutOnStack {
@@ -293,7 +498,8 @@ impl Game {
             trigger: trigger.id,
             object,
             source: trigger.source.object,
-            definition: trigger.definition,
+            presentation: trigger.presentation,
         });
+        self.capture_ability_targeting_triggers(object);
     }
 }

@@ -43,6 +43,13 @@ impl ReplayRng {
         sample < likelihood
     }
 
+    /// Uniformly samples an index into a slice of `len` items.
+    pub(crate) fn index_below(&mut self, len: usize) -> usize {
+        debug_assert!(len != 0);
+        let range = u64::try_from(len).expect("slice lengths fit in u64");
+        usize::try_from(self.uniform_below(range)).expect("result is below a slice length")
+    }
+
     fn index_inclusive(&mut self, upper: usize) -> usize {
         let range = u64::try_from(upper)
             .expect("slice indexes fit in u64")

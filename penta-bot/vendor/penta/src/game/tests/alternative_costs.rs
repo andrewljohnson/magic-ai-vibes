@@ -1,4 +1,5 @@
 use super::*;
+use crate::AbilityProgramDef;
 
 fn alternative_cast_action(
     game: &Game,
@@ -31,11 +32,14 @@ fn snapcaster_grants_an_ordinary_card_cost_flashback_ability() {
     let catalog = poc::catalog().unwrap();
     let snapcaster = catalog.get(cards::SNAPCASTER_MAGE).unwrap();
     let trigger = snapcaster.rules.ability(AbilityId(1)).unwrap();
-    let EffectDef::Apply {
-        effect: AppliedEffectDef::GrantAbility(granted),
-        duration: EffectDurationDef::UntilEndOfTurn,
+    let AbilityProgramDef::Effects(EffectDef::Apply {
+        effect:
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::Add(granted),
+            )),
+        duration: ResolvedEffectDurationDef::UntilEndOfTurn,
         ..
-    } = trigger.effect.definition
+    }) = trigger.effect.definition
     else {
         panic!("Snapcaster's trigger should use the generic ability-grant effect")
     };
@@ -434,7 +438,7 @@ fn snapcaster_flashback_cannot_be_combined_with_overload() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn incomplete_alternative_cast_clauses_do_not_enable_or_transform_their_costs() {
-    let definition_id = CardDefinitionId(20_100);
+    let definition_id = CardDefinitionId::new(20_100);
     let flashback = AlternativeCostId(1);
     let overload = AlternativeCostId(2);
     let targets = Box::leak(
@@ -591,22 +595,27 @@ fn ghor_clan_rampager_uses_one_shared_bloodrush_effect() {
             AbilityCostDef::DiscardSource,
         ],
     );
-    let EffectDef::Apply {
-        recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
+    let AbilityProgramDef::Effects(EffectDef::Apply {
+        recipient,
         effect: AppliedEffectDef::Composite(components),
-        duration: EffectDurationDef::UntilEndOfTurn,
-    } = bloodrush.effect.definition
+        duration: ResolvedEffectDurationDef::UntilEndOfTurn,
+    }) = bloodrush.effect.definition
     else {
         panic!("Rampager should apply one composite effect until end of turn")
     };
+    assert_eq!(recipient.legal_target(), Some(TargetIndex::PRIMARY));
     assert!(matches!(
         components,
         [
-            AppliedEffectDef::ModifyPowerToughness {
-                power: ValueDef::Constant(4),
-                toughness: ValueDef::Constant(4),
-            },
-            AppliedEffectDef::GrantAbility(ability),
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::PowerToughness(
+                PowerToughnessOperationDef::Modify {
+                    power: ValueDef::Constant(4),
+                    toughness: ValueDef::Constant(4),
+                },
+            )),
+            AppliedEffectDef::Characteristic(CharacteristicOperationDef::Abilities(
+                AbilityOperationDef::Add(ability),
+            )),
         ] if ability.definition == DeclarativeAbilityDef::Keyword(KeywordAbility::Trample)
     ));
 }
@@ -734,7 +743,7 @@ fn bloodrush_uses_real_mana_sources_and_tramples_over_a_blocker() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut blocker = creature(20_001, cards::SAVANNAH_LIONS, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     let mountain = creature(20_002, cards::MOUNTAIN, PlayerId::One);
     let mountain_id = mountain.card.id;
@@ -828,10 +837,13 @@ fn bloodrush_rechecks_that_its_target_is_still_attacking() {
     assert!(!game.permanent_has_executable_keyword(attacker, KeywordAbility::Trample));
     assert!(game.events.iter().any(|event| matches!(
         event,
-        GameEvent::AbilityFizzled { object, source, definition }
+        GameEvent::AbilityFizzled { object, source, presentation }
             if *object == ability_object
                 && *source == rampager_id
-                && *definition == cards::GHOR_CLAN_RAMPAGER
+                && *presentation == ObjectCharacteristics::card(
+                    cards::GHOR_CLAN_RAMPAGER,
+                    CardPartId::PRIMARY,
+                )
     )));
     assert!(!game.events.iter().any(|event| matches!(
         event,

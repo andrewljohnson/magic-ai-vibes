@@ -2,10 +2,15 @@ use std::fmt::Write as _;
 
 use crate::ids::{ModeId, TargetSlotId};
 
+use super::presentation_predicates::{
+    object_predicate_implies, predicate_color, predicate_color_count, predicate_controller,
+    predicate_mana_value_at_most, predicate_negated_subtype, predicate_power_at_least,
+    predicate_subtype,
+};
 use super::{
-    AbilityDef, AbilityTargetDef, AbilityTargetPredicate, CardEffectStatus, CardSupertype,
-    CardType, DeclarativeAbilityDef, DividedTotal, ManaColor, ObjectPredicateDef, PlayerRelation,
-    TargetPredicate, ZoneKind,
+    AbilityDef, AbilityPredicateDef, AbilityTargetDef, AbilityTargetPredicate, CardEffectStatus,
+    CardSupertype, CardType, ConditionalModeMaximumDef, DeclarativeAbilityDef, DividedTotal,
+    ManaColor, ObjectPredicateDef, PlayerRelation, TargetPredicate, ZoneKind,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -57,398 +62,6 @@ impl TargetSlotDef {
     }
 }
 
-fn object_predicate_implies(predicate: ObjectPredicateDef, expected: ObjectPredicateDef) -> bool {
-    if predicate == expected {
-        return true;
-    }
-    match predicate {
-        ObjectPredicateDef::All(predicates) => predicates
-            .iter()
-            .copied()
-            .any(|predicate| object_predicate_implies(predicate, expected)),
-        ObjectPredicateDef::AnyOf(predicates) => {
-            !predicates.is_empty()
-                && predicates
-                    .iter()
-                    .copied()
-                    .all(|predicate| object_predicate_implies(predicate, expected))
-        }
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => false,
-    }
-}
-
-fn predicate_color(predicate: ObjectPredicateDef) -> Option<ManaColor> {
-    match predicate {
-        ObjectPredicateDef::Color(color) => Some(color),
-        ObjectPredicateDef::All(predicates) => predicates.iter().copied().find_map(predicate_color),
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_color_count(predicate: ObjectPredicateDef) -> Option<u8> {
-    match predicate {
-        ObjectPredicateDef::ColorCount(count) => Some(count),
-        ObjectPredicateDef::All(predicates) => {
-            predicates.iter().copied().find_map(predicate_color_count)
-        }
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_subtype(predicate: ObjectPredicateDef) -> Option<&'static str> {
-    match predicate {
-        ObjectPredicateDef::Subtype(subtype) => Some(subtype),
-        ObjectPredicateDef::All(predicates) => {
-            predicates.iter().copied().find_map(predicate_subtype)
-        }
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_negated_subtype(predicate: ObjectPredicateDef) -> Option<&'static str> {
-    match predicate {
-        ObjectPredicateDef::Not(inner) => match *inner {
-            ObjectPredicateDef::Subtype(subtype) => Some(subtype),
-            _ => None,
-        },
-        ObjectPredicateDef::All(predicates) => predicates
-            .iter()
-            .copied()
-            .find_map(predicate_negated_subtype),
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_power_at_least(predicate: ObjectPredicateDef) -> Option<i16> {
-    match predicate {
-        // An exact power is also a minimum, which is all this reports.
-        ObjectPredicateDef::PowerAtLeast(power) | ObjectPredicateDef::PowerExactly(power) => {
-            Some(power)
-        }
-        ObjectPredicateDef::All(predicates) => predicates
-            .iter()
-            .copied()
-            .find_map(predicate_power_at_least),
-        ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_mana_value_at_most(predicate: ObjectPredicateDef) -> Option<u8> {
-    match predicate {
-        ObjectPredicateDef::ManaValueAtMost(value) => Some(value),
-        ObjectPredicateDef::All(predicates) => predicates
-            .iter()
-            .copied()
-            .find_map(predicate_mana_value_at_most),
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::ControlledBy(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
-fn predicate_controller(predicate: ObjectPredicateDef) -> Option<PlayerRelation> {
-    match predicate {
-        ObjectPredicateDef::ControlledBy(controller) => Some(controller),
-        ObjectPredicateDef::All(predicates) => {
-            predicates.iter().copied().find_map(predicate_controller)
-        }
-        ObjectPredicateDef::Any
-        | ObjectPredicateDef::Source
-        | ObjectPredicateDef::Token
-        | ObjectPredicateDef::Tapped
-        | ObjectPredicateDef::Attacking
-        | ObjectPredicateDef::Blocking
-        | ObjectPredicateDef::BlockedBySource
-        | ObjectPredicateDef::Enchanted
-        | ObjectPredicateDef::AttachedTo(_)
-        | ObjectPredicateDef::AttachedToSource
-        | ObjectPredicateDef::AttackedThisTurn
-        | ObjectPredicateDef::HasType(_)
-        | ObjectPredicateDef::Spell
-        | ObjectPredicateDef::NoncreatureSpell
-        | ObjectPredicateDef::Color(_)
-        | ObjectPredicateDef::ColorCount(_)
-        | ObjectPredicateDef::Subtype(_)
-        | ObjectPredicateDef::ManaValueAtMost(_)
-        | ObjectPredicateDef::ManaValueEqualTo(_)
-        | ObjectPredicateDef::ManaValueAtMostValue(_)
-        | ObjectPredicateDef::PowerAtLeast(_)
-        | ObjectPredicateDef::PowerExactly(_)
-        | ObjectPredicateDef::ToughnessExactly(_)
-        | ObjectPredicateDef::ToughnessLessThan(_)
-        | ObjectPredicateDef::PowerGreaterThan(_)
-        | ObjectPredicateDef::PowerLessThan(_)
-        | ObjectPredicateDef::ToughnessGreaterThan(_)
-        | ObjectPredicateDef::HasAnyBasicLandType(_)
-        | ObjectPredicateDef::Supertype(_)
-        | ObjectPredicateDef::DebutSet(_)
-        | ObjectPredicateDef::SharesNameWithSource
-        | ObjectPredicateDef::AttackingOrBlocking
-        | ObjectPredicateDef::HasKeyword(_)
-        | ObjectPredicateDef::HasCounter(_)
-        | ObjectPredicateDef::HasNonManaActivatedAbility
-        | ObjectPredicateDef::AnyOf(_)
-        | ObjectPredicateDef::Not(_)
-        | ObjectPredicateDef::Special(_) => None,
-    }
-}
-
 fn predicate_negates(predicate: ObjectPredicateDef, expected: ObjectPredicateDef) -> bool {
     match predicate {
         // Stay deliberately conservative: `not (red land)` does not imply
@@ -462,36 +75,54 @@ fn predicate_negates(predicate: ObjectPredicateDef, expected: ObjectPredicateDef
         | ObjectPredicateDef::Source
         | ObjectPredicateDef::Token
         | ObjectPredicateDef::Tapped
+        | ObjectPredicateDef::WasDealtDamageThisTurn
+        | ObjectPredicateDef::DealtDamageThisTurn
         | ObjectPredicateDef::Attacking
+        | ObjectPredicateDef::Saddled
         | ObjectPredicateDef::Blocking
         | ObjectPredicateDef::BlockedBySource
+        | ObjectPredicateDef::BlockingSource
+        | ObjectPredicateDef::BandedWithSource
+        | ObjectPredicateDef::Unpaired
+        | ObjectPredicateDef::PairedWithSource
         | ObjectPredicateDef::Enchanted
         | ObjectPredicateDef::AttachedTo(_)
         | ObjectPredicateDef::AttachedToSource
         | ObjectPredicateDef::AttackedThisTurn
+        | ObjectPredicateDef::CameUnderControlThisTurn
+        | ObjectPredicateDef::EnteredThisTurn
+        | ObjectPredicateDef::AttackedDuringControllersLastTurn
         | ObjectPredicateDef::HasType(_)
         | ObjectPredicateDef::Spell
         | ObjectPredicateDef::NoncreatureSpell
         | ObjectPredicateDef::Color(_)
         | ObjectPredicateDef::ColorCount(_)
         | ObjectPredicateDef::Subtype(_)
+        | ObjectPredicateDef::Named(_)
+        | ObjectPredicateDef::HasChosenName
         | ObjectPredicateDef::ManaValueAtMost(_)
         | ObjectPredicateDef::ManaValueEqualTo(_)
         | ObjectPredicateDef::ManaValueAtMostValue(_)
         | ObjectPredicateDef::PowerAtLeast(_)
         | ObjectPredicateDef::PowerExactly(_)
         | ObjectPredicateDef::ToughnessExactly(_)
+        | ObjectPredicateDef::TotalPowerAndToughnessAtMost(_)
         | ObjectPredicateDef::ToughnessLessThan(_)
         | ObjectPredicateDef::PowerGreaterThan(_)
         | ObjectPredicateDef::PowerLessThan(_)
+        | ObjectPredicateDef::ToughnessGreaterThanItsPower
         | ObjectPredicateDef::ToughnessGreaterThan(_)
         | ObjectPredicateDef::HasAnyBasicLandType(_)
         | ObjectPredicateDef::ControlledBy(_)
+        | ObjectPredicateDef::OwnedBy(_)
         | ObjectPredicateDef::Supertype(_)
         | ObjectPredicateDef::DebutSet(_)
         | ObjectPredicateDef::SharesNameWithSource
+        | ObjectPredicateDef::HasSourcesChosenScalar(_)
+        | ObjectPredicateDef::TargetsObjectMatching(_)
         | ObjectPredicateDef::AttackingOrBlocking
         | ObjectPredicateDef::HasKeyword(_)
+        | ObjectPredicateDef::HasAbility(_)
         | ObjectPredicateDef::HasCounter(_)
         | ObjectPredicateDef::HasNonManaActivatedAbility
         | ObjectPredicateDef::AnyOf(_)
@@ -519,7 +150,6 @@ const fn card_type_name(card_type: CardType) -> &'static str {
         CardType::Land => "land",
         CardType::Planeswalker => "planeswalker",
         CardType::Sorcery => "sorcery",
-        CardType::Emblem => "emblem",
     }
 }
 
@@ -618,7 +248,12 @@ fn semantic_card_subject(object: ObjectPredicateDef) -> String {
     if let Some(subject) = simple_disjunction_subject(object) {
         return format!("{subject} card");
     }
-    if object_predicate_implies(object, ObjectPredicateDef::HasType(CardType::Creature)) {
+    if object_predicate_implies(
+        object,
+        ObjectPredicateDef::HasAbility(AbilityPredicateDef::Flashback),
+    ) {
+        "card with flashback".into()
+    } else if object_predicate_implies(object, ObjectPredicateDef::HasType(CardType::Creature)) {
         "creature card".into()
     } else if let Some(subtype) = predicate_subtype(object) {
         format!("{subtype} card")
@@ -643,9 +278,11 @@ fn semantic_object_target_subject(
             Some(PlayerRelation::ActivePlayer) => "the active player's graveyard",
             Some(PlayerRelation::NonactivePlayer) => "the nonactive player's graveyard",
             Some(PlayerRelation::EventPlayer) => "the event player's graveyard",
+            Some(PlayerRelation::NotEventPlayer) => "a graveyard other than the event player's",
             Some(PlayerRelation::ControllerOfAttachedPermanent) => {
                 "the enchanted permanent's controller's graveyard"
             }
+            Some(PlayerRelation::EnchantedPlayer) => "the enchanted player's graveyard",
             Some(PlayerRelation::ChosenPlayer) => "the chosen player's graveyard",
             Some(PlayerRelation::Any) | None => "a graveyard",
         };
@@ -674,8 +311,10 @@ const fn player_target_label(relation: PlayerRelation) -> &'static str {
         PlayerRelation::ActivePlayer => "target active player",
         PlayerRelation::NonactivePlayer => "target nonactive player",
         PlayerRelation::EventPlayer => "target event player",
+        PlayerRelation::NotEventPlayer => "target player other than the event player",
         PlayerRelation::ChosenPlayer => "the chosen player",
         PlayerRelation::ControllerOfAttachedPermanent => "the enchanted permanent's controller",
+        PlayerRelation::EnchantedPlayer => "the enchanted player",
     }
 }
 
@@ -688,10 +327,14 @@ const fn player_or_planeswalker_target_label(relation: PlayerRelation) -> &'stat
         PlayerRelation::ActivePlayer => "target active player or planeswalker",
         PlayerRelation::NonactivePlayer => "target nonactive player or planeswalker",
         PlayerRelation::EventPlayer => "target event player or planeswalker",
+        PlayerRelation::NotEventPlayer => {
+            "target player other than the event player or planeswalker"
+        }
         PlayerRelation::ChosenPlayer => "the chosen player or planeswalker",
         PlayerRelation::ControllerOfAttachedPermanent => {
             "the enchanted permanent's controller or planeswalker"
         }
+        PlayerRelation::EnchantedPlayer => "the enchanted player or their planeswalker",
     }
 }
 
@@ -704,10 +347,12 @@ const fn controller_suffix(relation: PlayerRelation) -> &'static str {
         PlayerRelation::ActivePlayer => " the active player controls",
         PlayerRelation::NonactivePlayer => " the nonactive player controls",
         PlayerRelation::EventPlayer => " the event player controls",
+        PlayerRelation::NotEventPlayer => " the event player does not control",
         PlayerRelation::ChosenPlayer => " the chosen player controls",
         PlayerRelation::ControllerOfAttachedPermanent => {
             " the enchanted permanent's controller controls"
         }
+        PlayerRelation::EnchantedPlayer => " the enchanted player controls",
     }
 }
 
@@ -720,10 +365,12 @@ const fn owner_suffix(relation: PlayerRelation) -> &'static str {
         PlayerRelation::ActivePlayer => " the active player owns",
         PlayerRelation::NonactivePlayer => " the nonactive player owns",
         PlayerRelation::EventPlayer => " the event player owns",
+        PlayerRelation::NotEventPlayer => " the event player does not own",
         PlayerRelation::ChosenPlayer => " the chosen player owns",
         PlayerRelation::ControllerOfAttachedPermanent => {
             " the enchanted permanent's controller owns"
         }
+        PlayerRelation::EnchantedPlayer => " the enchanted player owns",
     }
 }
 
@@ -768,7 +415,11 @@ fn presentation_target_predicate(predicate: AbilityTargetPredicate) -> Option<Ta
                 Some(TargetPredicate::Permanent)
             }
         }
-        AbilityTargetPredicate::Object { .. } => None,
+        // Presented as a spell slot: a client has no narrower kind, and the
+        // ability half is the rarer reading.
+        AbilityTargetPredicate::StackObject { .. } => Some(TargetPredicate::Spell),
+        AbilityTargetPredicate::OwnedByTargetPlayer { .. }
+        | AbilityTargetPredicate::Object { .. } => None,
     }
 }
 
@@ -791,7 +442,28 @@ impl AbilityTargetDef {
                 let subject = object_target_subject(object, predicate);
                 format!("target {subject} that player or that planeswalker's controller controls")
             }
+            AbilityTargetPredicate::OwnedByTargetPlayer { object, zones, .. } => {
+                let subject = semantic_card_subject(object);
+                match zones {
+                    [ZoneKind::Graveyard] => {
+                        format!("target {subject} in that player's graveyard")
+                    }
+                    [ZoneKind::Hand] => format!("target {subject} in that player's hand"),
+                    [ZoneKind::Library] => {
+                        format!("target {subject} in that player's library")
+                    }
+                    [ZoneKind::Exile] => format!("target {subject} that player owns in exile"),
+                    _ => format!("target {subject} that player owns"),
+                }
+            }
             AbilityTargetPredicate::Player(relation) => player_target_label(relation).into(),
+            AbilityTargetPredicate::StackObject { controller, .. } => {
+                let mut label = "target spell or ability".to_string();
+                if let Some(relation) = controller {
+                    append_relation_suffix(&mut label, controller_suffix(relation));
+                }
+                label
+            }
             AbilityTargetPredicate::Object {
                 object,
                 zones,
@@ -850,6 +522,9 @@ pub struct ModeSetDef {
     pub maximum: u8,
     /// Some cards explicitly allow the same mode to be chosen more than once.
     pub may_repeat: bool,
+    /// The larger maximum a printed "you may choose two instead" allows, and
+    /// what has to be true where the spell is offered for it to apply.
+    pub conditional_maximum: Option<ConditionalModeMaximumDef>,
     pub modes: Vec<ModeDef>,
 }
 
@@ -860,6 +535,7 @@ impl ModeSetDef {
             minimum: 1,
             maximum: 1,
             may_repeat: false,
+            conditional_maximum: None,
             modes,
         }
     }

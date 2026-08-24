@@ -1,161 +1,95 @@
-//! Animation supplied by a static ability rather than by a resolved effect.
+//! Recipient stratification for static characteristic transformations.
 //!
 //! "All Forests are 1/1 creatures that are still lands" has to keep applying
-//! as Forests come and go, so it cannot be materialised onto a permanent the
-//! way a resolving animation is. It is read live instead, which raises the
-//! question a live read always raises: the effect changes characteristics,
-//! and the permanents it applies to are chosen by characteristics.
+//! as Forests come and go. The unified characteristic IR represents that as
+//! independent card-type and power/toughness operations, and the ordinary
+//! continuous-effect layer walkers derive those operations live.
 //!
-//! The stratification here is narrow rather than general. A static animation
-//! may only add the creature type and stats -- never subtypes, never removed
-//! abilities -- and may only be aimed by predicates that ask about land
-//! types, the card types on the printed rules, and control. None of those can
-//! read anything a static animation supplies, so the walk below cannot
-//! reach back into itself. `runtime_support` holds cards to the same limits,
-//! so a card that needs more is blocked rather than silently misread.
+//! The recipient vocabulary remains narrow: it may ask about land types, the
+//! card types below the operation being assembled, subtypes, attachment,
+//! which object is the source, and control. A layer-4 transformation may also
+//! ask about Creature because CR 613.6 pins a compound animation's recipient
+//! set when that component starts to apply; its later components do not
+//! reselect after it has supplied that type itself. A colour-only
+//! transformation gets no such exception. A basic land subtype is excluded
+//! the other way because layer-4 operations supply those. `runtime_support`
+//! uses this same boundary, so a card that needs more is blocked rather than
+//! silently misread. `card::catalog::validation` keeps a matching list for the
+//! catalog-time refusal; the two are meant to say the same thing.
 
-use super::{
-    AnimationDef, AppliedEffectDef, BasicLandType, CardType, DeclarativeAbilityDef, EffectDef,
-    EffectRecipientDef, Game, ObjectPredicateDef, Permanent, TriggerContext, ZoneKind,
-};
+use super::{BasicLandType, CardType, Game, ObjectPredicateDef};
+
+/// Whether a subtype name is one a static effect can itself supply. Basic
+/// land subtypes are: the layer-4 basic-land-type operations set and remove
+/// them, so a static animation asking about one could read what another
+/// animation just wrote. Every other subtype is inert here.
+fn subtype_is_supplied_by_a_static_effect(name: &str) -> bool {
+    BasicLandType::ALL
+        .iter()
+        .any(|land_type| land_type.subtype() == name)
+}
 
 impl Game {
-    /// The animation applying to this permanent: the one a resolved effect
-    /// put there, or failing that whatever a static ability supplies.
-    pub(super) fn effective_animation(
-        &self,
-        permanent: &Permanent,
-    ) -> Option<&'static AnimationDef> {
-        permanent
-            .animation
-            .or_else(|| self.static_animation(permanent))
-    }
-
-    /// The latest static animation covering this permanent. Later timestamps
-    /// win, the same way a second resolved animation overwrites the first.
-    fn static_animation(&self, affected: &Permanent) -> Option<&'static AnimationDef> {
-        let mut latest: Option<(&'static AnimationDef, super::ContinuousEffectTimestamp)> = None;
-        for source in self.battlefield.iter().chain(self.emblems.iter()) {
-            let Some(rules) = self.effective_rules(source) else {
-                continue;
-            };
-            for ability in rules.ability_clauses() {
-                if !ability.is_executable()
-                    || !matches!(ability.definition, DeclarativeAbilityDef::Static(_))
-                {
-                    continue;
-                }
-                let Some(EffectDef::Apply {
-                    recipient,
-                    effect: AppliedEffectDef::Animate(animation),
-                    ..
-                }) = ability.declarative_effect()
-                else {
-                    continue;
-                };
-                if !Self::static_animation_is_additive(animation)
-                    || !self.static_animation_applies(recipient, source, affected)
-                {
-                    continue;
-                }
-                if latest.is_none_or(|(_, timestamp)| timestamp <= source.timestamp) {
-                    latest = Some((animation, source.timestamp));
-                }
-            }
-        }
-        latest.map(|(animation, _)| animation)
-    }
-
-    /// Whether an animation only adds to what the permanent already is. One
-    /// that renamed subtypes or removed abilities would feed the layers that
-    /// choose which permanents it applies to.
-    #[must_use]
-    pub fn static_animation_is_additive(animation: &AnimationDef) -> bool {
-        animation.subtypes.is_empty()
-            && !animation.all_creature_types
-            && !animation.replaces_subtypes
-            && !animation.loses_abilities
-    }
-
-    fn static_animation_applies(
-        &self,
-        recipient: EffectRecipientDef,
-        source: &Permanent,
-        affected: &Permanent,
-    ) -> bool {
-        let EffectRecipientDef::MatchingObjects {
-            object,
-            zones,
-            controller,
-        } = recipient
-        else {
-            return false;
-        };
-        zones.contains(&ZoneKind::Battlefield)
-            && self.player_relation_matches(
-                affected.controller,
-                controller,
-                source.controller,
-                TriggerContext::empty(),
-            )
-            && self.static_animation_predicate_matches(object, affected)
-    }
-
-    /// The narrow predicate vocabulary a static animation may be aimed with.
-    /// Anything outside it answers false here and is refused by the runtime
-    /// boundary, so the two cannot disagree about which cards are supported.
-    pub(super) fn static_animation_predicate_matches(
-        &self,
+    fn static_animation_predicate_is_supported_with_creature(
         predicate: ObjectPredicateDef,
-        affected: &Permanent,
+        creature: bool,
     ) -> bool {
         match predicate {
-            ObjectPredicateDef::Any => true,
-            ObjectPredicateDef::HasType(card_type) => self
-                .effective_rules(affected)
-                .is_some_and(|rules| rules.types().contains(card_type)),
-            ObjectPredicateDef::HasAnyBasicLandType(land_types) => {
-                // Read from the subtype layer directly. `effective_land_types`
-                // guards on the card types, which is the very layer a static
-                // animation contributes to.
-                let subtypes = self.effective_subtypes(affected);
-                land_types.iter().any(|land_type| {
-                    subtypes
-                        .iter()
-                        .any(|subtype| BasicLandType::from_subtype(subtype) == Some(*land_type))
+            ObjectPredicateDef::Subtype(name) => !subtype_is_supplied_by_a_static_effect(name),
+            ObjectPredicateDef::Any
+            | ObjectPredicateDef::Source
+            | ObjectPredicateDef::AttachedToSource
+            | ObjectPredicateDef::HasSourcesChosenScalar(_)
+            | ObjectPredicateDef::HasAnyBasicLandType(_)
+            | ObjectPredicateDef::HasType(
+                CardType::Land | CardType::Enchantment | CardType::Artifact,
+            ) => true,
+            ObjectPredicateDef::HasType(CardType::Creature) => creature,
+            ObjectPredicateDef::All(predicates) | ObjectPredicateDef::AnyOf(predicates) => {
+                predicates.iter().copied().all(|predicate| {
+                    Self::static_animation_predicate_is_supported_with_creature(predicate, creature)
                 })
             }
-            ObjectPredicateDef::All(predicates) => predicates
-                .iter()
-                .all(|predicate| self.static_animation_predicate_matches(*predicate, affected)),
-            ObjectPredicateDef::AnyOf(predicates) => predicates
-                .iter()
-                .any(|predicate| self.static_animation_predicate_matches(*predicate, affected)),
             ObjectPredicateDef::Not(predicate) => {
-                !self.static_animation_predicate_matches(*predicate, affected)
+                Self::static_animation_predicate_is_supported_with_creature(*predicate, creature)
             }
             _ => false,
         }
     }
 
-    /// Whether this predicate stays inside the vocabulary above. The boundary
-    /// test asks the same question of every card that claims the shape.
+    /// Whether a static colour transformation's recipient predicate stays
+    /// inside the stratified vocabulary above.
     #[must_use]
     pub fn static_animation_predicate_is_supported(predicate: ObjectPredicateDef) -> bool {
-        match predicate {
-            ObjectPredicateDef::Any
-            | ObjectPredicateDef::HasAnyBasicLandType(_)
-            | ObjectPredicateDef::HasType(CardType::Land) => true,
-            ObjectPredicateDef::All(predicates) | ObjectPredicateDef::AnyOf(predicates) => {
-                predicates
-                    .iter()
-                    .copied()
-                    .all(Self::static_animation_predicate_is_supported)
-            }
-            ObjectPredicateDef::Not(predicate) => {
-                Self::static_animation_predicate_is_supported(*predicate)
-            }
-            _ => false,
-        }
+        Self::static_animation_predicate_is_supported_with_creature(predicate, false)
+    }
+
+    /// The layer-4 variant may select noncreatures because CR 613.6 keeps that
+    /// selection for the compound effect's later components.
+    #[must_use]
+    pub fn static_type_animation_predicate_is_supported(predicate: ObjectPredicateDef) -> bool {
+        Self::static_animation_predicate_is_supported_with_creature(predicate, true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    static NONCREATURE_ARTIFACT: ObjectPredicateDef = ObjectPredicateDef::All(&[
+        ObjectPredicateDef::AttachedToSource,
+        ObjectPredicateDef::HasType(CardType::Artifact),
+        ObjectPredicateDef::Not(&ObjectPredicateDef::HasType(CardType::Creature)),
+    ]);
+
+    #[test]
+    fn only_a_type_layer_transformation_may_pin_a_noncreature_selection() {
+        assert!(Game::static_type_animation_predicate_is_supported(
+            NONCREATURE_ARTIFACT,
+        ));
+        assert!(
+            !Game::static_animation_predicate_is_supported(NONCREATURE_ARTIFACT),
+            "a later colour-only transformation has no layer-4 selection to keep",
+        );
     }
 }

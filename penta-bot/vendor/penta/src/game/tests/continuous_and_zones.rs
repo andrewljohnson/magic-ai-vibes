@@ -79,6 +79,39 @@ fn kessig_wolf_run_offers_only_the_x_it_can_actually_pay() {
 }
 
 #[test]
+fn kessig_wolf_run_scales_across_many_chromatic_lantern_lands() {
+    let mut game = ready_game();
+    game.catalog = crate::card::catalog().unwrap();
+    game.battlefield.clear();
+    let run = game
+        .put_onto_battlefield(PlayerId::One, cards::KESSIG_WOLF_RUN)
+        .expect("Kessig Wolf Run is cataloged");
+    game.put_onto_battlefield(PlayerId::One, cards::CHROMATIC_LANTERN)
+        .expect("Chromatic Lantern is cataloged");
+    for _ in 0..16 {
+        game.put_onto_battlefield(PlayerId::One, cards::FOREST)
+            .expect("Forest is cataloged");
+    }
+    game.put_onto_battlefield(PlayerId::One, cards::SAVANNAH_LIONS)
+        .expect("the target creature is cataloged");
+
+    let mut offered = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .filter_map(|action| match action {
+            Action::ActivateAbility { source, x, .. } if source == run => Some(x),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    offered.sort_unstable();
+    assert_eq!(
+        offered,
+        (0..=15).collect::<Vec<_>>(),
+        "seventeen usable sources pay red, green, and X while the Run taps"
+    );
+}
+
+#[test]
 fn gaze_of_granite_sweeps_up_to_the_x_it_was_cast_for() {
     let mut game = ready_game();
     game.battlefield.clear();
@@ -185,7 +218,7 @@ fn scavenging_ooze_only_grows_on_a_creature_card() {
             .iter()
             .find(|permanent| permanent.card.id == ooze)
             .expect("still there");
-        let counters = ooze.counters[CounterKind::PlusOnePlusOne.index()];
+        let counters = ooze.counters.count(CounterKind::PlusOnePlusOne);
         assert_eq!(counters, u16::from(expect_growth), "{definition:?}");
         assert_eq!(
             game.players[0].life - life_before,
@@ -228,7 +261,12 @@ fn demonic_rising_only_pays_off_with_exactly_one_creature() {
         let demons = game
             .battlefield
             .iter()
-            .filter(|permanent| permanent.card.definition == cards::DEMON_TOKEN_5_5_BLACK)
+            .filter(|permanent| {
+                is_token_with(
+                    permanent,
+                    token_with_flying(tokens::creature(&["Demon"], &[ManaColor::Black], 5, 5)),
+                )
+            })
             .count();
         assert_eq!(demons, usize::from(expect_demon), "{creatures} creatures");
     }
@@ -302,8 +340,9 @@ fn izzet_staticaster_reads_the_name_copied_by_thespians_stage() {
             source: stage,
             ability: activated_ability_for(&game, stage, 0),
             targets: activated_targets(Target::Permanent(arbor)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -371,7 +410,16 @@ fn oblivion_ring_gives_back_exactly_what_it_took() {
                 let options = decision
                     .options
                     .iter()
-                    .filter(|option| option.card == Some((angel, cards::SERRA_ANGEL)))
+                    .filter(|option| {
+                        option.card
+                            == Some((
+                                angel,
+                                ObjectCharacteristics::card(
+                                    cards::SERRA_ANGEL,
+                                    CardPartId::PRIMARY,
+                                ),
+                            ))
+                    })
                     .map(|option| option.id)
                     .chain(decision.options.iter().map(|option| option.id))
                     .take(decision.minimum.max(1))
@@ -449,7 +497,14 @@ fn detention_sphere_takes_every_copy_and_gives_them_all_back() {
                     .iter()
                     .filter(|option| {
                         option.label == "Do it"
-                            || option.card == Some((lions[0], cards::SAVANNAH_LIONS))
+                            || option.card
+                                == Some((
+                                    lions[0],
+                                    ObjectCharacteristics::card(
+                                        cards::SAVANNAH_LIONS,
+                                        CardPartId::PRIMARY,
+                                    ),
+                                ))
                     })
                     .map(|option| option.id)
                     .chain(decision.options.iter().map(|option| option.id))
@@ -768,8 +823,9 @@ fn aetherling_dodges_a_blocker_and_comes_back_at_the_end_step() {
                     ability,
                 },
                 targets: Vec::new(),
-                cost_object: None,
+                cost_objects: Vec::new(),
                 x: 0,
+                modes: Vec::new(),
             },
         )
         .unwrap();

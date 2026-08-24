@@ -4,11 +4,11 @@ use super::*;
 fn duplicate_source_counter_costs_are_aggregated_before_an_activation_is_offered() {
     static COSTS: [AbilityCostDef; 2] = [
         AbilityCostDef::RemoveCountersFromSource {
-            kind: CounterKind::Charge,
+            kind: CounterKind::named("charge"),
             amount: 1,
         },
         AbilityCostDef::RemoveCountersFromSource {
-            kind: CounterKind::Charge,
+            kind: CounterKind::named("charge"),
             amount: 1,
         },
     ];
@@ -20,7 +20,7 @@ fn duplicate_source_counter_costs_are_aggregated_before_an_activation_is_offered
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_090);
+    let definition_id = CardDefinitionId::new(10_090);
     let mut definition = CardDefinition::new(
         definition_id,
         "Aggregate counter cost test",
@@ -41,23 +41,29 @@ fn duplicate_source_counter_costs_are_aggregated_before_an_activation_is_offered
     definitions.push(definition);
     game.catalog = CardCatalog::new(definitions).unwrap();
     let mut source = creature(10_000, definition_id, PlayerId::One);
-    source.counters[CounterKind::Charge.index()] = 1;
+    source.counters.set(CounterKind::named("charge"), 1);
     let source_id = source.card.id;
     game.battlefield.push(source);
     let action = Action::ActivateAbility {
         source: source_id,
         ability: activated_ability_for(&game, source_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(!game.legal_actions(PlayerId::One).contains(&action));
-    game.battlefield[0].counters[CounterKind::Charge.index()] = 2;
+    game.battlefield[0]
+        .counters
+        .set(CounterKind::named("charge"), 2);
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 
     game.apply(PlayerId::One, action).unwrap();
-    assert_eq!(game.battlefield[0].counters(CounterKind::Charge), 0);
+    assert_eq!(
+        game.battlefield[0].counters(CounterKind::named("charge")),
+        0
+    );
     pass_priority_pair(&mut game);
     assert_eq!(game.players[PlayerId::One.index()].life, 21);
 }
@@ -65,7 +71,7 @@ fn duplicate_source_counter_costs_are_aggregated_before_an_activation_is_offered
 #[test]
 fn a_counter_only_mana_ability_is_offered_and_pays_its_counter_cost() {
     static COSTS: [AbilityCostDef; 1] = [AbilityCostDef::RemoveCountersFromSource {
-        kind: CounterKind::Charge,
+        kind: CounterKind::named("charge"),
         amount: 1,
     }];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::activated_mana(
@@ -73,7 +79,7 @@ fn a_counter_only_mana_ability_is_offered_and_pays_its_counter_cost() {
         &COSTS,
         EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
     )];
-    let definition_id = CardDefinitionId(10_092);
+    let definition_id = CardDefinitionId::new(10_092);
     let mut definition = CardDefinition::new(
         definition_id,
         "Counter mana cost test",
@@ -94,18 +100,24 @@ fn a_counter_only_mana_ability_is_offered_and_pays_its_counter_cost() {
     definitions.push(definition);
     game.catalog = CardCatalog::new(definitions).unwrap();
     let mut source = creature(10_000, definition_id, PlayerId::One);
-    source.counters[CounterKind::Charge.index()] = 1;
+    source.counters.set(CounterKind::named("charge"), 1);
     let source_id = source.card.id;
     game.battlefield.push(source);
     let action = Action::ActivateManaAbility {
         source: source_id,
         ability: mana_ability_for(&game, source_id, ManaColor::Colorless),
         color: ManaColor::Colorless,
+        counters_removed: None,
+        cost_object: None,
+        combination: None,
     };
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 
     game.apply(PlayerId::One, action).unwrap();
-    assert_eq!(game.battlefield[0].counters(CounterKind::Charge), 0);
+    assert_eq!(
+        game.battlefield[0].counters(CounterKind::named("charge")),
+        0
+    );
     assert_eq!(game.players[PlayerId::One.index()].mana_pool.colorless, 1);
     assert!(!game.legal_actions(PlayerId::One).iter().any(
         |action| matches!(action, Action::ActivateManaAbility { source, .. } if *source == source_id)
@@ -117,7 +129,7 @@ fn source_counters_are_removed_before_a_source_sacrifice_cost_regardless_of_prin
     static COSTS: [AbilityCostDef; 2] = [
         AbilityCostDef::SacrificeSource,
         AbilityCostDef::RemoveCountersFromSource {
-            kind: CounterKind::Charge,
+            kind: CounterKind::named("charge"),
             amount: 1,
         },
     ];
@@ -129,7 +141,7 @@ fn source_counters_are_removed_before_a_source_sacrifice_cost_regardless_of_prin
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_091);
+    let definition_id = CardDefinitionId::new(10_091);
     let mut definition = CardDefinition::new(
         definition_id,
         "Counter and sacrifice cost test",
@@ -150,15 +162,16 @@ fn source_counters_are_removed_before_a_source_sacrifice_cost_regardless_of_prin
     definitions.push(definition);
     game.catalog = CardCatalog::new(definitions).unwrap();
     let mut source = creature(10_000, definition_id, PlayerId::One);
-    source.counters[CounterKind::Charge.index()] = 1;
+    source.counters.set(CounterKind::named("charge"), 1);
     let source_id = source.card.id;
     game.battlefield.push(source);
     let action = Action::ActivateAbility {
         source: source_id,
         ability: activated_ability_for(&game, source_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 
@@ -188,7 +201,7 @@ fn a_generic_source_sacrifice_waits_for_its_tap_and_counter_costs() {
         },
         AbilityCostDef::TapSource,
         AbilityCostDef::RemoveCountersFromSource {
-            kind: CounterKind::Charge,
+            kind: CounterKind::named("charge"),
             amount: 1,
         },
     ];
@@ -200,7 +213,7 @@ fn a_generic_source_sacrifice_waits_for_its_tap_and_counter_costs() {
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_093);
+    let definition_id = CardDefinitionId::new(10_093);
     let mut definition = CardDefinition::new(
         definition_id,
         "Generic source sacrifice ordering test",
@@ -221,15 +234,16 @@ fn a_generic_source_sacrifice_waits_for_its_tap_and_counter_costs() {
     definitions.push(definition);
     game.catalog = CardCatalog::new(definitions).unwrap();
     let mut source = creature(10_000, definition_id, PlayerId::One);
-    source.counters[CounterKind::Charge.index()] = 1;
+    source.counters.set(CounterKind::named("charge"), 1);
     let source_id = source.card.id;
     game.battlefield.push(source);
     let action = Action::ActivateAbility {
         source: source_id,
         ability: primary_ability(definition_id),
         targets: Vec::new(),
-        cost_object: Some(source_id),
+        cost_objects: vec![source_id],
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&action));
@@ -237,7 +251,7 @@ fn a_generic_source_sacrifice_waits_for_its_tap_and_counter_costs() {
 
     assert!(game.battlefield.is_empty());
     assert_eq!(
-        game.current_or_last_known_counters(source_id, CounterKind::Charge),
+        game.current_or_last_known_counters(source_id, CounterKind::named("charge")),
         0
     );
     assert!(matches!(
@@ -266,7 +280,7 @@ fn separate_source_sacrifice_costs_require_separate_permanents() {
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_094);
+    let definition_id = CardDefinitionId::new(10_094);
     let mut definition = CardDefinition::new(
         definition_id,
         "Distinct sacrifice cost test",
@@ -303,15 +317,17 @@ fn separate_source_sacrifice_costs_require_separate_permanents() {
         source: source_id,
         ability: primary_ability(definition_id),
         targets: Vec::new(),
-        cost_object: Some(other_id),
+        cost_objects: vec![other_id],
         x: 0,
+        modes: Vec::new(),
     };
     let illegal_double_payment = Action::ActivateAbility {
         source: source_id,
         ability: primary_ability(definition_id),
         targets: Vec::new(),
-        cost_object: Some(source_id),
+        cost_objects: vec![source_id],
         x: 0,
+        modes: Vec::new(),
     };
     let actions = game.legal_actions(PlayerId::One);
     assert!(actions.contains(&action));
@@ -343,7 +359,7 @@ fn duplicate_source_sacrifice_costs_are_never_offered() {
             EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
         ),
     ];
-    let definition_id = CardDefinitionId(10_095);
+    let definition_id = CardDefinitionId::new(10_095);
     let mut definition = CardDefinition::new(
         definition_id,
         "Duplicate source sacrifice test",
@@ -380,7 +396,7 @@ fn javelineers_on_the_stack_retain_the_sources_last_known_color() {
     let mut game = ready_game();
     game.turns_started[PlayerId::One.index()] = 1;
     let mut javelineers = creature(10_000, cards::ICATIAN_JAVELINEERS, PlayerId::One);
-    javelineers.counters[CounterKind::Javelin.index()] = 1;
+    javelineers.counters.set(CounterKind::named("javelin"), 1);
     let source = javelineers.card.id;
     let target = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::Two);
     let target_id = target.card.id;
@@ -392,8 +408,9 @@ fn javelineers_on_the_stack_retain_the_sources_last_known_color() {
             source,
             ability: activated_ability_for(&game, source, 0),
             targets: activated_targets(Target::Permanent(target_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -403,7 +420,7 @@ fn javelineers_on_the_stack_retain_the_sources_last_known_color() {
         .find(|permanent| permanent.card.id == target_id)
         .expect("the target remains on the battlefield")
         .temporary_keywords
-        .push(KeywordAbility::ProtectionFrom(ManaColor::White));
+        .push(protection_keyword(ManaColor::White));
 
     pass_priority_pair(&mut game);
 
@@ -573,6 +590,7 @@ fn wheel_and_timetwister_resolve_as_shared_declarative_spells() {
                 recipient: EffectRecipientDef::EachPlayer,
                 amount: ValueDef::Constant(i32::MAX),
                 selection: DiscardSelectionDef::RecipientChooses,
+                then: None,
             },
             EffectDef::DrawCards {
                 recipient: EffectRecipientDef::EachPlayer,

@@ -1,7 +1,7 @@
 use super::{
     AbilityCostDef, AbilityOrigin, CardDefinitionId, CardTypeSet, DecisionOption,
     DeclarativeAbilityDef, DeclarativeSpellProfile, GameObjectId, HandcraftedPolicy,
-    PlayerObservation, Step, Target,
+    ObjectCharacteristics, PlayerObservation, Step, Target,
 };
 
 impl HandcraftedPolicy {
@@ -30,7 +30,7 @@ impl HandcraftedPolicy {
                                 && observation.regular_combat_damage_pending);
                         if permanent.controller == observation.viewer
                             && useful_combat_window
-                            && (permanent.attacking || permanent.blocking.is_some())
+                            && (permanent.attacking || permanent.blocking_this_combat)
                         {
                             1_500
                         } else {
@@ -160,22 +160,17 @@ impl HandcraftedPolicy {
         loyalty_score + i32::from(cost) * 100
     }
 
-    /// What a card's own policy hint is worth here. Liliana's ultimate is the
-    /// only one so far: splitting an opponent's board is good, splitting your
-    /// own is not.
-    /// What one decision option is worth. A pile option stands for the cards
-    /// it groups, so its value is theirs together; an ordinary option is worth
-    /// its own card.
+    /// What one decision option is worth. An ordinary card option is worth
+    /// that card even when `members` disclose other inspected cards. A pile
+    /// option has no single `card`, so it is worth its members together.
     pub(super) fn option_value(&self, option: &DecisionOption) -> i32 {
-        if option.members.is_empty() {
-            return option
-                .card
-                .map_or(0, |(_, definition)| self.card_value(definition));
+        if let Some((_, characteristics)) = option.card {
+            return self.characteristics_value(characteristics);
         }
         option
             .members
             .iter()
-            .map(|(_, definition)| self.card_value(*definition))
+            .map(|(_, characteristics)| self.characteristics_value(*characteristics))
             .sum()
     }
 
@@ -274,7 +269,7 @@ impl HandcraftedPolicy {
                             .battlefield
                             .iter()
                             .filter(|permanent| permanent.controller == *player)
-                            .map(|permanent| self.card_value(permanent.definition))
+                            .map(|permanent| self.characteristics_value(permanent.characteristics))
                             .sum::<i32>()
                             / 2;
                         if *player == observation.viewer {
@@ -287,20 +282,39 @@ impl HandcraftedPolicy {
             })
     }
 
+    fn activated_source_profile(
+        &self,
+        observation: &PlayerObservation,
+        source: GameObjectId,
+        ability: AbilityOrigin,
+    ) -> (Option<CardDefinitionId>, Option<DeclarativeSpellProfile>) {
+        let Some(characteristics) =
+            Self::permanent_characteristics(observation, source).or_else(|| {
+                Self::hand_definition(observation, source).map(|definition| {
+                    ObjectCharacteristics::card(definition, crate::CardPartId::PRIMARY)
+                })
+            })
+        else {
+            return (None, None);
+        };
+        (
+            characteristics.card_definition(),
+            self.declarative_activated_profile(characteristics, ability),
+        )
+    }
+
     pub(super) fn score_ability(
         &self,
         observation: &PlayerObservation,
         source: GameObjectId,
         ability: AbilityOrigin,
         targets: &[crate::TargetSelection],
-        sacrifice: Option<GameObjectId>,
+        sacrifices: &[GameObjectId],
         x: u16,
     ) -> i32 {
-        let source_definition = Self::permanent_definition(observation, source)
-            .or_else(|| Self::hand_definition(observation, source));
+        let (source_definition, declarative) =
+            self.activated_source_profile(observation, source, ability);
         let behavior = source_definition.and_then(|id| self.behavior(id));
-        let declarative = source_definition
-            .and_then(|definition| self.declarative_activated_profile(definition, ability));
         let global_destroy_types =
             declarative.map_or_else(CardTypeSet::empty, |profile| profile.global_destroy_types);
         let target = targets
@@ -314,10 +328,14 @@ impl HandcraftedPolicy {
             .copied()
             .map(|value| Self::activated_target_score(observation, value, declarative))
             .sum::<i32>();
-        let sacrifice_cost = sacrifice
-            .filter(|card| *card != source)
-            .and_then(|card| Self::permanent_definition(observation, card))
-            .map_or(0, |definition| self.card_value(definition));
+        // Every object the cost spends is a cost, so a clause naming two
+        // cards is scored as twice the loss rather than once.
+        let sacrifice_cost = sacrifices
+            .iter()
+            .filter(|card| **card != source)
+            .filter_map(|card| Self::permanent_characteristics(observation, *card))
+            .map(|characteristics| self.characteristics_value(characteristics))
+            .sum::<i32>();
         let discard_source_cost = self.discard_source_cost(source_definition, ability);
         let card_owned_hint_score = self.card_owned_hint_score(observation, ability, targets);
         let loyalty_cost = self.loyalty_cost_of(source_definition, ability);
@@ -384,7 +402,7 @@ impl HandcraftedPolicy {
             None if declarative.is_some() => 4_500 + target_score,
             None => -10_000,
         };
-        if sacrifice.is_some()
+        if !sacrifices.is_empty()
             && let Some(amount) = declarative.and_then(|profile| profile.damage)
             && matches!(target, Some(Target::Player(player)) if player == observation.viewer.opponent())
             && observation.life_totals[observation.viewer.opponent().index()]

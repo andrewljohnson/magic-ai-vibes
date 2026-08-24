@@ -1,6 +1,6 @@
-use crate::ids::PlayerId;
+use crate::ids::{ObjectBindingIndex, ObjectSetBindingIndex, PlayerId};
 
-use super::{CardBehavior, ScopedEffect, StackObject, TriggerContext};
+use super::{CardBehavior, EffectResolutionContext, ScopedEffect, StackObject};
 
 /// A duration-limited replacement for one player's next draw.
 ///
@@ -10,13 +10,19 @@ use super::{CardBehavior, ScopedEffect, StackObject, TriggerContext};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct DrawReplacement {
     pub(super) object: Box<StackObject>,
-    pub(super) context: TriggerContext,
+    pub(super) context: EffectResolutionContext,
     pub(super) effect: ScopedEffect,
+    /// The affected player may let the prospective draw happen instead.
+    pub(super) optional: bool,
+    /// Unchosen installed next-draw replacements remain queued. A static
+    /// battlefield replacement is rediscovered for the next draw instead.
+    pub(super) installed: bool,
 }
 
 /// Rules procedures that paused behind a decision and must finish before
 /// state-based actions, trigger placement, or priority.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub(super) enum PendingProcedure {
     DrawCards {
         player: PlayerId,
@@ -25,11 +31,16 @@ pub(super) enum PendingProcedure {
     ResolveEffects {
         effects: Vec<ScopedEffect>,
         object: Box<StackObject>,
-        context: TriggerContext,
+        context: EffectResolutionContext,
         custom_followup: Option<CardBehavior>,
     },
-    SylvanAfterDraw {
-        player: PlayerId,
+    ForEachInBinding {
+        objects: ObjectSetBindingIndex,
+        binding: ObjectBindingIndex,
+        next: usize,
+        effect: ScopedEffect,
+        object: Box<StackObject>,
+        context: EffectResolutionContext,
     },
     SimultaneousDraws {
         remaining: [u16; 2],
@@ -40,6 +51,13 @@ pub(super) enum PendingProcedure {
     /// replacement choices have completed.
     ShuffleLibrary {
         player: PlayerId,
+    },
+    /// A resolving spell or ability suspended behind one of the procedures
+    /// above. Its source remains a resolving stack object until every part of
+    /// the effect has completed, then takes its normal resolution destination.
+    FinishStackResolution {
+        object: Box<StackObject>,
+        resolved: bool,
     },
     FinishStepAdvance,
 }

@@ -1,16 +1,16 @@
 use super::{
-    AbilityEffectExpiration, Action, AlternativeCastKindDef, CardBehavior, CardDefinitionId,
-    CardType, CombatDamageStage, CommittedTriggerEvent, DecisionContinuation, DecisionOption,
-    DecisionPreference, DecisionVisibility, DecisionZone, DeclarativeAbilityDef,
-    DeferredBeginTurnEffect, EffectDef, Game, GameEvent, GameObjectId, GameResult, ManaPool,
-    PendingProcedure, PlayerId, ReplacementEventDef, Step, TriggerContext, TurnStepDef,
-    one_or_none,
+    Action, CardBehavior, CombatDamageStage, CommittedTriggerEvent, ContinuousEffectExpiration,
+    CounterKind, DeclarativeAbilityDef, DeferredBeginTurnEffect, EffectResolutionContext, Game,
+    GameEvent, GameObjectId, GameResult, InstalledTriggerLifetime, ManaPool, PendingProcedure,
+    PlayerId, ReplacementEffectDef, ReplacementEventDef, Step, TriggerContext, TurnPhaseDef,
+    TurnPhaseResume, TurnStepDef, one_or_none,
 };
 
 mod begin_turn;
+mod drawing;
 
 impl Game {
-    fn skips_turn_based_untap(&self, permanent: &super::Permanent) -> bool {
+    pub(in crate::game) fn skips_turn_based_untap(&self, permanent: &super::Permanent) -> bool {
         permanent.skipped_untap_steps > 0 || self.does_not_untap_during_untap_step(permanent)
     }
 
@@ -27,40 +27,36 @@ impl Game {
     }
 
     pub(super) fn untap_actions(&self, player: PlayerId) -> Vec<Action> {
-        let lands: Vec<_> = self
+        let untappable: Vec<GameObjectId> = self
             .battlefield
             .iter()
             .filter(|permanent| {
                 permanent.controller == player
                     && permanent.tapped
                     && !self.skips_turn_based_untap(permanent)
-                    && self
-                        .permanent_types(permanent)
-                        .is_some_and(|types| types.contains(CardType::Land))
             })
             .map(|permanent| permanent.card.id)
             .collect();
-        let creatures: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| {
-                permanent.controller == player
-                    && permanent.tapped
-                    && !self.skips_turn_based_untap(permanent)
-                    && self.power(permanent).is_some()
-            })
-            .map(|permanent| permanent.card.id)
+        // Each cap narrows its own group to one survivor, so a permanent
+        // covered by two caps cannot let a second one through either.
+        let groups: Vec<Vec<GameObjectId>> = self
+            .untap_limits(player)
+            .into_iter()
+            .map(|limit| self.permanents_under_untap_limit(player, limit))
             .collect();
-        let land_choices = if self.winter_orb_active() {
-            one_or_none(&lands)
-        } else {
-            vec![lands]
-        };
-        let creature_choices = if self.count_behavior(CardBehavior::Smoke) > 0 {
-            one_or_none(&creatures)
-        } else {
-            vec![creatures]
-        };
+        let mut choices: Vec<Vec<GameObjectId>> = vec![untappable];
+        for group in &groups {
+            choices = choices
+                .iter()
+                .flat_map(|chosen| {
+                    one_or_none(group).into_iter().map(move |kept| {
+                        let mut next = chosen.clone();
+                        next.retain(|id| !group.contains(id) || kept.contains(id));
+                        next
+                    })
+                })
+                .collect();
+        }
         // A permanent that may choose not to untap turns its own untap into
         // an independent yes/no, so each combination of those choices is a
         // separate declaration.
@@ -75,20 +71,14 @@ impl Game {
             .map(|permanent| permanent.card.id)
             .collect::<Vec<_>>();
         let mut actions = Vec::new();
-        for land in &land_choices {
-            for creature in &creature_choices {
-                let mut permanents = land.clone();
-                permanents.extend(creature);
-                permanents.sort_unstable();
-                permanents.dedup();
-                for skipped in Self::subsets_of(&optional) {
-                    let mut choice = permanents.clone();
-                    choice.retain(|id| !skipped.contains(id));
-                    if !actions.contains(&Action::ChooseUntap {
-                        permanents: choice.clone(),
-                    }) {
-                        actions.push(Action::ChooseUntap { permanents: choice });
-                    }
+        for permanents in &choices {
+            for skipped in Self::subsets_of(&optional) {
+                let mut choice = permanents.clone();
+                choice.retain(|id| !skipped.contains(id));
+                if !actions.contains(&Action::ChooseUntap {
+                    permanents: choice.clone(),
+                }) {
+                    actions.push(Action::ChooseUntap { permanents: choice });
                 }
             }
         }
@@ -126,7 +116,7 @@ impl Game {
             .collect::<Vec<_>>();
         for permanent in &mut self.battlefield {
             if eligible.contains(&permanent.card.id) && selected.contains(&permanent.card.id) {
-                permanent.tapped = false;
+                permanent.untap();
             }
         }
         self.untap_pending = false;
@@ -144,18 +134,57 @@ impl Game {
         if amount == 0 {
             return;
         }
-        self.players[player.index()].poison =
-            self.players[player.index()].poison.saturating_add(amount);
+        self.players[player.index()]
+            .counters
+            .add(CounterKind::Poison, amount);
+    }
+
+    /// "You get {E}". Energy is spent rather than counted down to anything,
+    /// so nothing checks it as a state-based action.
+    pub(super) fn add_energy(&mut self, player: PlayerId, amount: u16) {
+        if amount == 0 {
+            return;
+        }
+        self.players[player.index()]
+            .counters
+            .add(CounterKind::Energy, amount);
+    }
+
+    /// Spends energy, all of it or none. A payment that cannot be made in
+    /// full is not made at all, which is what makes "unless you pay {E}" a
+    /// real choice rather than a partial one.
+    pub(super) fn spend_energy(&mut self, player: PlayerId, amount: u16) -> bool {
+        if self.players[player.index()]
+            .counters
+            .count(CounterKind::Energy)
+            < amount
+        {
+            return false;
+        }
+        self.players[player.index()]
+            .counters
+            .remove(CounterKind::Energy, amount);
+        true
+    }
+
+    /// Whether this player has been told they cannot gain life for the rest
+    /// of the game (Screaming Nemesis). A prohibition rather than a
+    /// replacement: the life never arrives, so nothing watching for a gain
+    /// sees one.
+    pub(super) const fn cannot_gain_life(&self, player: PlayerId) -> bool {
+        self.cannot_gain_life[player.index()]
     }
 
     pub(super) fn gain_life(&mut self, player: PlayerId, amount: u16) {
-        if amount == 0 {
+        if amount == 0 || self.cannot_gain_life(player) {
             return;
         }
         let amount = amount.saturating_mul(self.life_gain_multiplier(player));
         self.players[player.index()].life = self.players[player.index()]
             .life
             .saturating_add(i16::try_from(amount).unwrap_or(i16::MAX));
+        let gained = &mut self.life_gained_this_turn[player.index()];
+        *gained = gained.saturating_add(amount);
         self.capture_battlefield_triggers(&CommittedTriggerEvent::LifeGained { player, amount });
     }
 
@@ -173,7 +202,8 @@ impl Game {
                 let ReplacementEventDef::WouldGainLife(relation) = definition.event else {
                     return;
                 };
-                let Some(EffectDef::MultiplyEventAmount(factor)) = ability.declarative_effect()
+                let Some(ReplacementEffectDef::MultiplyEventAmount(factor)) =
+                    ability.declarative_replacement()
                 else {
                     return;
                 };
@@ -197,15 +227,25 @@ impl Game {
     pub(super) fn lose_life(&mut self, player: PlayerId, amount: u16) {
         let amount_as_i16 = i16::try_from(amount).unwrap_or(i16::MAX);
         self.players[player.index()].life -= amount_as_i16;
+        if amount > 0 {
+            self.lost_life_this_turn[player.index()] = true;
+        }
         self.events.push(GameEvent::LifeLost { player, amount });
     }
 
     pub(super) fn deal_damage(&mut self, player: PlayerId, amount: u16) {
         let amount_as_i16 = i16::try_from(amount).unwrap_or(i16::MAX);
         self.players[player.index()].life -= amount_as_i16;
+        // Damage to a player is life lost, which is what the clauses reading
+        // it ask about: how the life went is not part of the question.
+        if amount > 0 {
+            self.lost_life_this_turn[player.index()] = true;
+        }
         self.events.push(GameEvent::DamageDealt { player, amount });
     }
 
+    /// Every step a card can name, which is now all of them: Thawing
+    /// Glaciers returns itself at the beginning of the cleanup step.
     pub(super) const fn turn_step_def(step: Step) -> TurnStepDef {
         match step {
             Step::Upkeep => TurnStepDef::Upkeep,
@@ -222,20 +262,6 @@ impl Game {
         }
     }
 
-    /// A miracle window belongs to one card sitting in hand. Once that card
-    /// has been cast, discarded, or otherwise moved, there is nothing left to
-    /// pay a miracle cost for.
-    pub(super) fn close_stale_miracle_window(&mut self) {
-        if let Some(card) = self.miracle_window
-            && !self
-                .players
-                .iter()
-                .any(|player| player.hand.iter().any(|held| held.id == card))
-        {
-            self.miracle_window = None;
-        }
-    }
-
     pub(super) fn advance_step(&mut self) {
         if self.step.ends_phase() || self.format.rules().mana_empties_at_end_of_step {
             self.empty_mana_pools();
@@ -247,8 +273,9 @@ impl Game {
         match self.step {
             Step::Upkeep => {
                 self.step = Step::Draw;
+                self.draw_step_draw_taken[self.active_player.index()] = false;
                 if !(self.turn == 1 && self.active_player == PlayerId::One) {
-                    let _ = self.draw_card(self.active_player);
+                    self.draw_instruction(self.active_player, 1);
                     if !self.pending_decisions.is_empty() || !self.pending_events.is_empty() {
                         self.pending_procedures
                             .push_back(PendingProcedure::FinishStepAdvance);
@@ -256,8 +283,16 @@ impl Game {
                     }
                 }
             }
-            Step::Draw => self.step = Step::PrecombatMain,
-            Step::PrecombatMain => self.step = Step::BeginningOfCombat,
+            Step::Draw => {
+                if self.advance_after_turn_phase(TurnPhaseResume::Step(Step::PrecombatMain)) {
+                    return;
+                }
+            }
+            Step::PrecombatMain => {
+                if self.advance_after_turn_phase(TurnPhaseResume::Step(Step::BeginningOfCombat)) {
+                    return;
+                }
+            }
             Step::BeginningOfCombat => {
                 self.step = Step::DeclareAttackers;
                 self.attackers_declared = false;
@@ -272,20 +307,16 @@ impl Game {
             }
             Step::CombatDamage => self.advance_combat_damage_step(),
             Step::EndOfCombat => {
-                self.destroy_end_of_combat_permanents();
+                self.expire_end_of_combat_effects();
                 self.clear_combat();
-                // An extra combat phase replaces the move to the second main,
-                // which still happens once the extra combats are spent.
-                if self.additional_combat_phases > 0 {
-                    self.additional_combat_phases -= 1;
-                    self.step = Step::BeginningOfCombat;
-                } else {
-                    self.step = Step::PostcombatMain;
+                if self.advance_after_turn_phase(TurnPhaseResume::Step(Step::PostcombatMain)) {
+                    return;
                 }
             }
             Step::PostcombatMain => {
-                self.step = Step::End;
-                self.handle_end_step();
+                if self.advance_after_turn_phase(TurnPhaseResume::Step(Step::End)) {
+                    return;
+                }
             }
             Step::End => {
                 self.step = Step::Cleanup;
@@ -295,12 +326,52 @@ impl Game {
                 }
             }
             Step::Cleanup => {
-                self.start_next_turn();
-                return;
+                if self.advance_after_turn_phase(TurnPhaseResume::NextTurn) {
+                    return;
+                }
             }
         }
 
         self.finish_step_advance();
+    }
+
+    /// Starts the next additional phase, or resumes the ordinary turn once
+    /// the queue is empty. The first boundary displaced by a schedule is
+    /// frozen so an inserted combat created after the postcombat main resumes
+    /// at the end step rather than manufacturing another ordinary main phase.
+    ///
+    /// Returns `true` when progression began the next turn, whose startup path
+    /// publishes its own step change.
+    fn advance_after_turn_phase(&mut self, ordinary_resume: TurnPhaseResume) -> bool {
+        let next = if let Some(phase) = self.turn_phase_queue.pop_front() {
+            self.turn_phase_resume.get_or_insert(ordinary_resume);
+            TurnPhaseResume::Step(match phase {
+                TurnPhaseDef::Combat => Step::BeginningOfCombat,
+                TurnPhaseDef::PostcombatMain => Step::PostcombatMain,
+            })
+        } else {
+            self.turn_phase_resume.take().unwrap_or(ordinary_resume)
+        };
+
+        match next {
+            TurnPhaseResume::Step(step) => {
+                self.step = step;
+                if step == Step::End {
+                    self.handle_end_step();
+                }
+                false
+            }
+            TurnPhaseResume::NextTurn => {
+                self.start_next_turn();
+                true
+            }
+        }
+    }
+
+    pub(super) fn schedule_turn_phases(&mut self, phases: &[TurnPhaseDef]) {
+        for phase in phases.iter().rev() {
+            self.turn_phase_queue.push_front(*phase);
+        }
     }
 
     fn finish_step_advance(&mut self) {
@@ -326,28 +397,7 @@ impl Game {
         }
     }
 
-    /// Drops the granted and removed abilities whose window closed with the
-    /// turn that just began.
-    fn expire_turn_scoped_ability_changes(&mut self) {
-        let turns_started = self.turns_started;
-        let active = self.active_player;
-        let expired = |expiration: AbilityEffectExpiration| match expiration {
-            AbilityEffectExpiration::UpkeepOf(player) => player != active,
-            AbilityEffectExpiration::TurnOf { player, turn } => {
-                turns_started[player.index()] < turn
-            }
-            AbilityEffectExpiration::EndOfTurn | AbilityEffectExpiration::Never => true,
-        };
-        for permanent in &mut self.battlefield {
-            permanent
-                .temporary_granted_abilities
-                .retain(|grant| expired(grant.expiration));
-            permanent
-                .temporary_removed_abilities
-                .retain(|removal| expired(removal.expiration));
-        }
-    }
-
+    #[allow(clippy::too_many_lines)]
     pub(super) fn commit_next_turn(
         &mut self,
         next_player: PlayerId,
@@ -360,31 +410,92 @@ impl Game {
         self.turn += 1;
         self.active_player = next_player;
         self.turns_started[self.active_player.index()] += 1;
-        self.expire_turn_scoped_ability_changes();
+        let turns_started = self.turns_started;
+        self.damage_preventions.retain(|prevention| {
+            prevention
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        self.damage_redirects.retain(|redirect| {
+            redirect
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        self.resolved_play_restrictions.retain(|restriction| {
+            restriction
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        self.resolved_attack_restrictions.retain(|restriction| {
+            restriction
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        self.resolved_play_permissions.retain(|permission| {
+            permission
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        self.ongoing_effects.retain(|effect| {
+            effect
+                .expiration
+                .survives_turn_start(self.active_player, turns_started)
+        });
+        for permanent in &mut self.battlefield {
+            permanent.resolved_continuous_effects.retain(|effect| {
+                effect
+                    .expiration
+                    .survives_turn_start(self.active_player, turns_started)
+            });
+            // A copy that named a duration ends with everything else that
+            // did; one that named none has no expiration to check.
+            if permanent.copy_expiration.is_some_and(|expiration| {
+                !expiration.survives_turn_start(self.active_player, turns_started)
+            }) {
+                permanent.copy_effect = None;
+                permanent.copy_expiration = None;
+            }
+        }
+        // The bound a limited graveyard permission carries is per turn, so
+        // the allowance returns as the turn does.
+        self.graveyard_permission_uses.clear();
         self.creature_died_this_turn = false;
+        self.damage_cannot_be_prevented_this_turn = false;
+        self.creatures_died_this_turn = 0;
         self.sorcery_flash_grants = [0; 2];
-        self.additional_combat_phases = 0;
-        self.noncreature_casts_locked = [false; 2];
+        self.turn_phase_queue.clear();
+        self.turn_phase_resume = None;
         self.spells_cast_last_turn = self.spells_cast_this_turn;
         self.spells_cast_this_turn = [0; 2];
+        self.spell_cast_history_this_turn.clear();
         self.cards_drawn_this_turn = [0; 2];
+        self.life_gained_this_turn = [0; 2];
+        self.lost_life_this_turn = [false; 2];
+        self.permanent_left_battlefield_this_turn = [false; 2];
+        self.card_left_graveyard_this_turn = [false; 2];
         self.drawn_this_turn = [Vec::new(), Vec::new()];
-        self.miracle_window = None;
         self.step = Step::Upkeep;
-        self.players[self.active_player.index()].land_played_this_turn = false;
-        // "Until your next turn" means the one now beginning, not the one the
-        // ability resolved during.
+        self.players[self.active_player.index()].lands_played_this_turn = 0;
         let started = self.turns_started[self.active_player.index()];
         let active = self.active_player;
-        self.floating_triggers.retain(|floating| {
-            floating.until_turn_of != self.active_player || started <= floating.created_after_turns
-        });
+        // The lifetime freezes both the referenced player and the exact turn
+        // at installation, so extra turns and skipped turns have ordinary
+        // turn-engine semantics rather than being re-evaluated later.
+        self.installed_triggers
+            .retain(|installed| match installed.lifetime {
+                InstalledTriggerLifetime::Once => true,
+                // The turn it was installed on is over: this runs as the
+                // next one begins, whoever it belongs to.
+                InstalledTriggerLifetime::ThisTurn { turn } => self.turn == turn,
+                InstalledTriggerLifetime::UntilTurn { player, turn } => {
+                    player != self.active_player || self.turns_started[player.index()] < turn
+                }
+            });
         for permanent in &mut self.battlefield {
             permanent
                 .keywords_until_upkeep_of
                 .retain(|(player, _)| *player != self.active_player);
-            // Detain ends when its controller's next turn begins, the same
-            // reading the floating triggers above take.
+            // Detain ends when its controller's next turn begins.
             if permanent
                 .detained_until_turn_of
                 .is_some_and(|(player, created)| player == active && started > created)
@@ -394,23 +505,33 @@ impl Game {
             // One loyalty ability per planeswalker per turn, so the allowance
             // returns as the turn does.
             permanent.activated_loyalty_this_turn = false;
+            permanent.activations_this_turn.clear();
+            permanent.triggers_this_turn.clear();
+            permanent.resolutions_this_turn.clear();
+            permanent.dealt_damage_to_opponent_this_turn = false;
+            permanent.attacked_this_turn = false;
+            permanent.exerted = false;
+            permanent.saddled = false;
+            permanent.attacks_this_turn = 0;
+            permanent.damage_sources.clear();
+            permanent.was_dealt_damage_this_turn = false;
+            permanent.dealt_damage_this_turn = false;
         }
-        let winter_orb = self.winter_orb_active();
-        let smoke = self.count_behavior(CardBehavior::Smoke) > 0;
-        let restricted_lands: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| {
-                self.permanent_types(permanent)
-                    .is_some_and(|types| types.contains(CardType::Land))
-            })
-            .map(|permanent| permanent.card.id)
-            .collect();
-        let restricted_creatures: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| self.power(permanent).is_some())
-            .map(|permanent| permanent.card.id)
+        // "Damage dealt to you this turn" resets with the turn, not with
+        // cleanup: a spell cast in the postcombat main phase still reads what
+        // combat did.
+        self.damage_taken_this_turn = [0; 2];
+        self.damage_taken_by_group_this_turn = [[0; crate::card::DamageSourceGroupDef::COUNT]; 2];
+        // "It phases in before its controller untaps": ahead of the untap
+        // itself, so a permanent that comes back this turn untaps with the
+        // rest of them.
+        self.phase_in_for(self.active_player);
+        // Everything a cap covers waits for the player to choose; everything
+        // else untaps now.
+        let capped: Vec<GameObjectId> = self
+            .untap_limits(self.active_player)
+            .into_iter()
+            .flat_map(|limit| self.permanents_under_untap_limit(self.active_player, limit))
             .collect();
         let untap_restricted: Vec<_> = self
             .battlefield
@@ -421,15 +542,37 @@ impl Game {
         self.untap_pending = false;
         for permanent in &mut self.battlefield {
             if permanent.controller == self.active_player {
-                let restricted = (winter_orb && restricted_lands.contains(&permanent.card.id))
-                    || (smoke && restricted_creatures.contains(&permanent.card.id));
-                if restricted && permanent.tapped && !untap_restricted.contains(&permanent.card.id)
+                if capped.contains(&permanent.card.id)
+                    && permanent.tapped
+                    && !untap_restricted.contains(&permanent.card.id)
                 {
                     self.untap_pending = true;
                 } else if !untap_restricted.contains(&permanent.card.id) {
-                    permanent.tapped = false;
+                    permanent.untap();
                 }
             }
+        }
+        // The untap is done, so anything that only had to survive it is
+        // finished. Dropping these here rather than with the turn-start pass
+        // above is what makes "until your next upkeep" cover the untap step
+        // the way the words do.
+        let active = self.active_player;
+        self.damage_preventions
+            .retain(|prevention| prevention.expiration.survives_untap_step(active));
+        self.damage_redirects
+            .retain(|redirect| redirect.expiration.survives_untap_step(active));
+        self.resolved_play_restrictions
+            .retain(|restriction| restriction.expiration.survives_untap_step(active));
+        self.resolved_attack_restrictions
+            .retain(|restriction| restriction.expiration.survives_untap_step(active));
+        self.resolved_play_permissions
+            .retain(|permission| permission.expiration.survives_untap_step(active));
+        self.ongoing_effects
+            .retain(|effect| effect.expiration.survives_untap_step(active));
+        for permanent in &mut self.battlefield {
+            permanent
+                .resolved_continuous_effects
+                .retain(|effect| effect.expiration.survives_untap_step(active));
         }
         if !self.untap_pending {
             self.spend_untap_skips();
@@ -452,28 +595,33 @@ impl Game {
             step: TurnStepDef::Upkeep,
             player,
         });
-        self.fire_delayed_triggers(TurnStepDef::Upkeep);
     }
 
-    /// CR 510.4-adjacent: "destroy that creature at end of combat" resolves
-    /// while combat is still the current phase, which is earlier than the
-    /// end step an ordinary delayed destruction waits for.
-    fn destroy_end_of_combat_permanents(&mut self) {
-        let doomed: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| permanent.destroy_at_end_of_combat)
-            .map(|permanent| permanent.card.id)
-            .collect();
-        for id in &doomed {
-            self.destroy_permanent(*id);
-        }
+    /// Ends the continuous effects that last only for one combat. Combat can
+    /// happen more than once in a turn, so this runs per combat phase rather
+    /// than waiting for cleanup.
+    fn expire_end_of_combat_effects(&mut self) {
         for permanent in &mut self.battlefield {
-            permanent.destroy_at_end_of_combat = false;
+            permanent
+                .resolved_continuous_effects
+                .retain(|effect| effect.expiration.survives_end_of_combat());
         }
+        self.damage_preventions
+            .retain(|prevention| prevention.expiration.survives_end_of_combat());
+        self.damage_redirects
+            .retain(|redirect| redirect.expiration.survives_end_of_combat());
+        self.resolved_play_restrictions
+            .retain(|restriction| restriction.expiration.survives_end_of_combat());
+        self.resolved_attack_restrictions
+            .retain(|restriction| restriction.expiration.survives_end_of_combat());
+        self.resolved_play_permissions
+            .retain(|permission| permission.expiration.survives_end_of_combat());
+        self.ongoing_effects
+            .retain(|effect| effect.expiration.survives_end_of_combat());
     }
 
     pub(super) fn handle_end_step(&mut self) {
+        self.monarch_draws_at_end_step();
         let doomed: Vec<_> = self
             .battlefield
             .iter()
@@ -486,7 +634,9 @@ impl Game {
     }
 
     pub(super) fn cleanup(&mut self) {
-        if self.players[self.active_player.index()].hand.len() > 7 {
+        if self.players[self.active_player.index()].hand.len() > 7
+            && !self.player_has_no_maximum_hand_size(self.active_player)
+        {
             self.cleanup_pending = true;
         } else {
             self.complete_cleanup();
@@ -494,24 +644,61 @@ impl Game {
     }
 
     pub(super) fn complete_cleanup(&mut self) {
-        self.channel_active[self.active_player.index()] = false;
         self.finish_cleanup();
         self.empty_mana_pools();
-        if self.result.is_none() {
-            self.start_next_turn();
+        if self.result.is_some() {
+            return;
+        }
+        // CR 514.2-3: the turn-based actions happen first, and only then does
+        // anything that triggered at the beginning of this step go on the
+        // stack. When something does, the turn stops here and both players
+        // get priority instead of the step ending silently.
+        //
+        // The extra cleanup step CR 514.3 grants afterwards is not modeled:
+        // no supported card creates an effect during cleanup that a second
+        // round would have to clear.
+        self.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+            step: TurnStepDef::Cleanup,
+            player: self.active_player,
+        });
+        if !self.pending_triggers.is_empty() {
+            self.priority = self.active_player;
+            self.events.push(GameEvent::StepChanged {
+                turn: self.turn,
+                active_player: self.active_player,
+                step: self.step,
+            });
+            return;
+        }
+        if !self.advance_after_turn_phase(TurnPhaseResume::NextTurn) {
+            self.finish_step_advance();
         }
     }
 
     pub(super) fn finish_cleanup(&mut self) {
         self.temporary_ability_grants.clear();
-        self.all_combat_damage_prevented = false;
-        self.prevention_shields.clear();
-        self.relational_damage_preventions.clear();
+        // These resolving permissions and restrictions last only until the
+        // cleanup step. A later phase can still be inserted into this turn,
+        // but it must not revive an expired Quicken or Aurelia's Fury effect.
+        self.sorcery_flash_grants = [0; 2];
+        self.resolved_play_restrictions
+            .retain(|restriction| restriction.expiration.survives_cleanup());
+        self.resolved_attack_restrictions
+            .retain(|restriction| restriction.expiration.survives_cleanup());
+        self.resolved_play_permissions
+            .retain(|permission| permission.expiration.survives_cleanup());
+        self.ongoing_effects
+            .retain(|effect| effect.expiration.survives_cleanup());
+        self.damage_preventions
+            .retain(|prevention| prevention.expiration.survives_cleanup());
+        self.damage_redirects
+            .retain(|redirect| redirect.expiration.survives_cleanup());
         for replacements in &mut self.draw_replacements {
             replacements.clear();
         }
-        // A bonus whose source has untapped or left is spent; dropping it at
-        // cleanup keeps the list from growing without bound.
+        // A source-tapped effect survives cleanup only while its recorded
+        // source is still present and tapped. Once spent, remove the ordered
+        // component so tapping that source again cannot revive it.
         let still_tapped: Vec<_> = self
             .battlefield
             .iter()
@@ -519,24 +706,24 @@ impl Game {
             .map(|permanent| permanent.card.id)
             .collect();
         for permanent in &mut self.battlefield {
-            permanent
-                .while_source_tapped
-                .retain(|bonus| still_tapped.contains(&bonus.source));
-        }
-        for permanent in &mut self.battlefield {
             permanent.damage = 0;
             permanent.exile_instead_of_dying = false;
-            permanent.damage_sources.clear();
             permanent.deathtouch_damage = false;
-            permanent.power_bonus = 0;
-            permanent.toughness_bonus = 0;
             permanent.temporary_keywords.clear();
-            permanent
-                .temporary_granted_abilities
-                .retain(|grant| grant.expiration != AbilityEffectExpiration::EndOfTurn);
-            permanent
-                .temporary_removed_abilities
-                .retain(|removal| removal.expiration != AbilityEffectExpiration::EndOfTurn);
+            permanent.resolved_continuous_effects.retain(|effect| {
+                effect.expiration.survives_cleanup()
+                    && (!matches!(
+                        effect.expiration,
+                        ContinuousEffectExpiration::WhileSourceTapped
+                    ) || still_tapped.contains(&effect.source.object))
+            });
+            if permanent
+                .copy_expiration
+                .is_some_and(|expiration| !expiration.survives_cleanup())
+            {
+                permanent.copy_effect = None;
+                permanent.copy_expiration = None;
+            }
             // A control change held by a permanent outlives the turn; only
             // the turn-scoped form is ended here.
             if permanent.control_source.is_none()
@@ -544,202 +731,23 @@ impl Game {
             {
                 permanent.controller = owner;
             }
-            permanent.unblockable_this_turn = false;
-            permanent.cannot_block_this_turn = false;
-            permanent.combat_damage_prevented = false;
-            permanent.combat_damage_dealt_by_prevented = false;
-            permanent.damage_dealt_by_prevented = false;
             permanent.destroy_at_end = false;
-            permanent.animation = None;
-            permanent.activations_this_turn.clear();
-            permanent.dealt_damage_to_opponent_this_turn = false;
             permanent.regeneration_shields = 0;
-            permanent.cannot_regenerate_this_turn = false;
-            permanent.attacked_this_turn = false;
-            permanent.attacks_this_turn = 0;
         }
     }
 
     pub(super) fn clear_combat(&mut self) {
         for permanent in &mut self.battlefield {
             permanent.attacking = false;
+            permanent.attacking_band = None;
             permanent.blocked = false;
-            permanent.blocking = None;
+            permanent.blocking.clear();
+            permanent.blocking_this_combat = false;
             permanent.combat_damage_assignment.clear();
         }
-        self.pending_combat_attackers.clear();
+        self.pending_combat_assignments.clear();
         self.combat_damage_stage = CombatDamageStage::NotStarted;
         self.combat_blocked_attackers.clear();
-    }
-
-    pub(super) fn winter_orb_active(&self) -> bool {
-        self.battlefield.iter().any(|permanent| {
-            !permanent.tapped && self.effective_behavior(permanent) == Some(CardBehavior::WinterOrb)
-        })
-    }
-
-    pub(super) fn draw_card(&mut self, player: PlayerId) -> Option<GameObjectId> {
-        if self.draw_replacements[player.index()].len() > 1 {
-            self.queue_draw_replacement_choice(player);
-            return None;
-        }
-        if let Some(replacement) = self.draw_replacements[player.index()].pop_front() {
-            self.resolve_effect_def(replacement.effect, &replacement.object, replacement.context);
-            return None;
-        }
-        let Some(card) = self.players[player.index()].library.pop() else {
-            self.players[player.index()].tried_to_draw_from_empty_library = true;
-            return None;
-        };
-        let (card, _zone_change) = self.zone_change_card(card);
-        let card_id = card.id;
-        let definition = card.definition;
-        self.players[player.index()].hand.push(card);
-        self.events.push(GameEvent::CardDrawn {
-            player,
-            card: card_id,
-        });
-        let drawn = &mut self.cards_drawn_this_turn[player.index()];
-        *drawn = drawn.saturating_add(1);
-        self.drawn_this_turn[player.index()].push(card_id);
-        if self.cards_drawn_this_turn[player.index()] == 1 && self.has_miracle(definition) {
-            self.queue_miracle_reveal(player, card_id);
-        }
-        Some(card_id)
-    }
-
-    fn queue_draw_replacement_choice(&mut self, player: PlayerId) {
-        let replacements = self.draw_replacements[player.index()]
-            .drain(..)
-            .collect::<Vec<_>>();
-        let options = replacements
-            .iter()
-            .enumerate()
-            .map(|(index, replacement)| {
-                let definition = replacement.object.presentation_definition();
-                let name = self
-                    .catalog
-                    .get(definition)
-                    .map_or("Draw replacement", |card| card.name.as_str());
-                DecisionOption {
-                    id: u32::try_from(index).unwrap_or(u32::MAX),
-                    label: replacement
-                        .object
-                        .ability_text()
-                        .map_or_else(|| name.to_string(), |text| format!("{name} — {text}")),
-                    card: None,
-                    members: Vec::new(),
-                    ability_text: replacement.object.ability_text().map(str::to_owned),
-                    zone: DecisionZone::None,
-                }
-            })
-            .collect();
-        self.queue_decision(
-            player,
-            "Choose which effect replaces this draw",
-            DecisionVisibility::Public,
-            DecisionPreference::Neutral,
-            1..=1,
-            false,
-            options,
-            DecisionContinuation::DrawReplacement {
-                player,
-                replacements,
-            },
-        );
-    }
-
-    /// Whether a card offers a miracle cost at all.
-    pub(super) fn has_miracle(&self, definition: CardDefinitionId) -> bool {
-        self.catalog.get(definition).is_some_and(|definition| {
-            definition.parts.iter().any(|part| {
-                part.rules.ability_clauses().iter().any(|ability| {
-                    ability.is_executable()
-                        && matches!(
-                            ability.definition,
-                            DeclarativeAbilityDef::AlternativeCast(alternative)
-                                if alternative.kind == AlternativeCastKindDef::Miracle
-                        )
-                })
-            })
-        })
-    }
-
-    /// Offers the reveal that opens a miracle window. Revealing is the whole
-    /// choice: whether to then pay the cost is the ordinary cast decision,
-    /// and declining to cast simply lets the window close.
-    pub(super) fn queue_miracle_reveal(&mut self, player: PlayerId, card: GameObjectId) {
-        let name = self.players[player.index()]
-            .hand
-            .iter()
-            .find(|held| held.id == card)
-            .and_then(|held| self.catalog.get(held.definition))
-            .map_or_else(
-                || "that card".to_string(),
-                |definition| definition.name.clone(),
-            );
-        self.queue_decision(
-            player,
-            format!("Reveal {name} for its miracle cost?"),
-            DecisionVisibility::Private,
-            DecisionPreference::Neutral,
-            1..=1,
-            false,
-            vec![
-                DecisionOption {
-                    id: 0,
-                    label: "Keep it hidden".into(),
-                    card: None,
-                    members: Vec::new(),
-                    ability_text: None,
-                    zone: DecisionZone::None,
-                },
-                DecisionOption {
-                    id: 1,
-                    label: format!("Reveal {name}"),
-                    card: Some((card, CardDefinitionId(0))),
-                    members: Vec::new(),
-                    ability_text: None,
-                    zone: DecisionZone::Hand,
-                },
-            ],
-            DecisionContinuation::MiracleReveal { card },
-        );
-    }
-
-    pub(super) fn draw_cards(&mut self, player: PlayerId, count: u16) {
-        if count == 0 {
-            return;
-        }
-        if !self.pending_decisions.is_empty()
-            || !self.pending_events.is_empty()
-            || !self.pending_procedures.is_empty()
-        {
-            self.pending_procedures
-                .push_back(PendingProcedure::DrawCards {
-                    player,
-                    remaining: count,
-                });
-            return;
-        }
-        let mut remaining = count;
-        while remaining > 0 {
-            if self.result.is_some() {
-                break;
-            }
-            remaining -= 1;
-            let _ = self.draw_card(player);
-            if !self.pending_decisions.is_empty()
-                || !self.pending_events.is_empty()
-                || !self.pending_procedures.is_empty()
-            {
-                if remaining > 0 {
-                    self.pending_procedures
-                        .push_back(PendingProcedure::DrawCards { player, remaining });
-                }
-                break;
-            }
-        }
     }
 
     /// Resumes rules procedures in the order their interrupted operations
@@ -764,13 +772,15 @@ impl Game {
                     context,
                     custom_followup,
                 } => self.resolve_effects_in_order(effects, &object, context, custom_followup),
-                PendingProcedure::SylvanAfterDraw { player } => {
-                    let candidates = self.sylvan_candidates(player);
-                    let choices = candidates.len().min(2);
-                    if choices > 0 {
-                        self.queue_sylvan_select(player, candidates, choices);
-                    }
-                }
+                PendingProcedure::ForEachInBinding {
+                    objects,
+                    binding,
+                    next,
+                    effect,
+                    object,
+                    context,
+                } => self
+                    .resolve_for_each_in_binding(objects, binding, next, effect, &object, context),
                 PendingProcedure::SimultaneousDraws {
                     remaining,
                     next,
@@ -778,6 +788,9 @@ impl Game {
                 } => self.continue_simultaneous_draws(remaining, next, was_deferred),
                 PendingProcedure::ShuffleLibrary { player } => {
                     self.rng.shuffle(&mut self.players[player.index()].library);
+                }
+                PendingProcedure::FinishStackResolution { object, resolved } => {
+                    self.finish_stack_resolution(&object, resolved);
                 }
                 PendingProcedure::FinishStepAdvance => self.finish_step_advance(),
             }
@@ -789,13 +802,14 @@ impl Game {
         &mut self,
         mut effects: Vec<super::ScopedEffect>,
         object: &super::StackObject,
-        context: TriggerContext,
+        context: impl Into<EffectResolutionContext>,
         custom_followup: Option<CardBehavior>,
     ) {
+        let context = context.into();
         let mut later_procedures = std::mem::take(&mut self.pending_procedures);
         while !effects.is_empty() {
             let effect = effects.remove(0);
-            self.resolve_effect_def(effect, object, context);
+            self.resolve_effect_def(effect, object, context.clone());
             if !self.pending_decisions.is_empty()
                 || !self.pending_events.is_empty()
                 || !self.pending_procedures.is_empty()
@@ -832,52 +846,6 @@ impl Game {
             }
         }
         self.check_state_based_actions();
-    }
-
-    /// Draws every card for the active player first, then every card for the
-    /// other player. Each player's draws still happen one at a time so draw
-    /// replacements can suspend the instruction. One spell can deck both
-    /// players, so empty-library losses remain deferred until the complete
-    /// simultaneous instruction finishes. Empty-library loss is recorded on
-    /// each player and settled at the next state-based-action check.
-    #[cfg(test)]
-    pub(super) fn draw_cards_simultaneously(&mut self, counts: [u16; 2]) {
-        let was_deferred = self.defer_empty_library_loss;
-        self.defer_empty_library_loss = true;
-        self.continue_simultaneous_draws(counts, self.active_player, was_deferred);
-    }
-
-    fn continue_simultaneous_draws(
-        &mut self,
-        mut remaining: [u16; 2],
-        mut next: PlayerId,
-        was_deferred: bool,
-    ) {
-        while remaining.iter().any(|count| *count > 0) && self.result.is_none() {
-            let player = next;
-            if remaining[player.index()] == 0 {
-                next = player.opponent();
-                continue;
-            }
-            remaining[player.index()] -= 1;
-            let _ = self.draw_card(player);
-            if remaining[player.index()] == 0 {
-                next = player.opponent();
-            }
-            if !self.pending_decisions.is_empty()
-                || !self.pending_events.is_empty()
-                || !self.pending_procedures.is_empty()
-            {
-                self.pending_procedures
-                    .push_back(PendingProcedure::SimultaneousDraws {
-                        remaining,
-                        next,
-                        was_deferred,
-                    });
-                return;
-            }
-        }
-        self.defer_empty_library_loss = was_deferred;
     }
 
     pub(super) fn finish(&mut self, result: GameResult) {

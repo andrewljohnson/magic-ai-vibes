@@ -66,9 +66,9 @@ fn blind_obedience_competes_with_a_permanents_own_entry_replacement() {
         .options
         .iter()
         .find(|option| {
-            option
-                .card
-                .is_some_and(|(_, definition)| definition == cards::BLIND_OBEDIENCE)
+            option.card.is_some_and(|(_, characteristics)| {
+                characteristics.card_definition() == Some(cards::BLIND_OBEDIENCE)
+            })
         })
         .expect("Blind Obedience supplies one applicable replacement")
         .id;
@@ -88,132 +88,6 @@ fn blind_obedience_competes_with_a_permanents_own_entry_replacement() {
         .expect("re-evaluation applies Time Vault's remaining replacement and commits");
     assert!(entered.tapped);
     assert!(game.pending_decisions.is_empty());
-}
-
-#[test]
-fn sylvan_library_triggers_onto_the_stack_and_may_be_declined() {
-    let mut game = ready_game();
-    game.turn = 2;
-    game.step = Step::Upkeep;
-    game.battlefield
-        .push(creature(10_000, cards::SYLVAN_LIBRARY, PlayerId::One));
-    game.players[0].library = vec![
-        card(10_001, cards::PLAINS, PlayerId::One),
-        card(10_002, cards::SAVANNAH_LIONS, PlayerId::One),
-        card(10_003, cards::SWORDS_TO_PLOWSHARES, PlayerId::One),
-    ];
-
-    game.advance_step();
-    assert_eq!(
-        game.players[0].hand.len(),
-        1,
-        "the draw step draws one; the extras wait on the ability"
-    );
-    assert_eq!(game.pending_triggers.len(), 1, "the ability triggered");
-
-    pass_priority_pair(&mut game);
-    assert_eq!(game.stack.len(), 1, "and it went on the stack");
-    assert!(
-        game.observe(PlayerId::One).decision.is_none(),
-        "so the opponent had a window before any of it happened"
-    );
-
-    pass_until_decision(&mut game);
-    let offer = game.observe(PlayerId::One).decision.unwrap();
-    assert_eq!(offer.prompt, "Draw two additional cards?");
-    game.apply(
-        PlayerId::One,
-        Action::ChooseDecision {
-            decision: offer.id,
-            options: vec![0],
-        },
-    )
-    .unwrap();
-
-    assert_eq!(game.players[0].hand.len(), 1, "declining draws nothing");
-    assert_eq!(game.players[0].life, 20, "and costs nothing");
-    assert!(game.observe(PlayerId::One).decision.is_none());
-}
-
-#[test]
-fn sylvan_library_may_draw_from_an_empty_library_before_state_based_actions() {
-    let mut game = ready_game();
-    game.players[0].library.clear();
-    game.queue_sylvan_offer(PlayerId::One);
-
-    let offer = game.observe(PlayerId::One).decision.unwrap();
-    assert_eq!(offer.prompt, "Draw two additional cards?");
-    game.choose_decision(PlayerId::One, offer.id, &[1]);
-
-    assert_eq!(
-        game.result, None,
-        "choosing the draw only records the failed attempts during resolution"
-    );
-    game.finish_rules_procedure();
-    assert_eq!(
-        game.result,
-        Some(GameResult::Winner {
-            winner: PlayerId::Two,
-            reason: WinReason::OpponentTriedToDrawFromEmptyLibrary,
-        })
-    );
-}
-
-#[test]
-fn sylvan_library_pays_life_or_puts_each_chosen_card_back() {
-    let mut game = ready_game();
-    game.turn = 2;
-    game.step = Step::Upkeep;
-    game.battlefield
-        .push(creature(10_000, cards::SYLVAN_LIBRARY, PlayerId::One));
-    game.players[0].library = vec![
-        card(10_001, cards::PLAINS, PlayerId::One),
-        card(10_002, cards::SAVANNAH_LIONS, PlayerId::One),
-        card(10_003, cards::SWORDS_TO_PLOWSHARES, PlayerId::One),
-    ];
-
-    game.advance_step();
-    pass_priority_pair(&mut game);
-    pass_until_decision(&mut game);
-    let offer = game.observe(PlayerId::One).decision.unwrap();
-    game.apply(
-        PlayerId::One,
-        Action::ChooseDecision {
-            decision: offer.id,
-            options: vec![1],
-        },
-    )
-    .unwrap();
-    assert_eq!(game.players[0].hand.len(), 3, "one drawn plus two more");
-
-    for mode in [1, 0] {
-        let selection = game.observe(PlayerId::One).decision.unwrap();
-        game.apply(
-            PlayerId::One,
-            Action::ChooseDecision {
-                decision: selection.id,
-                options: vec![selection.options[0].id],
-            },
-        )
-        .unwrap();
-        let decision = game.observe(PlayerId::One).decision.unwrap();
-        game.apply(
-            PlayerId::One,
-            Action::ChooseDecision {
-                decision: decision.id,
-                options: vec![mode],
-            },
-        )
-        .unwrap();
-    }
-
-    assert_eq!(game.players[0].life, 16, "four life for the one kept");
-    assert_eq!(game.players[0].hand.len(), 2);
-    assert_eq!(
-        game.players[0].library.len(),
-        1,
-        "the other went back on top"
-    );
 }
 
 #[test]
@@ -275,8 +149,9 @@ fn triskelion_enters_with_counters_and_spends_one_to_deal_damage() {
             source: permanent_id,
             ability: activated_ability_for(&game, permanent_id, 0),
             targets: activated_targets(Target::Player(PlayerId::Two)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -301,7 +176,9 @@ fn triskelion_cannot_activate_without_a_plus_one_counter() {
         |action| matches!(action, Action::ActivateAbility { source: candidate, .. } if *candidate == source)
     ));
 
-    game.battlefield[0].counters[CounterKind::PlusOnePlusOne.index()] = 1;
+    game.battlefield[0]
+        .counters
+        .set(CounterKind::PlusOnePlusOne, 1);
     assert!(game.legal_actions(PlayerId::One).iter().any(
         |action| matches!(action, Action::ActivateAbility { source: candidate, .. } if *candidate == source)
     ));
@@ -477,8 +354,9 @@ fn order_of_leitbur_can_gain_first_strike() {
         source: order_id,
         ability: activated_ability_for(&game, order_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&activation));
@@ -730,8 +608,9 @@ fn ivory_tower_and_jayemdae_tome_provide_control_card_advantage() {
             source: tome_id,
             ability: activated_ability_for(&game, tome_id, 0),
             targets: Vec::new(),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -760,8 +639,9 @@ fn library_of_alexandria_draw_activation_keeps_its_printed_ability_id() {
         source: library_id,
         ability: expected_origin,
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
 
     assert_eq!(activated_ability_for(&game, library_id, 0), expected_origin);

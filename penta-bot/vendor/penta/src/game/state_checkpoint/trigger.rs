@@ -1,183 +1,150 @@
-use crate::card::{DeclarativeAbilityDef, PlayerRelation, TurnStepDef};
-use crate::{CardDefinitionId, GameObjectId, PlayerId};
+use crate::GameObjectId;
+use crate::card::DeclarativeAbilityDef;
 
-use super::super::{DelayedTrigger, FloatingTrigger, TriggerCapture};
 use super::model::AbilitySourceSnapshot;
-use super::model_trigger::{
-    DelayedTriggerSnapshot, FloatingTriggerSnapshot, PlayerRelationSnapshot, TurnStepSnapshot,
-};
-use super::semantics::{
-    ability_locator, catalog_ability, catalog_scoped_effect, scoped_effect_snapshot,
-};
+use super::model_trigger::{InstalledTriggerLifetimeSnapshot, InstalledTriggerSnapshot};
+use super::semantics::{ability_locator_for_origin, catalog_ability};
 use super::stack::{
-    detached_stack_snapshot, parse_detached_stack, parse_trigger_context, stack_ability_snapshot,
-    trigger_context_snapshot,
+    effect_resolution_context_snapshot, parse_effect_resolution_context, parse_target_selection,
+    target_selection_snapshot, trigger_capture_has_unrebindable_hidden_reference,
 };
-use super::{AbilitySourceRef, Game, ability_origin_from_snapshot, ability_origin_snapshot};
+use super::{
+    AbilitySourceRef, Game, InstalledTrigger, InstalledTriggerLifetime, PlayerId, ScopedEffect,
+    StackAbilityResolver, TriggerCapture, ability_origin_from_snapshot, ability_origin_snapshot,
+    player_from_index,
+};
 
-pub(super) fn delayed_trigger_snapshot(
+pub(super) fn installed_trigger_snapshot(
     game: &Game,
-    trigger: &DelayedTrigger,
-) -> Option<DelayedTriggerSnapshot> {
-    let ability = stack_ability_snapshot(game, &trigger.object)?.ability_locator?;
-    let definition = catalog_ability(&game.catalog, &ability)?;
-    let object = detached_stack_snapshot(game, &trigger.object)?;
-    Some(DelayedTriggerSnapshot {
-        object,
-        ability,
-        context: trigger_context_snapshot(trigger.context),
-        step: turn_step_snapshot(trigger.step),
-        player: player_relation_snapshot(trigger.player),
-        effect: scoped_effect_snapshot(&definition, trigger.effect)?,
-    })
-}
-
-pub(super) fn parse_delayed_trigger(
-    snapshot: &DelayedTriggerSnapshot,
-    game: &Game,
-) -> Result<DelayedTrigger, String> {
-    Ok(DelayedTrigger {
-        object: Box::new(parse_detached_stack(&snapshot.object, game)?),
-        context: parse_trigger_context(snapshot.context)?,
-        step: parse_turn_step(snapshot.step),
-        player: parse_player_relation(snapshot.player),
-        effect: catalog_scoped_effect(&game.catalog, &snapshot.ability, &snapshot.effect)
-            .ok_or("delayed trigger effect locator is absent from this catalog")?,
-    })
-}
-
-pub(super) fn floating_trigger_snapshot(
-    game: &Game,
-    trigger: &FloatingTrigger,
-) -> Option<FloatingTriggerSnapshot> {
-    let capture = trigger.capture;
-    let ability = ability_locator(&game.catalog, |ability| {
+    viewer: PlayerId,
+    trigger: &InstalledTrigger,
+) -> Option<InstalledTriggerSnapshot> {
+    let capture = &trigger.capture;
+    if trigger_capture_has_unrebindable_hidden_reference(
+        game,
+        viewer,
+        &capture.targets,
+        &capture.context,
+    ) {
+        return None;
+    }
+    let StackAbilityResolver::Declarative(resolver) = capture.resolver else {
+        return None;
+    };
+    if resolver.effect != capture.effect {
+        return None;
+    }
+    let ability = ability_locator_for_origin(&game.catalog, capture.source.ability, |ability| {
         let DeclarativeAbilityDef::Triggered(definition) = ability.definition else {
             return false;
         };
         definition.event == trigger.event
             && ability.text == capture.text
-            && definition.targets == capture.target_defs
-            && ability.effect.definition == capture.effect
+            && ability.declarative_effect() == Some(capture.effect)
             && definition.condition == capture.condition
-            && Game::ability_resolver(capture.source.ability, ability) == capture.resolver
+            && matches!(
+                Game::ability_resolver(capture.source.ability, ability),
+                StackAbilityResolver::Declarative(candidate)
+                    if candidate.effect == capture.effect
+            )
     })?;
-    Some(FloatingTriggerSnapshot {
+    Some(InstalledTriggerSnapshot {
+        id: trigger.id,
         source: AbilitySourceSnapshot {
             object: capture.source.object.0,
             ability: ability_origin_snapshot(capture.source.ability),
         },
         ability,
-        definition: capture.definition.0,
+        presentation: super::object_characteristics_snapshot(&game.catalog, capture.presentation)?,
         owner: capture.owner.index(),
         controller: capture.controller.index(),
-        context: trigger_context_snapshot(capture.context),
-        until_turn_of: trigger.until_turn_of.index(),
-        created_after_turns: trigger.created_after_turns,
+        targets: capture
+            .targets
+            .iter()
+            .map(target_selection_snapshot)
+            .collect(),
+        context: effect_resolution_context_snapshot(&capture.context),
+        lifetime: match trigger.lifetime {
+            InstalledTriggerLifetime::Once => InstalledTriggerLifetimeSnapshot::Once,
+            InstalledTriggerLifetime::ThisTurn { turn } => {
+                InstalledTriggerLifetimeSnapshot::ThisTurn { turn }
+            }
+            InstalledTriggerLifetime::UntilTurn { player, turn } => {
+                InstalledTriggerLifetimeSnapshot::UntilTurn {
+                    seat: player.index(),
+                    turn,
+                }
+            }
+        },
+        target_base: resolver.target_base,
+        x: capture.x,
     })
 }
 
-pub(super) fn parse_floating_trigger(
-    snapshot: &FloatingTriggerSnapshot,
+pub(super) fn parse_installed_trigger(
+    snapshot: &InstalledTriggerSnapshot,
     game: &Game,
-) -> Result<FloatingTrigger, String> {
+) -> Result<InstalledTrigger, String> {
     let ability = catalog_ability(&game.catalog, &snapshot.ability)
-        .ok_or("floating trigger ability locator is absent from this catalog")?;
+        .ok_or("installed trigger ability locator is absent from this catalog")?;
     let DeclarativeAbilityDef::Triggered(triggered) = ability.definition else {
-        return Err("floating trigger locator does not identify a triggered ability".into());
+        return Err("installed trigger locator does not identify a triggered ability".into());
     };
+    let effect = ability
+        .declarative_effect()
+        .ok_or("installed trigger does not identify an ordinary declarative program")?;
     let source = AbilitySourceRef {
         object: GameObjectId(snapshot.source.object),
         ability: ability_origin_from_snapshot(snapshot.source.ability),
     };
-    Ok(FloatingTrigger {
+    if !super::semantics::ability_locator_matches_origin(&snapshot.ability, source.ability) {
+        return Err("installed trigger ability locator disagrees with its origin".into());
+    }
+    let presentation =
+        super::object_characteristics_from_snapshot(&game.catalog, &snapshot.presentation)
+            .ok_or("installed trigger presentation locator is absent from this catalog")?;
+    let targets = snapshot
+        .targets
+        .iter()
+        .map(parse_target_selection)
+        .collect::<Result<Vec<_>, _>>()?;
+    if snapshot.target_base > targets.len() {
+        return Err("installed trigger target base exceeds its lexical selections".into());
+    }
+    Ok(InstalledTrigger {
+        id: snapshot.id,
         event: triggered.event,
         capture: TriggerCapture {
             source,
-            definition: CardDefinitionId(snapshot.definition),
-            owner: player(snapshot.owner)?,
-            controller: player(snapshot.controller)?,
+            presentation,
+            owner: player_from_index(snapshot.owner)?,
+            controller: player_from_index(snapshot.controller)?,
             text: ability.text,
-            target_defs: triggered.targets,
-            effect: ability.effect.definition,
-            resolver: Game::ability_resolver(source.ability, &ability),
-            context: parse_trigger_context(snapshot.context)?,
+            // These are lexical selections retained from the installing
+            // ability, not targets chosen again when the trigger fires.
+            target_defs: Vec::new(),
+            targets,
+            effect,
+            resolver: StackAbilityResolver::Declarative(ScopedEffect {
+                effect,
+                target_base: snapshot.target_base,
+            }),
+            context: parse_effect_resolution_context(snapshot.context.clone())?,
             condition: triggered.condition,
+            modes: triggered.modes,
+            x: snapshot.x,
         },
-        until_turn_of: player(snapshot.until_turn_of)?,
-        created_after_turns: snapshot.created_after_turns,
+        lifetime: match snapshot.lifetime {
+            InstalledTriggerLifetimeSnapshot::Once => InstalledTriggerLifetime::Once,
+            InstalledTriggerLifetimeSnapshot::ThisTurn { turn } => {
+                InstalledTriggerLifetime::ThisTurn { turn }
+            }
+            InstalledTriggerLifetimeSnapshot::UntilTurn { seat, turn } => {
+                InstalledTriggerLifetime::UntilTurn {
+                    player: player_from_index(seat)?,
+                    turn,
+                }
+            }
+        },
     })
-}
-
-const fn turn_step_snapshot(step: TurnStepDef) -> TurnStepSnapshot {
-    match step {
-        TurnStepDef::Untap => TurnStepSnapshot::Untap,
-        TurnStepDef::Upkeep => TurnStepSnapshot::Upkeep,
-        TurnStepDef::Draw => TurnStepSnapshot::Draw,
-        TurnStepDef::PrecombatMain => TurnStepSnapshot::PrecombatMain,
-        TurnStepDef::BeginningOfCombat => TurnStepSnapshot::BeginningOfCombat,
-        TurnStepDef::DeclareAttackers => TurnStepSnapshot::DeclareAttackers,
-        TurnStepDef::DeclareBlockers => TurnStepSnapshot::DeclareBlockers,
-        TurnStepDef::CombatDamage => TurnStepSnapshot::CombatDamage,
-        TurnStepDef::EndOfCombat => TurnStepSnapshot::EndOfCombat,
-        TurnStepDef::PostcombatMain => TurnStepSnapshot::PostcombatMain,
-        TurnStepDef::End => TurnStepSnapshot::End,
-        TurnStepDef::Cleanup => TurnStepSnapshot::Cleanup,
-    }
-}
-
-const fn parse_turn_step(step: TurnStepSnapshot) -> TurnStepDef {
-    match step {
-        TurnStepSnapshot::Untap => TurnStepDef::Untap,
-        TurnStepSnapshot::Upkeep => TurnStepDef::Upkeep,
-        TurnStepSnapshot::Draw => TurnStepDef::Draw,
-        TurnStepSnapshot::PrecombatMain => TurnStepDef::PrecombatMain,
-        TurnStepSnapshot::BeginningOfCombat => TurnStepDef::BeginningOfCombat,
-        TurnStepSnapshot::DeclareAttackers => TurnStepDef::DeclareAttackers,
-        TurnStepSnapshot::DeclareBlockers => TurnStepDef::DeclareBlockers,
-        TurnStepSnapshot::CombatDamage => TurnStepDef::CombatDamage,
-        TurnStepSnapshot::EndOfCombat => TurnStepDef::EndOfCombat,
-        TurnStepSnapshot::PostcombatMain => TurnStepDef::PostcombatMain,
-        TurnStepSnapshot::End => TurnStepDef::End,
-        TurnStepSnapshot::Cleanup => TurnStepDef::Cleanup,
-    }
-}
-
-const fn player_relation_snapshot(relation: PlayerRelation) -> PlayerRelationSnapshot {
-    match relation {
-        PlayerRelation::Any => PlayerRelationSnapshot::Any,
-        PlayerRelation::You => PlayerRelationSnapshot::You,
-        PlayerRelation::NotYou => PlayerRelationSnapshot::NotYou,
-        PlayerRelation::Opponent => PlayerRelationSnapshot::Opponent,
-        PlayerRelation::ActivePlayer => PlayerRelationSnapshot::ActivePlayer,
-        PlayerRelation::NonactivePlayer => PlayerRelationSnapshot::NonactivePlayer,
-        PlayerRelation::EventPlayer => PlayerRelationSnapshot::EventPlayer,
-        PlayerRelation::ChosenPlayer => PlayerRelationSnapshot::ChosenPlayer,
-        PlayerRelation::ControllerOfAttachedPermanent => {
-            PlayerRelationSnapshot::ControllerOfAttachedPermanent
-        }
-    }
-}
-
-const fn parse_player_relation(relation: PlayerRelationSnapshot) -> PlayerRelation {
-    match relation {
-        PlayerRelationSnapshot::Any => PlayerRelation::Any,
-        PlayerRelationSnapshot::You => PlayerRelation::You,
-        PlayerRelationSnapshot::NotYou => PlayerRelation::NotYou,
-        PlayerRelationSnapshot::Opponent => PlayerRelation::Opponent,
-        PlayerRelationSnapshot::ActivePlayer => PlayerRelation::ActivePlayer,
-        PlayerRelationSnapshot::NonactivePlayer => PlayerRelation::NonactivePlayer,
-        PlayerRelationSnapshot::EventPlayer => PlayerRelation::EventPlayer,
-        PlayerRelationSnapshot::ChosenPlayer => PlayerRelation::ChosenPlayer,
-        PlayerRelationSnapshot::ControllerOfAttachedPermanent => {
-            PlayerRelation::ControllerOfAttachedPermanent
-        }
-    }
-}
-
-fn player(index: usize) -> Result<PlayerId, String> {
-    [PlayerId::One, PlayerId::Two]
-        .get(index)
-        .copied()
-        .ok_or_else(|| "seat index must be 0 or 1".into())
 }

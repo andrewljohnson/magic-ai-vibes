@@ -331,6 +331,13 @@ pub const CREATURE_TYPES: &[&str] = &[
     "Zombie",
     "Zubera",
 ];
+/// The catalog's own name for a creature type, matched exactly. A
+/// checkpoint that names one gets back the same `&'static str` the cards
+/// hold, which is what lets a permission carry it.
+#[must_use]
+pub fn creature_type_name(name: &str) -> Option<&'static str> {
+    CREATURE_TYPES.iter().copied().find(|known| *known == name)
+}
 
 #[cfg(test)]
 mod tests {

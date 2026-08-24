@@ -1,0 +1,12 @@
+/target
+/wasm/target
+/bindings/penta-py/target
+/bindings/penta-py/penta.so
+/web/app/wasm/
+.pnpm-store/
+.DS_Store
+
+# Python bytecode from the skills' test suites. Tracked by accident, and it
+# rewrote itself into every commit that ran them.
+__pycache__/
+*.pyc

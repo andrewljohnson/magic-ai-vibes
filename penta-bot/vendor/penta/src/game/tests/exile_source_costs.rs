@@ -15,7 +15,7 @@ fn exile_source_and_life_costs_are_paid_before_the_ability_goes_on_the_stack() {
             amount: ValueDef::Constant(1),
         },
     )];
-    let definition_id = CardDefinitionId(10_096);
+    let definition_id = CardDefinitionId::new(10_096);
     let mut definition = CardDefinition::new(
         definition_id,
         "Exile source cost test",
@@ -42,8 +42,9 @@ fn exile_source_and_life_costs_are_paid_before_the_ability_goes_on_the_stack() {
         source: source_id,
         ability: activated_ability_for(&game, source_id, 0),
         targets: Vec::new(),
-        cost_object: None,
+        cost_objects: Vec::new(),
         x: 0,
+        modes: Vec::new(),
     };
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 
@@ -79,7 +80,7 @@ fn a_mana_ability_can_exile_its_source_and_pay_life() {
         &COSTS,
         EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
     )];
-    let definition_id = CardDefinitionId(10_097);
+    let definition_id = CardDefinitionId::new(10_097);
     let mut definition = CardDefinition::new(
         definition_id,
         "Exile source mana cost test",
@@ -106,6 +107,9 @@ fn a_mana_ability_can_exile_its_source_and_pay_life() {
         source: source_id,
         ability: mana_ability_for(&game, source_id, ManaColor::Colorless),
         color: ManaColor::Colorless,
+        counters_removed: None,
+        cost_object: None,
+        combination: None,
     };
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 
@@ -152,7 +156,7 @@ fn source_leaving_mana_cannot_also_pay_an_exile_source_ability() {
             EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
         ),
     ];
-    let definition_id = CardDefinitionId(10_098);
+    let definition_id = CardDefinitionId::new(10_098);
     let mut definition = CardDefinition::new(
         definition_id,
         "Mutually exclusive source costs test",
@@ -206,7 +210,7 @@ fn source_preserving_mana_can_pay_an_exile_source_ability() {
             EffectDef::AddMana(AddManaEffectDef::one(ManaColor::Colorless)),
         ),
     ];
-    let definition_id = CardDefinitionId(10_099);
+    let definition_id = CardDefinitionId::new(10_099);
     let mut definition = CardDefinition::new(
         definition_id,
         "Compatible source costs test",

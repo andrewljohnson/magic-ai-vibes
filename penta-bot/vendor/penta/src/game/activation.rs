@@ -1,12 +1,33 @@
 use super::{
-    AbilityCostDef, AbilityOrigin, AbilityProcedureDef, ActivationTimingDef,
-    BattlefieldExitCompletion, CardBehavior, CardInstance, CharacteristicContext, CounterKind,
-    DeclarativeAbilityDef, FrozenActivatedAbility, Game, GameEvent, GameObjectId, ManaCost,
-    ManaPaymentPurpose, PlayRestriction, PlayerId, Step, Target, TargetSelection, ZoneKind,
-    remove_card,
+    AbilityCostDef, AbilityOrigin, AbilityProcedureDef, ActivationChoices, ActivationTimingDef,
+    BattlefieldExitCompletion, CardBehavior, CardInstance, CharacteristicContext,
+    CommittedTriggerEvent, CounterKind, DeclarativeAbilityDef, FrozenActivatedAbility, Game,
+    GameEvent, GameObjectId, ManaPaymentPurpose, ManaPlanOptions, ObjectCharacteristics,
+    ObjectInstance, PendingActivation, PlayRestriction, PlayerId, SacrificeQuota, Step, Target,
+    TargetSelection, ZoneKind, ZoneMoveCause, ZonePlacement, remove_card,
 };
 
 impl Game {
+    /// Moves the counters a loyalty cost names and records that this
+    /// planeswalker has used its one ability for the turn (CR 606.3). Shared
+    /// by the two activation paths, because a loyalty ability that makes
+    /// mana is paid for exactly like one that does not.
+    pub(super) fn pay_loyalty_cost(&mut self, source: GameObjectId, change: i8) {
+        let Some(permanent) = self
+            .battlefield
+            .iter_mut()
+            .find(|permanent| permanent.card.id == source)
+        else {
+            return;
+        };
+        if change >= 0 {
+            permanent.add_counters(CounterKind::Loyalty, u16::from(change.unsigned_abs()));
+        } else {
+            permanent.remove_counters(CounterKind::Loyalty, u16::from(change.unsigned_abs()));
+        }
+        permanent.activated_loyalty_this_turn = true;
+    }
+
     /// Whether a printed "Activate only ..." window is currently open for
     /// this player. The restriction narrows when an ability may be activated;
     /// it says nothing about priority, so an ability still needs its
@@ -22,14 +43,23 @@ impl Game {
             ActivationTimingDef::YourUpkeep => {
                 self.active_player == player && self.step == Step::Upkeep
             }
+            ActivationTimingDef::AnyUpkeep => self.step == Step::Upkeep,
+            ActivationTimingDef::DuringCombat => self.step.is_combat(),
+            ActivationTimingDef::EndOfCombat => self.step == Step::EndOfCombat,
             ActivationTimingDef::SorcerySpeed => {
                 self.active_player == player && self.step.is_main() && self.stack.is_empty()
             }
             // The same window Berserk uses, and read the same way: once
             // combat damage has started it is gone for the rest of the turn,
             // even in a later step.
+            // The priority round the declaration opens, which is the only
+            // window between the two declarations: once the step advances,
+            // blockers are being declared and nothing else has priority.
+            ActivationTimingDef::AfterAttackersDeclared => {
+                self.step == Step::DeclareAttackers && self.attackers_declared
+            }
             ActivationTimingDef::BeforeCombatDamage => {
-                self.play_timing_allows(PlayRestriction::BeforeCombatDamage)
+                self.play_timing_allows(player, PlayRestriction::BeforeCombatDamage)
             }
         }
     }
@@ -37,15 +67,40 @@ impl Game {
     /// Activates an ability printed to work from its owner's graveyard. The
     /// card is not a permanent and never becomes one, so the only cost it can
     /// pay with itself is exile, and the ability on the stack outlives it.
+    /// Scavenge's cost, and the only one a card pays out of its own
+    /// graveyard. Retiring the old identity here is what later lets the
+    /// resolving ability read the card's power: by then it is in exile under
+    /// a new one.
+    pub(super) fn exile_graveyard_source(&mut self, player: PlayerId, source: GameObjectId) {
+        self.exile_graveyard_cards(player, &[source]);
+    }
+
+    pub(super) fn exile_graveyard_cards(&mut self, player: PlayerId, sources: &[GameObjectId]) {
+        let mut exiled = Vec::new();
+        for source in sources {
+            let card = remove_card(&mut self.players[player.index()].graveyard, *source)
+                .expect("a legal graveyard payment still has its card");
+            let (card, _zone_change) = self.zone_change_card(card);
+            self.players[player.index()].exile.push(card.clone());
+            exiled.push(card);
+        }
+        if !exiled.is_empty() {
+            self.capture_cards_exiled(&exiled, crate::card::ZoneKind::Graveyard);
+            self.note_card_left_graveyard(player);
+        }
+    }
+
     fn activate_graveyard_ability(
         &mut self,
         player: PlayerId,
         source: GameObjectId,
         ability: AbilityOrigin,
-        targets: Vec<TargetSelection>,
-        x: u16,
+        choices: ActivationChoices<'_>,
         source_card: &CardInstance,
     ) {
+        let ActivationChoices {
+            targets, x, modes, ..
+        } = choices;
         let Some(effective) = self.find_printed_card_ability(
             source_card,
             &CharacteristicContext::Graveyard,
@@ -62,16 +117,20 @@ impl Game {
         {
             return;
         }
+        let Some(plan) = Self::selected_activated_plan(&definition, modes) else {
+            return;
+        };
         let frozen = FrozenActivatedAbility {
             origin: effective.origin,
             definition: Some(Box::new(effective.ability)),
-            presentation_definition: Self::ability_presentation_definition(
+            presentation: Self::ability_presentation(
                 effective.origin,
-                source_card.definition,
+                ObjectCharacteristics::card(source_card.definition, crate::CardPartId::PRIMARY),
             ),
             text: Some(effective.ability.text),
-            target_defs: definition.targets,
+            target_defs: plan.target_defs,
             resolver: Self::ability_resolver(effective.origin, &effective.ability),
+            mode_effects: plan.mode_effects,
             x,
         };
         let payment_purpose = ManaPaymentPurpose::Ability {
@@ -79,38 +138,42 @@ impl Game {
             taps_source: false,
             leaves_source: true,
         };
+        let priced_mana_cost = self.priced_ability_mana_cost(source, definition.costs.as_slice());
         for cost in definition.costs.as_slice() {
             match cost {
                 AbilityCostDef::Mana(cost) => {
+                    let cost = priced_mana_cost.unwrap_or(*cost);
                     self.activate_mana_for_cost_avoiding_for(
                         player,
-                        *cost,
+                        cost,
                         x,
                         None,
                         &payment_purpose,
                     );
-                    let _ = self.pay_player_cost_for(player, *cost, x, &payment_purpose);
+                    let _ = self.pay_player_cost_for(player, cost, x, &payment_purpose);
                 }
-                AbilityCostDef::ExileSource => {
-                    let exiled = remove_card(&mut self.players[player.index()].graveyard, source)
-                        .expect("a legal graveyard activation still has its source");
-                    // Retiring the old identity here is what later lets the
-                    // resolving ability read the card's power: by then it is
-                    // in exile under a new one.
-                    let (exiled, _zone_change) = self.zone_change_card(exiled);
-                    self.players[player.index()].exile.push(exiled);
-                }
+                AbilityCostDef::ExileSource => self.exile_graveyard_source(player, source),
                 AbilityCostDef::TapSource
                 | AbilityCostDef::UntapSource
                 | AbilityCostDef::SacrificeSource
+                | AbilityCostDef::SacrificeObject(_)
+                | AbilityCostDef::ReturnSourceToHand
                 | AbilityCostDef::RemoveCountersFromSource { .. }
+                | AbilityCostDef::RemoveAnyNumberOfCountersFromSource(_)
                 | AbilityCostDef::PayLife(_)
+                | AbilityCostDef::MillCards(_)
                 | AbilityCostDef::DiscardSource
                 | AbilityCostDef::DiscardCards(_)
+                | AbilityCostDef::DiscardCardMatching(_)
+                | AbilityCostDef::ExileCardFromHand(_)
+                | AbilityCostDef::DiscardCardsAtRandom(_)
                 | AbilityCostDef::SacrificePermanent { .. }
+                | AbilityCostDef::SacrificePermanents { .. }
+                | AbilityCostDef::ReturnUnblockedAttackerToHand
                 | AbilityCostDef::TapPermanent { .. }
+                | AbilityCostDef::TapCreaturesWithTotalPower { .. }
                 | AbilityCostDef::Loyalty(_)
-                | AbilityCostDef::ExileCardFromGraveyard(_)
+                | AbilityCostDef::ExileCardsFromGraveyard { .. }
                 | AbilityCostDef::Special(_) => {
                     unreachable!("unsupported graveyard-zone costs are not offered")
                 }
@@ -126,7 +189,7 @@ impl Game {
             .collect();
         self.push_activated_ability(
             source,
-            source_card,
+            &source_card.clone().into(),
             player,
             frozen,
             targets,
@@ -136,16 +199,88 @@ impl Game {
         self.check_state_based_actions();
     }
 
+    /// Activates the ability carried by a resolved ongoing effect. The effect
+    /// is command-zone-resident only as an engine source-zone approximation;
+    /// it has no permanent state and therefore supports only the source-free
+    /// mana-cost shape enforced by catalog validation.
+    fn activate_ongoing_effect_ability(
+        &mut self,
+        player: PlayerId,
+        source: GameObjectId,
+        ability: AbilityOrigin,
+    ) -> bool {
+        let Some(ongoing) = self
+            .ongoing_effects
+            .iter()
+            .find(|ongoing| {
+                ongoing.source.object == source
+                    && ongoing.source.ability == ability
+                    && ongoing.controller == player
+            })
+            .cloned()
+        else {
+            return false;
+        };
+        let DeclarativeAbilityDef::Activated(definition) = ongoing.ability.definition else {
+            return false;
+        };
+        if !ongoing.ability.is_executable()
+            || definition.procedure != AbilityProcedureDef::Shared
+            || definition.source_zones != [ZoneKind::Command]
+        {
+            return false;
+        }
+        let Some(cost) = Self::activated_ability_mana_cost(&definition) else {
+            return false;
+        };
+        let purpose = ManaPaymentPurpose::Ability {
+            source,
+            taps_source: false,
+            leaves_source: false,
+        };
+        self.activate_mana_for_cost_avoiding_for(player, cost, 0, None, &purpose);
+        let _ = self.pay_player_cost_for(player, cost, 0, &purpose);
+        let frozen = FrozenActivatedAbility {
+            origin: ongoing.source.ability,
+            definition: Some(Box::new(ongoing.ability)),
+            presentation: ongoing.presentation,
+            text: Some(ongoing.ability.text),
+            target_defs: Vec::new(),
+            resolver: Self::ability_resolver(ongoing.source.ability, &ongoing.ability),
+            mode_effects: Vec::new(),
+            x: 0,
+        };
+        self.push_activated_ability_with_context(
+            source,
+            ongoing.owner,
+            player,
+            frozen,
+            Vec::new(),
+            Vec::new(),
+            ongoing.context,
+        );
+        self.consecutive_passes = 0;
+        self.check_state_based_actions();
+        true
+    }
+
     #[allow(clippy::too_many_lines)]
     pub(super) fn activate_ability(
         &mut self,
         player: PlayerId,
         source: GameObjectId,
         ability: AbilityOrigin,
-        targets: Vec<TargetSelection>,
-        cost_object: Option<GameObjectId>,
-        x: u16,
+        choices: ActivationChoices<'_>,
     ) {
+        let ActivationChoices {
+            targets,
+            cost_objects,
+            x,
+            modes,
+        } = choices;
+        if self.activate_ongoing_effect_ability(player, source, ability) {
+            return;
+        }
         if let Some(source_card) = self.players[player.index()]
             .hand
             .iter()
@@ -168,16 +303,20 @@ impl Game {
             {
                 return;
             }
+            let Some(plan) = Self::selected_activated_plan(&definition, modes) else {
+                return;
+            };
             let frozen = FrozenActivatedAbility {
                 origin: effective.origin,
                 definition: Some(Box::new(effective.ability)),
-                presentation_definition: Self::ability_presentation_definition(
+                presentation: Self::ability_presentation(
                     effective.origin,
-                    source_card.definition,
+                    ObjectCharacteristics::card(source_card.definition, crate::CardPartId::PRIMARY),
                 ),
                 text: Some(effective.ability.text),
-                target_defs: definition.targets,
+                target_defs: plan.target_defs,
                 resolver: Self::ability_resolver(effective.origin, &effective.ability),
+                mode_effects: plan.mode_effects,
                 x,
             };
             let payment_purpose = ManaPaymentPurpose::Ability {
@@ -185,17 +324,20 @@ impl Game {
                 taps_source: false,
                 leaves_source: false,
             };
+            let priced_mana_cost =
+                self.priced_ability_mana_cost(source, definition.costs.as_slice());
             for cost in definition.costs.as_slice() {
                 match cost {
                     AbilityCostDef::Mana(cost) => {
+                        let cost = priced_mana_cost.unwrap_or(*cost);
                         self.activate_mana_for_cost_avoiding_for(
                             player,
-                            *cost,
+                            cost,
                             x,
                             None,
                             &payment_purpose,
                         );
-                        let _ = self.pay_player_cost_for(player, *cost, x, &payment_purpose);
+                        let _ = self.pay_player_cost_for(player, cost, x, &payment_purpose);
                     }
                     AbilityCostDef::DiscardSource => {
                         let discarded = remove_card(&mut self.players[player.index()].hand, source)
@@ -208,18 +350,61 @@ impl Game {
                             player,
                             cards: vec![(discarded_id, definition)],
                         });
+                        // A discard paid as a cost is still a discard, so
+                        // what watches for one sees this too.
+                        let card = self.printed_trigger_event_object(
+                            discarded_id,
+                            definition,
+                            player,
+                            &CharacteristicContext::Graveyard,
+                        );
+                        self.capture_battlefield_triggers(&CommittedTriggerEvent::Discarded {
+                            player,
+                            card,
+                        });
+                        self.capture_battlefield_triggers(&CommittedTriggerEvent::CardsDiscarded {
+                            player,
+                        });
+                        // Cycling is the only printed ability with this
+                        // shape, and CR 702.29b fires its trigger on
+                        // activation rather than on resolution -- so here,
+                        // beside the cost, rather than at the draw.
+                        self.capture_cycling_triggers(discarded_id, player);
+                    }
+                    // The attacker named by the action, returned before the
+                    // ability goes on the stack: it is a cost.
+                    AbilityCostDef::ReturnUnblockedAttackerToHand => {
+                        if let Some(returned) = cost_objects.first() {
+                            self.ninjutsu_returned_defender = self.attack_defender_of(*returned);
+                            self.move_target_to_zone(
+                                Target::Permanent(*returned),
+                                ZoneKind::Hand,
+                                ZoneMoveCause::Effect { controller: player },
+                                None,
+                                ZonePlacement::Top,
+                            );
+                        }
                     }
                     AbilityCostDef::TapSource
                     | AbilityCostDef::UntapSource
                     | AbilityCostDef::SacrificeSource
+                    | AbilityCostDef::SacrificeObject(_)
+                    | AbilityCostDef::ReturnSourceToHand
                     | AbilityCostDef::RemoveCountersFromSource { .. }
+                    | AbilityCostDef::RemoveAnyNumberOfCountersFromSource(_)
                     | AbilityCostDef::PayLife(_)
+                    | AbilityCostDef::MillCards(_)
                     | AbilityCostDef::DiscardCards(_)
+                    | AbilityCostDef::DiscardCardMatching(_)
+                    | AbilityCostDef::ExileCardFromHand(_)
+                    | AbilityCostDef::DiscardCardsAtRandom(_)
                     | AbilityCostDef::SacrificePermanent { .. }
+                    | AbilityCostDef::SacrificePermanents { .. }
                     | AbilityCostDef::TapPermanent { .. }
+                    | AbilityCostDef::TapCreaturesWithTotalPower { .. }
                     | AbilityCostDef::ExileSource
                     | AbilityCostDef::Loyalty(_)
-                    | AbilityCostDef::ExileCardFromGraveyard(_)
+                    | AbilityCostDef::ExileCardsFromGraveyard { .. }
                     | AbilityCostDef::Special(_) => {
                         unreachable!("unsupported hand-zone costs are not offered")
                     }
@@ -235,7 +420,7 @@ impl Game {
                 .collect();
             self.push_activated_ability(
                 source,
-                &source_card,
+                &source_card.clone().into(),
                 player,
                 frozen,
                 targets,
@@ -251,7 +436,13 @@ impl Game {
             .find(|card| card.id == source)
             .cloned()
         {
-            self.activate_graveyard_ability(player, source, ability, targets, x, &source_card);
+            let choices = ActivationChoices {
+                targets,
+                cost_objects,
+                x,
+                modes,
+            };
+            self.activate_graveyard_ability(player, source, ability, choices, &source_card);
             return;
         }
         let Some(source_permanent) = self
@@ -264,6 +455,18 @@ impl Game {
         let source_card = source_permanent.card.clone();
         let mut frozen_ability = self.freeze_activated_ability(source_permanent, ability);
         frozen_ability.x = x;
+        // A modal ability's slots are its own followed by each chosen
+        // mode's, and the chosen modes' effects resolve after its own.
+        if let Some(DeclarativeAbilityDef::Activated(definition)) = self
+            .find_effective_ability(source_permanent, |effective| effective.origin == ability)
+            .map(|effective| effective.ability.definition)
+        {
+            let Some(plan) = Self::selected_activated_plan(&definition, modes) else {
+                return;
+            };
+            frozen_ability.target_defs = plan.target_defs;
+            frozen_ability.mode_effects = plan.mode_effects;
+        }
         // `apply` validated these exact ordered slot selections against a
         // generated legal action. Freeze both their slot identity and values
         // before any activation cost can move or change the source.
@@ -294,6 +497,7 @@ impl Game {
             | DeclarativeAbilityDef::Static(_)
             | DeclarativeAbilityDef::Replacement(_)
             | DeclarativeAbilityDef::AlternativeCast(_)
+            | DeclarativeAbilityDef::OptionalAdditionalCost(_)
             | DeclarativeAbilityDef::SpecialAction(_)
             | DeclarativeAbilityDef::Keyword(_) => None,
         });
@@ -302,54 +506,105 @@ impl Game {
                 unreachable!("the declarative activation filter checked its category")
             };
             let taps_source = definition.costs.contains(&AbilityCostDef::TapSource);
+            let fixed_sacrifices = definition
+                .costs
+                .iter()
+                .filter_map(|cost| {
+                    let AbilityCostDef::SacrificeObject(reference) = cost else {
+                        return None;
+                    };
+                    Self::activation_object_reference(*reference, source, frozen_ability.origin)
+                })
+                .collect::<Vec<_>>();
             let leaves_source = definition.costs.iter().any(|cost| {
                 matches!(
                     cost,
                     AbilityCostDef::SacrificeSource | AbilityCostDef::ExileSource
                 )
-            });
+            }) || fixed_sacrifices.contains(&source);
             let animates_source = Self::effect_animates_source(ability_def.declarative_effect());
             let has_generic_sacrifice = definition
                 .costs
                 .iter()
                 .any(|cost| matches!(cost, AbilityCostDef::SacrificePermanent { .. }));
-            let sacrifice_choice_is_source = has_generic_sacrifice && cost_object == Some(source);
-            if definition
+            let sacrifice_choice_is_source =
+                has_generic_sacrifice && cost_objects.contains(&source);
+            let tap_cost_payer = if definition
                 .costs
                 .iter()
                 .any(|cost| matches!(cost, AbilityCostDef::TapPermanent { .. }))
             {
+                cost_objects.first().copied()
+            } else {
+                None
+            };
+            if definition.costs.iter().any(|cost| {
+                matches!(
+                    cost,
+                    AbilityCostDef::ReturnUnblockedAttackerToHand
+                        | AbilityCostDef::TapPermanent { .. }
+                )
+            }) {
                 // Ahead of the loop, so automatic mana payment cannot tap the
                 // chosen permanent out from under the cost it is paying.
-                let chosen = cost_object.expect("a legal activation chose the one to tap");
+                let chosen = *cost_objects
+                    .first()
+                    .expect("a legal activation chose the one to tap");
                 let _ = self.tap_permanent(chosen);
             }
             for cost in definition.costs.as_slice() {
                 match cost {
                     AbilityCostDef::Mana(cost) => {
-                        self.activate_mana_for_cost_avoiding_for(
+                        // Read through any increase on the battlefield, so
+                        // what is paid is what the offer was priced at.
+                        let cost = self.ability_mana_cost_for_source(source, *cost);
+                        let payment_purpose = ManaPaymentPurpose::Ability {
+                            source,
+                            taps_source,
+                            leaves_source,
+                        };
+                        self.activate_mana_for_cost_with_options_for(
                             player,
-                            *cost,
+                            cost,
                             x,
-                            // Tapping the source to pay would hand back a
-                            // tapped creature, so auto-payment leaves it
-                            // alone even though the tap itself is legal.
-                            (taps_source || animates_source).then_some(source),
-                            &ManaPaymentPurpose::Ability {
-                                source,
-                                taps_source,
-                                leaves_source,
+                            ManaPlanOptions {
+                                // Tapping the source to pay would hand back a
+                                // tapped creature, so auto-payment leaves it
+                                // alone even though the tap itself is legal.
+                                avoid: (taps_source || animates_source).then_some(source),
+                                tap_cost_payer,
                             },
+                            &payment_purpose,
                         );
-                        let _ = self.pay_player_cost(player, *cost, x);
+                        // The same purpose the mana was raised under. Paying
+                        // under a different one would price the cost
+                        // differently from the offer it came from.
+                        let _ = self.pay_player_cost_for(player, cost, x, &payment_purpose);
                     }
                     AbilityCostDef::TapSource => {
                         let _ = self.tap_permanent(source);
                     }
-                    AbilityCostDef::TapPermanent { .. }
+                    AbilityCostDef::UntapSource => {
+                        self.battlefield
+                            .iter_mut()
+                            .find(|permanent| permanent.card.id == source)
+                            .expect("a legal activation has its source")
+                            .untap();
+                    }
+                    // The open-ended removal never reaches payment: mana
+                    // enumeration replaced it with a sized one.
+                    AbilityCostDef::RemoveAnyNumberOfCountersFromSource(_)
+                    | AbilityCostDef::ReturnUnblockedAttackerToHand
+                    | AbilityCostDef::TapPermanent { .. }
+                    // Paid by decision after everything else, the way a
+                    // multiple sacrifice is.
+                    | AbilityCostDef::TapCreaturesWithTotalPower { .. }
                     | AbilityCostDef::SacrificeSource
+                    | AbilityCostDef::SacrificeObject(_)
+                    | AbilityCostDef::ReturnSourceToHand
                     | AbilityCostDef::ExileSource
-                    | AbilityCostDef::SacrificePermanent { .. } => {
+                    | AbilityCostDef::SacrificePermanent { .. }
+                    | AbilityCostDef::SacrificePermanents { .. } => {
                         // A tap of a chosen permanent was paid above, ahead of
                         // mana. The rest are deferred until mana and
                         // source-dependent costs have been paid: a chosen
@@ -370,51 +625,87 @@ impl Game {
                     AbilityCostDef::PayLife(amount) => {
                         self.lose_life(player, *amount);
                     }
-                    AbilityCostDef::ExileCardFromGraveyard(_) => {
-                        let chosen = cost_object.expect("a legal activation chose the exiled card");
-                        if let Some(card) =
-                            remove_card(&mut self.players[player.index()].graveyard, chosen)
-                        {
-                            let (card, _zone_change) = self.zone_change_card(card);
-                            self.players[player.index()].exile.push(card);
+                    AbilityCostDef::DiscardCardMatching(_) => {
+                        self.discard_cards(player, cost_objects);
+                    }
+                    AbilityCostDef::ExileCardFromHand(_) => {
+                        for chosen in cost_objects {
+                            if let Some(card) =
+                                remove_card(&mut self.players[player.index()].hand, *chosen)
+                            {
+                                let (card, _zone_change) = self.zone_change_card(card);
+                                self.players[player.index()].exile.push(card.clone());
+                                self.capture_cards_exiled(
+                                    std::slice::from_ref(&card),
+                                    crate::card::ZoneKind::Hand,
+                                );
+                            }
+                        }
+                    }
+                    // The cost names as many cards as it prints, and the
+                    // activation carried every one of them.
+                    AbilityCostDef::ExileCardsFromGraveyard { .. } => {
+                        // One move for the whole cost, however many cards it
+                        // spends, which is what "one or more" reads.
+                        let mut moved = Vec::new();
+                        for chosen in cost_objects {
+                            if let Some(card) =
+                                remove_card(&mut self.players[player.index()].graveyard, *chosen)
+                            {
+                                let (card, _zone_change) = self.zone_change_card(card);
+                                self.players[player.index()].exile.push(card.clone());
+                                moved.push(card);
+                            }
+                        }
+                        if !moved.is_empty() {
+                            self.capture_cards_exiled(&moved, crate::card::ZoneKind::Graveyard);
+                            self.note_card_left_graveyard(player);
                         }
                     }
                     AbilityCostDef::Loyalty(change) => {
-                        if let Some(permanent) = self
-                            .battlefield
-                            .iter_mut()
-                            .find(|permanent| permanent.card.id == source)
-                        {
-                            if *change >= 0 {
-                                permanent.add_counters(
-                                    CounterKind::Loyalty,
-                                    u16::from(change.unsigned_abs()),
-                                );
-                            } else {
-                                permanent.remove_counters(
-                                    CounterKind::Loyalty,
-                                    u16::from(change.unsigned_abs()),
-                                );
-                            }
-                            permanent.activated_loyalty_this_turn = true;
-                        }
+                        self.pay_loyalty_cost(source, *change);
                     }
-                    AbilityCostDef::UntapSource
-                    | AbilityCostDef::DiscardCards(_)
-                    | AbilityCostDef::Special(_) => {
+                    AbilityCostDef::DiscardCardsAtRandom(amount) => {
+                        self.discard_at_random(player, usize::from(*amount));
+                    }
+                    AbilityCostDef::MillCards(amount) => {
+                        let milled = self.take_top_of_library(player, usize::from(*amount));
+                        assert_eq!(
+                            milled.len(),
+                            usize::from(*amount),
+                            "a legal activation can still pay its mill cost",
+                        );
+                        self.bury_cards(player, milled);
+                    }
+                    AbilityCostDef::DiscardCards(_) | AbilityCostDef::Special(_) => {
                         unreachable!("unsupported costs are not offered as legal actions")
                     }
                 }
             }
             let mut remaining_sacrifices = Vec::new();
-            if has_generic_sacrifice
-                && let Some(sacrificed) = cost_object
-                && sacrificed != source
-            {
-                remaining_sacrifices.push(sacrificed);
+            if has_generic_sacrifice {
+                remaining_sacrifices.extend(
+                    cost_objects
+                        .iter()
+                        .copied()
+                        .filter(|chosen| *chosen != source),
+                );
+            }
+            for sacrificed in fixed_sacrifices {
+                if !remaining_sacrifices.contains(&sacrificed) {
+                    remaining_sacrifices.push(sacrificed);
+                }
             }
             if definition.costs.contains(&AbilityCostDef::ExileSource) {
                 self.exile_permanent(source);
+            } else if definition
+                .costs
+                .contains(&AbilityCostDef::ReturnSourceToHand)
+            {
+                // The source leaves the battlefield to pay, the way a
+                // sacrifice does, but it goes somewhere it can be cast from
+                // again.
+                self.return_permanent_to_hand(source);
             } else if definition.costs.contains(&AbilityCostDef::SacrificeSource)
                 || sacrifice_choice_is_source
             {
@@ -428,10 +719,67 @@ impl Game {
                     Target::Player(_) | Target::Card(_) | Target::Spell(_) => None,
                 })
                 .collect::<Vec<_>>();
-            if let Some(sacrificed) = cost_object
-                && !chosen_permanents.contains(&sacrificed)
+            for chosen in cost_objects {
+                if !chosen_permanents.contains(chosen) {
+                    chosen_permanents.push(*chosen);
+                }
+            }
+            // Crew and saddle name the creatures that pay by decision too,
+            // and the total they owe is what the offer counts down.
+            if let Some(AbilityCostDef::TapCreaturesWithTotalPower { minimum }) = definition
+                .costs
+                .iter()
+                .find(|cost| matches!(cost, AbilityCostDef::TapCreaturesWithTotalPower { .. }))
             {
-                chosen_permanents.push(sacrificed);
+                self.queue_activation_saddle(
+                    player,
+                    i32::from(*minimum),
+                    PendingActivation {
+                        source,
+                        source_card,
+                        controller: player,
+                        frozen: frozen_ability,
+                        targets: frozen_targets,
+                        chosen_permanents,
+                        remaining_sacrifices,
+                    },
+                    Vec::new(),
+                );
+                self.consecutive_passes = 0;
+                return;
+            }
+            // A cost that takes a printed number of permanents names them
+            // by decision, so the activation waits here with everything it
+            // has already chosen and paid.
+            if let Some(AbilityCostDef::SacrificePermanents {
+                object,
+                controller,
+                count,
+            }) = definition
+                .costs
+                .iter()
+                .find(|cost| matches!(cost, AbilityCostDef::SacrificePermanents { .. }))
+            {
+                self.queue_activation_sacrifice(
+                    player,
+                    SacrificeQuota {
+                        remaining: *count,
+                        object: *object,
+                        controller: *controller,
+                    },
+                    PendingActivation {
+                        source,
+                        source_card,
+                        controller: player,
+                        frozen: frozen_ability,
+                        targets: frozen_targets,
+                        chosen_permanents,
+                        remaining_sacrifices,
+                    },
+                    Vec::new(),
+                );
+                self.consecutive_passes = 0;
+                return;
             }
             self.continue_activated_ability_costs(
                 source,
@@ -444,40 +792,18 @@ impl Game {
             );
             return;
         }
-        match behavior {
-            Some(CardBehavior::SedgeTroll) => {
-                let cost = ManaCost::colored(0, 0, 0, 1, 0, 0);
-                self.activate_mana_for_cost(player, cost, 0);
-                let _ = self.pay_player_cost(player, cost, 0);
-                let card = self
-                    .battlefield
-                    .iter()
-                    .find(|permanent| permanent.card.id == source)
-                    .map(|permanent| permanent.card.clone())
-                    .expect("legal Sedge Troll activation has a source");
-                self.push_activated_ability(
-                    source,
-                    &card,
-                    player,
-                    frozen_ability,
-                    Vec::new(),
-                    Vec::new(),
-                );
-            }
-            Some(CardBehavior::LibraryOfAlexandria) => {
-                let card = self
-                    .tap_permanent(source)
-                    .expect("legal activation has a source");
-                self.push_activated_ability(
-                    source,
-                    &card,
-                    player,
-                    frozen_ability,
-                    frozen_targets,
-                    Vec::new(),
-                );
-            }
-            _ => {}
+        if let Some(CardBehavior::LibraryOfAlexandria) = behavior {
+            let card = self
+                .tap_permanent(source)
+                .expect("legal activation has a source");
+            self.push_activated_ability(
+                source,
+                &card,
+                player,
+                frozen_ability,
+                frozen_targets,
+                Vec::new(),
+            );
         }
         self.consecutive_passes = 0;
         self.check_state_based_actions();
@@ -487,7 +813,7 @@ impl Game {
     pub(super) fn continue_activated_ability_costs(
         &mut self,
         source: GameObjectId,
-        source_card: CardInstance,
+        source_card: ObjectInstance,
         controller: PlayerId,
         frozen: FrozenActivatedAbility,
         targets: Vec<TargetSelection>,
@@ -496,6 +822,7 @@ impl Game {
     ) {
         if !remaining_sacrifices.is_empty() {
             let sacrificed = remaining_sacrifices.remove(0);
+            self.capture_sacrifices(&[sacrificed]);
             self.move_permanents_to_graveyard_then(
                 &[sacrificed],
                 Some(BattlefieldExitCompletion::CompleteActivatedAbility {

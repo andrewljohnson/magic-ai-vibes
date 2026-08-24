@@ -1,0 +1,7 @@
+engine 0.7.0 protocol 29
+source: lacker/penta origin/main 12366c87, built rustc 1.97.1
+built 2026-08-24T10:54:06-07:00
+
+Replaces engine-0.7.0 (protocol 22). The public server
+penta.lacker.workers.dev refused protocol 22 with
+409 incompatible_bot, so this is the build that can register.

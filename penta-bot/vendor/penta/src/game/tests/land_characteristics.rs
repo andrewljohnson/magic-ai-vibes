@@ -71,7 +71,7 @@ fn lands_derive_intrinsic_mana_in_effective_subtype_order() {
 
 #[test]
 fn a_basic_land_subtype_only_grants_mana_to_a_land() {
-    let definition_id = CardDefinitionId(10_000);
+    let definition_id = CardDefinitionId::new(10_000);
     let mut definition = CardDefinition::new(
         definition_id,
         "Forest creature",
@@ -97,7 +97,7 @@ fn a_basic_land_subtype_only_grants_mana_to_a_land() {
 #[test]
 fn printed_and_intrinsic_mana_abilities_coexist() {
     static ABILITIES: [AbilityDef; 1] = [abilities::tap_for(ManaColor::Green)];
-    let definition_id = CardDefinitionId(10_000);
+    let definition_id = CardDefinitionId::new(10_000);
     let mut definition = CardDefinition::new(
         definition_id,
         "Forest with printed mana",
@@ -141,19 +141,17 @@ fn direct_and_composite_land_type_effects_grant_intrinsic_mana_in_order() {
     static FIRST_COMPOSITE_TYPES: [BasicLandType; 1] = [BasicLandType::Forest];
     static SECOND_COMPOSITE_TYPES: [BasicLandType; 1] = [BasicLandType::Island];
     static COMPONENTS: [AppliedEffectDef; 2] = [
-        AppliedEffectDef::AddLandTypes(&FIRST_COMPOSITE_TYPES),
-        AppliedEffectDef::AddLandTypes(&SECOND_COMPOSITE_TYPES),
+        AppliedEffectDef::add_basic_land_types(&FIRST_COMPOSITE_TYPES),
+        AppliedEffectDef::add_basic_land_types(&SECOND_COMPOSITE_TYPES),
     ];
     static EFFECTS: [EffectDef; 2] = [
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::AttachedPermanent,
-            effect: AppliedEffectDef::AddLandTypes(&DIRECT_TYPES),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::add_basic_land_types(&DIRECT_TYPES),
         },
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::AttachedPermanent,
             effect: AppliedEffectDef::Composite(&COMPONENTS),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
         },
     ];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
@@ -161,7 +159,7 @@ fn direct_and_composite_land_type_effects_grant_intrinsic_mana_in_order() {
         EffectDef::Sequence(&EFFECTS),
     )];
 
-    let definition_id = CardDefinitionId(10_081);
+    let definition_id = CardDefinitionId::new(10_081);
     let mut definition = CardDefinition::new(
         definition_id,
         "Composite land-type test Aura",
@@ -200,7 +198,15 @@ fn direct_and_composite_land_type_effects_grant_intrinsic_mana_in_order() {
                 AbilityOrigin::IntrinsicBasicLand(land_type) => {
                     Some((land_type, activation.color))
                 }
-                AbilityOrigin::Printed { .. } | AbilityOrigin::Granted { .. } => None,
+                AbilityOrigin::Printed { .. }
+                | AbilityOrigin::Token { .. }
+                | AbilityOrigin::Emblem { .. }
+                | AbilityOrigin::FaceDown { .. }
+                | AbilityOrigin::Granted { .. }
+                | AbilityOrigin::TokenGranted { .. }
+                | AbilityOrigin::EmblemGranted { .. }
+                | AbilityOrigin::FaceDownGranted { .. }
+                | AbilityOrigin::IntrinsicCounter(_) => None,
             })
             .collect::<Vec<_>>(),
         vec![
@@ -296,7 +302,7 @@ fn blood_moon_suppresses_nonbasic_lands_own_entry_replacements() {
 
 #[test]
 fn blood_moon_preserves_nonland_subtypes_on_a_land_creature() {
-    let definition_id = CardDefinitionId(10_000);
+    let definition_id = CardDefinitionId::new(10_000);
     let mut definition = CardDefinition::new(
         definition_id,
         "Forest Dryad",
@@ -553,8 +559,9 @@ fn magical_hack_on_stage_applies_to_land_types_that_stage_later_copies() {
             source: stage_id,
             ability: activated_ability_for(&game, stage_id, 0),
             targets: activated_targets(Target::Permanent(arbor_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();

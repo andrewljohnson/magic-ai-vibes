@@ -198,7 +198,7 @@ mod blocking_predicate {
 
         // Blocking that attacker, and untapped: blockers do not tap.
         let mut blocker = creature(10_002, cards::SAVANNAH_LIONS, PlayerId::One);
-        blocker.blocking = Some(attacker_id);
+        blocker.blocking = vec![attacker_id];
         let blocker_id = blocker.card.id;
         game.battlefield.push(blocker);
 

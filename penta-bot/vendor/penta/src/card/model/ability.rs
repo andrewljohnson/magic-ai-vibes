@@ -5,11 +5,12 @@ use crate::ids::TargetIndex;
 use super::{
     AbilityCostDef, AbilityCostList, AbilityCoverageDef, AbilityEffectDef, AbilityProcedureDef,
     AbilityTargetDef, ActivatedAbilityDef, ActivationTimingDef, AlternativeCastAbilityDef,
-    AlternativeCastKindDef, AlternativeCastManaCostDef, CardBehavior, DeclarativeAbilityDef,
-    EffectDef, EffectExecutionDef, ImplementationStatus, KeywordAbility, ManaCost,
-    ReplacementAbilityDef, ReplacementConditionDef, ReplacementEffectDef, ReplacementEventDef,
-    SpecialActionDef, SpellAbilityDef, SpellAdditionalCostDef, StaticAbilityDef,
-    TriggerConditionDef, TriggerEventDef, TriggeredAbilityDef, ZoneKind,
+    AlternativeCastKindDef, AlternativeCastManaCostDef, CardBehavior, ConditionDef,
+    DeclarativeAbilityDef, EffectDef, EffectExecutionDef, ImplementationStatus, KeywordAbility,
+    ManaCost, ModalSpellDef, OptionalAdditionalCostAbilityDef, ReplacementAbilityDef,
+    ReplacementConditionDef, ReplacementEffectDef, ReplacementEventDef, SpecialActionDef,
+    SpellAbilityDef, SpellAdditionalCostDef, SpellLifeCostDef, SpellResolutionDestinationDef,
+    StaticAbilityDef, TriggerConditionDef, TriggerEventDef, TriggeredAbilityDef, ZoneKind,
 };
 
 /// One printed rules clause and its implementation.
@@ -52,6 +53,21 @@ impl AbilityDef {
         )
     }
 
+    /// A spell that pays life as it is cast, in addition to its mana.
+    ///
+    /// # Panics
+    ///
+    /// Panics for any ability that is not a nonmodal spell, since nothing
+    /// else carries a spell's additional cost.
+    #[must_use]
+    pub const fn with_spell_life_cost(mut self, cost: SpellLifeCostDef) -> Self {
+        let DeclarativeAbilityDef::Spell(spell) = self.definition else {
+            panic!("only a spell has an additional cost");
+        };
+        self.definition = DeclarativeAbilityDef::Spell(spell.with_life_cost(cost));
+        self
+    }
+
     #[must_use]
     pub const fn spell_with_targets(
         text: &'static str,
@@ -63,6 +79,25 @@ impl AbilityDef {
             DeclarativeAbilityDef::Spell(SpellAbilityDef::new().with_targets(targets)),
             effect,
         )
+    }
+
+    /// Declares where this spell's card goes after successful resolution.
+    /// Flashback still replaces that move with exile.
+    ///
+    /// # Panics
+    ///
+    /// Panics when called on an ability that is not a spell.
+    #[must_use]
+    pub const fn with_resolution_destination(
+        mut self,
+        destination: SpellResolutionDestinationDef,
+    ) -> Self {
+        let DeclarativeAbilityDef::Spell(spell) = self.definition else {
+            panic!("a resolution destination belongs on a spell")
+        };
+        self.definition =
+            DeclarativeAbilityDef::Spell(spell.with_resolution_destination(destination));
+        self
     }
 
     /// A one-target counterspell. The effect recipient is derived from the
@@ -114,6 +149,48 @@ impl AbilityDef {
         )
     }
 
+    /// A cost paid as the whole spell is cast, on top of its mana. Escalate
+    /// is the only one a modal spell prints.
+    ///
+    /// # Panics
+    ///
+    /// Panics for any ability that is not a spell.
+    #[must_use]
+    pub const fn with_spell_additional_cost(
+        mut self,
+        cost: &'static SpellAdditionalCostDef,
+    ) -> Self {
+        let DeclarativeAbilityDef::Spell(spell) = self.definition else {
+            panic!("only a spell has an additional cost to pay");
+        };
+        self.definition = DeclarativeAbilityDef::Spell(spell.with_additional_cost(*cost));
+        self
+    }
+
+    /// "If <condition> as you cast this spell, you may choose two instead."
+    /// The larger maximum applies where the spell is offered, which is what
+    /// "as you cast" means; the minimum is unchanged, because choosing the
+    /// extra mode is always optional.
+    ///
+    /// # Panics
+    ///
+    /// Panics for any ability that is not a modal spell, since nothing else
+    /// has a mode count to raise.
+    #[must_use]
+    pub const fn with_conditional_mode_maximum(
+        mut self,
+        condition: ConditionDef,
+        maximum: u8,
+    ) -> Self {
+        let DeclarativeAbilityDef::Spell(SpellAbilityDef::Modal(modal)) = self.definition else {
+            panic!("only a modal spell has a mode count");
+        };
+        self.definition = DeclarativeAbilityDef::Spell(SpellAbilityDef::Modal(
+            modal.with_conditional_maximum(condition, maximum),
+        ));
+        self
+    }
+
     #[must_use]
     pub const fn choose_one_spell(text: &'static str, modes: &'static [AbilityDef]) -> Self {
         Self::modal_spell(text, modes, 1, 1, false)
@@ -128,6 +205,25 @@ impl AbilityDef {
         Self::defined(
             text,
             DeclarativeAbilityDef::ActivatedMana(ActivatedAbilityDef::new(costs)),
+            effect,
+        )
+    }
+
+    /// "{T}: Add {B}. Activate only if you control a Swamp or a Forest."
+    /// The condition is read where the activation is offered, so a land
+    /// whose condition is false simply does not produce that colour.
+    #[must_use]
+    pub const fn activated_mana_if(
+        text: &'static str,
+        costs: &'static [AbilityCostDef],
+        condition: &'static TriggerConditionDef,
+        effect: EffectDef,
+    ) -> Self {
+        Self::defined(
+            text,
+            DeclarativeAbilityDef::ActivatedMana(
+                ActivatedAbilityDef::new(costs).only_if(condition),
+            ),
             effect,
         )
     }
@@ -185,9 +281,84 @@ impl AbilityDef {
         )
     }
 
+    /// "Choose one --" on an activated ability, which chooses its modes as
+    /// it is activated (CR 601.2b) rather than as it resolves. The ability
+    /// does nothing of its own beyond the modes it prints.
+    #[must_use]
+    pub const fn modal_activated(
+        text: &'static str,
+        costs: &'static [AbilityCostDef],
+        modes: &'static [AbilityDef],
+        minimum: u8,
+        maximum: u8,
+        may_repeat: bool,
+    ) -> Self {
+        Self::defined(
+            text,
+            DeclarativeAbilityDef::Activated(
+                ActivatedAbilityDef::with_costs(AbilityCostList::borrowed(costs))
+                    .with_modes(ModalSpellDef::new(modes, minimum, maximum, may_repeat)),
+            ),
+            EffectDef::None,
+        )
+    }
+
+    /// "Choose one --" on a triggered ability, which chooses its mode as it
+    /// is put onto the stack (CR 603.3c) rather than as it resolves. The
+    /// ability does nothing of its own beyond the mode it prints.
+    #[must_use]
+    pub const fn modal_triggered(
+        text: &'static str,
+        event: TriggerEventDef,
+        modes: &'static [AbilityDef],
+    ) -> Self {
+        Self::defined(
+            text,
+            DeclarativeAbilityDef::Triggered(
+                TriggeredAbilityDef::new(event).with_modes(ModalSpellDef::choose_one(modes)),
+            ),
+            EffectDef::None,
+        )
+    }
+
+    /// "Choose up to one --" on a triggered ability. The only difference
+    /// from `modal_triggered` is that declining every mode is a legal
+    /// answer, so the trigger goes onto the stack carrying nothing.
+    #[must_use]
+    pub const fn modal_triggered_up_to_one(
+        text: &'static str,
+        event: TriggerEventDef,
+        modes: &'static [AbilityDef],
+    ) -> Self {
+        Self::defined(
+            text,
+            DeclarativeAbilityDef::Triggered(
+                TriggeredAbilityDef::new(event).with_modes(ModalSpellDef::new(modes, 0, 1, false)),
+            ),
+            EffectDef::None,
+        )
+    }
+
     #[must_use]
     pub const fn triggered(text: &'static str, event: TriggerEventDef, effect: EffectDef) -> Self {
         Self::triggered_with_targets(text, event, &[], effect)
+    }
+
+    /// "This ability triggers only once each turn."
+    ///
+    /// # Panics
+    ///
+    /// Panics for any ability that is not a triggered one, since nothing
+    /// else has a triggering to cap.
+    #[must_use]
+    pub const fn triggering_at_most(self, times: u8) -> Self {
+        let DeclarativeAbilityDef::Triggered(definition) = self.definition else {
+            panic!("only a triggered ability caps how often it triggers");
+        };
+        Self {
+            definition: DeclarativeAbilityDef::Triggered(definition.triggering_at_most(times)),
+            ..self
+        }
     }
 
     #[must_use]
@@ -268,23 +439,40 @@ impl AbilityDef {
     }
 
     #[must_use]
-    pub const fn replacement(text: &'static str, effect: EffectDef) -> Self {
-        Self::defined(
+    pub const fn replacement(text: &'static str, effect: ReplacementEffectDef) -> Self {
+        Self::replacement_for(text, ReplacementEventDef::SourceEntersBattlefield, effect)
+    }
+
+    /// Defines a replacement ability with a prospective-event program rather
+    /// than a resolving stack effect.
+    #[must_use]
+    pub const fn replacement_for(
+        text: &'static str,
+        event: ReplacementEventDef,
+        effect: ReplacementEffectDef,
+    ) -> Self {
+        Self::defined_replacement(text, ReplacementAbilityDef::new().with_event(event), effect)
+    }
+
+    #[must_use]
+    pub const fn defined_replacement(
+        text: &'static str,
+        definition: ReplacementAbilityDef,
+        effect: ReplacementEffectDef,
+    ) -> Self {
+        Self {
             text,
-            DeclarativeAbilityDef::Replacement(ReplacementAbilityDef::new()),
-            effect,
-        )
+            definition: DeclarativeAbilityDef::Replacement(definition),
+            effect: AbilityEffectDef::replacement_program(effect),
+            coverage: AbilityCoverageDef::complete(),
+        }
     }
 
     /// Defines a replacement ability that modifies how its own source enters
     /// the battlefield.
     #[must_use]
     pub const fn as_enters(text: &'static str, effect: ReplacementEffectDef) -> Self {
-        Self::replacement_for(
-            text,
-            ReplacementEventDef::SourceEntersBattlefield,
-            EffectDef::Replacement(effect),
-        )
+        Self::replacement(text, effect)
     }
 
     /// The same, gated on a condition read as the permanent enters.
@@ -294,65 +482,28 @@ impl AbilityDef {
         condition: ReplacementConditionDef,
         effect: ReplacementEffectDef,
     ) -> Self {
-        Self::defined(
+        Self::defined_replacement(
             text,
-            DeclarativeAbilityDef::Replacement(
-                ReplacementAbilityDef::new()
-                    .with_event(ReplacementEventDef::SourceEntersBattlefield)
-                    .with_condition(condition),
-            ),
-            EffectDef::Replacement(effect),
+            ReplacementAbilityDef::new()
+                .with_event(ReplacementEventDef::SourceEntersBattlefield)
+                .with_condition(condition),
+            effect,
         )
     }
 
+    /// A cost a player may add to any legal way of casting this spell. The
+    /// selected identity travels in `CostConfiguration::additional`, so the
+    /// outcome can be frozen on the stack without conflating it with an
+    /// alternative way of casting the card.
     #[must_use]
-    pub const fn replacement_for(
+    pub const fn optional_additional_cost(
         text: &'static str,
-        event: ReplacementEventDef,
-        effect: EffectDef,
+        definition: OptionalAdditionalCostAbilityDef,
     ) -> Self {
         Self::defined(
             text,
-            DeclarativeAbilityDef::Replacement(ReplacementAbilityDef::new().with_event(event)),
-            effect,
-        )
-    }
-
-    #[must_use]
-    pub const fn alternative_cast(
-        mana_cost: ManaCost,
-        kind: AlternativeCastKindDef,
-        stack_text: Option<&'static str>,
-        effect: EffectDef,
-    ) -> Self {
-        Self::defined(
-            kind.label(),
-            DeclarativeAbilityDef::AlternativeCast(AlternativeCastAbilityDef {
-                mana_cost: AlternativeCastManaCostDef::Fixed(mana_cost),
-                kind,
-                stack_text,
-            }),
-            effect,
-        )
-    }
-
-    /// Builds an alternative-casting ability whose cost is the mana cost of
-    /// the card carrying the ability. This is resolved only after a concrete
-    /// spell form has been selected.
-    #[must_use]
-    pub const fn alternative_cast_for_card_mana_cost(
-        kind: AlternativeCastKindDef,
-        stack_text: Option<&'static str>,
-        effect: EffectDef,
-    ) -> Self {
-        Self::defined(
-            kind.label(),
-            DeclarativeAbilityDef::AlternativeCast(AlternativeCastAbilityDef {
-                mana_cost: AlternativeCastManaCostDef::ThisCardManaCost,
-                kind,
-                stack_text,
-            }),
-            effect,
+            DeclarativeAbilityDef::OptionalAdditionalCost(definition),
+            EffectDef::None,
         )
     }
 
@@ -445,10 +596,50 @@ impl AbilityDef {
     /// carries an activation window.
     #[must_use]
     pub const fn with_activation_timing(mut self, timing: ActivationTimingDef) -> Self {
-        let DeclarativeAbilityDef::Activated(definition) = self.definition else {
-            panic!("only an activated ability has an activation window");
+        self.definition = match self.definition {
+            DeclarativeAbilityDef::Activated(definition) => {
+                DeclarativeAbilityDef::Activated(definition.with_timing(timing))
+            }
+            // A mana ability is enumerated elsewhere but is an activated
+            // ability all the same, and "activate only during your turn" is
+            // printed on some of them.
+            DeclarativeAbilityDef::ActivatedMana(definition) => {
+                DeclarativeAbilityDef::ActivatedMana(definition.with_timing(timing))
+            }
+            _ => panic!("only an activated ability has an activation window"),
         };
-        self.definition = DeclarativeAbilityDef::Activated(definition.with_timing(timing));
+        self
+    }
+
+    /// A printed "activate only if ..." restriction on an activated ability.
+    ///
+    /// # Panics
+    ///
+    /// Panics for any other ability category, which has no activation to gate.
+    #[must_use]
+    pub const fn with_activation_condition(
+        mut self,
+        condition: &'static TriggerConditionDef,
+    ) -> Self {
+        let DeclarativeAbilityDef::Activated(definition) = self.definition else {
+            panic!("only an activated ability has an activation restriction");
+        };
+        self.definition = DeclarativeAbilityDef::Activated(definition.only_if(condition));
+        self
+    }
+
+    /// Opens an activated ability to every player, for a printed "any player
+    /// may activate this ability" clause. The permanent stays the source.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the clause is not an activated ability.
+    #[must_use]
+    pub const fn open_to_any_player(mut self) -> Self {
+        let DeclarativeAbilityDef::Activated(definition) = self.definition else {
+            panic!("only an activated ability can be opened to other players");
+        };
+        self.definition = DeclarativeAbilityDef::Activated(definition.open_to_any_player());
         self
     }
 
@@ -463,6 +654,26 @@ impl AbilityDef {
         self.activations_each_turn(1)
     }
 
+    /// Exhaust (CR 702.184a): this ability may be activated once from this
+    /// object and never again, however many turns it survives.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the clause is not an activated ability.
+    #[must_use]
+    pub const fn exhausting(mut self) -> Self {
+        self.definition = match self.definition {
+            DeclarativeAbilityDef::Activated(definition) => {
+                DeclarativeAbilityDef::Activated(definition.exhausting())
+            }
+            DeclarativeAbilityDef::ActivatedMana(definition) => {
+                DeclarativeAbilityDef::ActivatedMana(definition.exhausting())
+            }
+            _ => panic!("only an activated ability can be exhausted"),
+        };
+        self
+    }
+
     /// The general form: "no more than twice each turn" and its relatives.
     ///
     /// # Panics
@@ -470,10 +681,15 @@ impl AbilityDef {
     /// Panics if the clause is not an activated ability.
     #[must_use]
     pub const fn activations_each_turn(mut self, limit: u8) -> Self {
-        let DeclarativeAbilityDef::Activated(definition) = self.definition else {
-            panic!("only an activated ability can be capped per turn");
+        self.definition = match self.definition {
+            DeclarativeAbilityDef::Activated(definition) => {
+                DeclarativeAbilityDef::Activated(definition.with_activation_limit(limit))
+            }
+            DeclarativeAbilityDef::ActivatedMana(definition) => {
+                DeclarativeAbilityDef::ActivatedMana(definition.with_activation_limit(limit))
+            }
+            _ => panic!("only an activated ability can be capped per turn"),
         };
-        self.definition = DeclarativeAbilityDef::Activated(definition.with_activation_limit(limit));
         self
     }
 
@@ -497,6 +713,7 @@ impl AbilityDef {
             | DeclarativeAbilityDef::Static(_)
             | DeclarativeAbilityDef::Replacement(_)
             | DeclarativeAbilityDef::AlternativeCast(_)
+            | DeclarativeAbilityDef::OptionalAdditionalCost(_)
             | DeclarativeAbilityDef::SpecialAction(_)
             | DeclarativeAbilityDef::Keyword(_)
             | DeclarativeAbilityDef::Legacy => {
@@ -520,10 +737,33 @@ impl AbilityDef {
         }
     }
 
+    /// The printed "choose one --" of this clause, wherever it prints it.
+    /// A spell carries its modes in its casting shape; an activated ability
+    /// carries its own, chosen as it is activated (CR 601.2b). Everything
+    /// downstream -- validation, grant numbering, mode selection -- treats
+    /// the two identically, so it asks here rather than matching the kind.
+    #[must_use]
+    pub const fn modal(self) -> Option<ModalSpellDef> {
+        match self.definition {
+            DeclarativeAbilityDef::Spell(spell) => spell.modal(),
+            DeclarativeAbilityDef::Activated(activated) => activated.modes,
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub const fn declarative_effect(self) -> Option<EffectDef> {
         if self.is_executable() {
             self.effect.declarative_definition()
+        } else {
+            None
+        }
+    }
+
+    #[must_use]
+    pub const fn declarative_replacement(self) -> Option<ReplacementEffectDef> {
+        if self.is_executable() {
+            self.effect.declarative_replacement()
         } else {
             None
         }
@@ -536,6 +776,11 @@ impl AbilityDef {
     pub fn rules_text(&self) -> Cow<'static, str> {
         match self.definition {
             DeclarativeAbilityDef::AlternativeCast(definition) => {
+                Cow::Owned(definition.rules_text())
+            }
+            DeclarativeAbilityDef::OptionalAdditionalCost(definition)
+                if definition.mana_cost.is_some() && self.text == definition.kind.label() =>
+            {
                 Cow::Owned(definition.rules_text())
             }
             _ => Cow::Borrowed(self.text),
@@ -564,6 +809,7 @@ impl AbilityDef {
             }
             DeclarativeAbilityDef::Spell(_)
             | DeclarativeAbilityDef::AlternativeCast(_)
+            | DeclarativeAbilityDef::OptionalAdditionalCost(_)
             | DeclarativeAbilityDef::Keyword(_)
             | DeclarativeAbilityDef::Legacy => {}
         }
@@ -603,12 +849,12 @@ impl AbilityDef {
         let modes = statuses.next().map_or(own, |first| {
             statuses.fold(first, ImplementationStatus::combine)
         });
-        if self.effect.execution == EffectExecutionDef::Declarative
-            && self.effect.definition == EffectDef::None
-        {
+        if self.effect.declarative_definition() == Some(EffectDef::None) {
             modes
         } else {
             own.combine(modes)
         }
     }
 }
+include!("ability/alternative_casts.rs");
+include!("ability/target_resolution.rs");

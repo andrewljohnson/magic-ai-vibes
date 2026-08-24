@@ -30,13 +30,15 @@ pub(crate) fn seen_defs(obs: &PlayerObservation, seat: PlayerId, include_hand: b
     let si = seat_idx(seat);
     let mut v = Vec::new();
     if include_hand {
-        for (_, d) in &obs.hand { v.push(d.0); }
+        for (_, d) in &obs.hand { v.push(d.get() as u16); }
     }
     for p in &obs.battlefield {
-        if p.controller == seat { v.push(p.definition.0); }
+        if p.controller == seat {
+            if let Some(d) = crate::extract::perm_def(p) { v.push(d); }
+        }
     }
-    for (_, d) in &obs.graveyards[si] { v.push(d.0); }
-    for (_, d) in &obs.exiles[si] { v.push(d.0); }
+    for (_, d) in &obs.graveyards[si] { v.push(d.get() as u16); }
+    for (_, d) in &obs.exiles[si] { v.push(d.get() as u16); }
     v
 }
 
@@ -228,7 +230,7 @@ fn explore_pick(obs: &PlayerObservation, actions: &[penta::Action],
             return lands[prng.below(lands.len())];
         }
         let mut hand_def = std::collections::HashMap::new();
-        for (id, d) in &obs.hand { hand_def.insert(id.0, d.0); }
+        for (id, d) in &obs.hand { hand_def.insert(id.0, d.get() as u16); }
         let casts: Vec<usize> = actions.iter().enumerate()
             .filter(|(_, a)| matches!(a, Action::CastSpell { .. }))
             .map(|(i, _)| i).collect();

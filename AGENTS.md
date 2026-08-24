@@ -94,3 +94,34 @@ the pure line is built. It is legacy, not the direction.
 
 One trainer process saturates around 3 cores regardless of thread count.
 Fill a big box with **several concurrent runs**, not one wide one.
+
+## Measure on the path the code actually runs
+
+Several conclusions on this project were wrong because they were measured
+somewhere the real code never goes. Each cost hours:
+
+* A "31.6% baseline" was carried in five files for months. It was the lower
+  bound of a confidence interval from an abandoned C++ project. Parity with
+  the built-in bot is **50%** -- the gate scores OUR win rate head to head.
+* "The value head is blind on 92.6% of decisions" came from featurising
+  without deck context, leaving the belief block empty. On the real native
+  path it was 56.5%. The conclusion held; the number was five times too big.
+* "More search does not help" was measured through a SATURATED value head,
+  where extra simulations could only re-confirm the prior. With the sigmoid
+  fixed, each 4x of search buys ~5 points.
+* A "best net" was assumed to be a lucky reading three separate times.
+  Re-gating frozen weights reproduced the result to the game -- the gate is
+  EXACTLY deterministic, so that could never have happened.
+
+Before trusting a number: run the same input twice, and check the code path
+you measured is the one that ships.
+
+## A detector that fires on correct play is worse than none
+
+`playout_log.py` briefly reported "land played after combat" at 1.80/game
+as the bot's systematic defect. Holding a land until postcombat is better
+or neutral by default -- it tells the opponent less and costs nothing. The
+flag was removed rather than kept with a caveat, because the next person
+would have tuned land sequencing for no reason.
+
+Flag what is wrong by the RULES. Leave judgement calls out.

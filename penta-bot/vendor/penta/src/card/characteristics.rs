@@ -129,6 +129,13 @@ fn outside_stack_parts(structure: &CardStructure) -> Vec<CardPartId> {
     match structure {
         CardStructure::Single { main } | CardStructure::AlternateSpell { main, .. } => vec![*main],
         CardStructure::Split { parts, .. } => parts.clone(),
+        // A Room's doors, and only its doors: outside the battlefield a Room
+        // card is the combination of the two halves as printed, which is why
+        // Walk-In Closet // Forgotten Cellar has mana value 8 in a library.
+        // The combined and locked parts describe a permanent's state rather
+        // than anything printed, so nothing outside the battlefield uses
+        // them.
+        CardStructure::Room { doors, .. } => doors.clone(),
         CardStructure::Flip { normal, .. } => vec![*normal],
         CardStructure::DoubleFaced { front, .. } | CardStructure::MeldPart { front, .. } => {
             vec![*front]
@@ -147,6 +154,11 @@ fn structure_contains(structure: &CardStructure, wanted: CardPartId) -> bool {
     match structure {
         CardStructure::Single { main } => *main == wanted,
         CardStructure::Split { parts, .. } => parts.contains(&wanted),
+        CardStructure::Room {
+            doors,
+            combined,
+            locked,
+        } => doors.contains(&wanted) || *combined == wanted || *locked == wanted,
         CardStructure::Flip { normal, flipped } => *normal == wanted || *flipped == wanted,
         CardStructure::DoubleFaced { front, back, .. } => *front == wanted || *back == wanted,
         CardStructure::AlternateSpell {
@@ -383,7 +395,7 @@ mod tests {
         let creature_rules = CardRules::new_creature(ManaCost::new(2, 0), &[], 2, 2);
         let flipped_rules = CardRules::new_creature_without_mana_cost(&[], 4, 4);
         let mut flip = CardDefinition::new(
-            CardDefinitionId(20_000),
+            CardDefinitionId::new(20_000),
             "Test flip card",
             CardSet::Innistrad,
             false,
@@ -420,7 +432,7 @@ mod tests {
         let adventure = CardPartId(1);
         let adventure_rules = CardRules::new_instant(ManaCost::new(1, 0));
         let mut alternate = CardDefinition::new(
-            CardDefinitionId(20_001),
+            CardDefinitionId::new(20_001),
             "Test adventurer",
             CardSet::Innistrad,
             false,

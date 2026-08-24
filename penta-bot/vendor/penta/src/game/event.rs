@@ -1,5 +1,7 @@
 use crate::{CardDefinitionId, GameObjectId, PlayerId, Target};
 
+use super::ObjectCharacteristics;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Step {
     Upkeep,
@@ -20,6 +22,20 @@ impl Step {
         matches!(self, Self::PrecombatMain | Self::PostcombatMain)
     }
 
+    /// Whether this step is part of the combat phase. Every step from the
+    /// beginning of combat through the end of combat, on either player's
+    /// turn -- which is what an unqualified "during combat" asks for.
+    pub(super) const fn is_combat(self) -> bool {
+        matches!(
+            self,
+            Self::BeginningOfCombat
+                | Self::DeclareAttackers
+                | Self::DeclareBlockers
+                | Self::CombatDamage
+                | Self::EndOfCombat
+        )
+    }
+
     pub(super) const fn ends_phase(self) -> bool {
         matches!(
             self,
@@ -30,6 +46,15 @@ impl Step {
                 | Self::Cleanup
         )
     }
+}
+
+/// Where ordinary turn progression resumes after an inserted phase sequence.
+/// The next-turn sentinel keeps a sequence created during the ending phase in
+/// the same turn until every inserted phase has happened.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum TurnPhaseResume {
+    Step(Step),
+    NextTurn,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -46,6 +71,10 @@ pub enum WinReason {
     /// An effect said the opponent loses the game, with no life total or
     /// empty library involved.
     OpponentLostToAnEffect,
+    /// An effect said you win the game outright. The mirror of
+    /// [`Self::OpponentLostToAnEffect`]: nothing happened to the loser, the
+    /// winner's card simply said so.
+    WonByAnEffect,
     /// The opponent did not act inside the time their host allowed. Distinct
     /// from conceding: nobody chose this, it was imposed by a clock.
     OpponentRanOutOfTime,
@@ -115,8 +144,8 @@ pub enum GameEvent {
         object: GameObjectId,
         /// The permanent object that created the ability.
         source: GameObjectId,
-        /// Immutable source definition for logs after the source leaves play.
-        definition: CardDefinitionId,
+        /// Frozen source presentation for logs after the source leaves play.
+        presentation: ObjectCharacteristics,
         chosen_permanents: Vec<GameObjectId>,
     },
     AbilityResolved {
@@ -124,38 +153,38 @@ pub enum GameEvent {
         object: GameObjectId,
         /// The permanent object that created the ability.
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     /// An activated ability resolved with every target illegal, so it did
     /// nothing even though its activation costs remain paid.
     AbilityFizzled {
         object: GameObjectId,
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     AbilityTriggered {
         player: PlayerId,
         trigger: u32,
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     TriggeredAbilityPutOnStack {
         player: PlayerId,
         trigger: u32,
         object: GameObjectId,
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     TriggeredAbilityResolved {
         object: GameObjectId,
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     /// A triggered ability resolved with every target illegal.
     TriggeredAbilityFizzled {
         object: GameObjectId,
         source: GameObjectId,
-        definition: CardDefinitionId,
+        presentation: ObjectCharacteristics,
     },
     AttackDeclared {
         player: PlayerId,
@@ -187,12 +216,12 @@ pub enum GameEvent {
     },
     /// A permanent left the battlefield. Emitted from the three functions that
     /// can remove one, so nothing leaves play without the log seeing it. The
-    /// definition travels with the event because the card is by then in a zone
-    /// the observing player may not be able to read.
+    /// characteristics travel with the event because a token is by then gone
+    /// and a card may be in a zone the observing player cannot read.
     PermanentLeftBattlefield {
         controller: PlayerId,
         card: GameObjectId,
-        definition: CardDefinitionId,
+        characteristics: ObjectCharacteristics,
         destination: BattlefieldExit,
     },
     GameEnded {

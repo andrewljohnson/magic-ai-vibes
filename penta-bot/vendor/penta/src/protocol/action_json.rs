@@ -9,6 +9,7 @@ use crate::{Action, PlayerObservation};
 /// Serializes one legal action. The `type` tag names the engine's action
 /// variant; the remaining fields identify what it operates on.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn action_json(action: &Action) -> Value {
     match action {
         Action::KeepHand => json!({ "type": "KeepHand" }),
@@ -25,6 +26,18 @@ pub fn action_json(action: &Action) -> Value {
         Action::CancelDecision { decision } => {
             json!({ "type": "CancelDecision", "decision": decision })
         }
+        Action::Foretell { card } => {
+            json!({ "type": "Foretell", "card": card.0 })
+        }
+        Action::Plot { card } => {
+            json!({ "type": "Plot", "card": card.0 })
+        }
+        Action::UnlockDoor { room, door } => {
+            json!({ "type": "UnlockDoor", "room": room.0, "door": door.0 })
+        }
+        Action::TurnFaceUp { permanent } => {
+            json!({ "type": "TurnFaceUp", "permanent": permanent.0 })
+        }
         Action::ChooseUntap { permanents } => {
             json!({ "type": "ChooseUntap", "permanents": instances_json(permanents) })
         }
@@ -38,12 +51,47 @@ pub fn action_json(action: &Action) -> Value {
             source,
             ability,
             color,
-        } => json!({
-            "type": "ActivateManaAbility",
-            "source": source.0,
-            "ability": ability_origin_json(*ability),
-            "color": super::json_common::mana_color_name(*color),
-        }),
+            counters_removed,
+            cost_object,
+            combination,
+        } => {
+            let mut action = json!({
+                "type": "ActivateManaAbility",
+                "source": source.0,
+                "ability": ability_origin_json(*ability),
+                "color": super::json_common::mana_color_name(*color),
+            });
+            // Optional, and present only for the abilities that offer more
+            // than one size: every other mana ability's wire shape is
+            // unchanged.
+            if let Some(removed) = counters_removed {
+                action["countersRemoved"] = json!(removed);
+            }
+            // Likewise optional, and present only for a cost that sacrifices
+            // some other permanent.
+            if let Some(sacrificed) = cost_object {
+                action["costObject"] = json!(sacrificed.0);
+            }
+            // Likewise optional, and present only for an ability that adds
+            // mana "in any combination of" more than one type. Types the
+            // division produces none of are left out, and `color` names its
+            // first entry, so a bot that reads only `color` still sees a
+            // colour it will receive.
+            if let Some(division) = combination {
+                action["combination"] = Value::Object(
+                    division
+                        .iter()
+                        .map(|(color, amount)| {
+                            (
+                                super::json_common::mana_color_name(color).to_owned(),
+                                json!(amount),
+                            )
+                        })
+                        .collect(),
+                );
+            }
+            action
+        }
         Action::PayLifeForMana => json!({ "type": "PayLifeForMana" }),
         Action::CastSpell {
             card,
@@ -63,11 +111,16 @@ pub fn action_json(action: &Action) -> Value {
             source,
             ability,
             targets,
-            cost_object,
+            cost_objects,
             x,
+            modes,
         } => json!({
             "type": "ActivateAbility",
             "x": x,
+            // Present for every activation, empty for the abilities that
+            // print no modes -- which is nearly all of them. A cast already
+            // reports its modes the same way.
+            "modeIds": modes.iter().map(|mode| mode.0).collect::<Vec<_>>(),
             "source": source.0,
             "ability": ability_origin_json(*ability),
             "target": targets
@@ -83,10 +136,16 @@ pub fn action_json(action: &Action) -> Value {
                 .map(target_json)
                 .collect::<Vec<_>>(),
             "targetSelections": target_selections_json(targets),
-            "costObject": cost_object.map(|card| card.0),
+            "costObjects": cost_objects.iter().map(|card| card.0).collect::<Vec<_>>(),
         }),
         Action::DeclareAttacker { attacker, defender } => {
             json!({ "type": "DeclareAttacker", "attacker": attacker.0, "defender": defender_json(*defender) })
+        }
+        Action::ExertAttacker { attacker } => {
+            json!({ "type": "ExertAttacker", "attacker": attacker.0 })
+        }
+        Action::BandAttackers { first, second } => {
+            json!({ "type": "BandAttackers", "first": first.0, "second": second.0 })
         }
         Action::FinishDeclaringAttackers => json!({ "type": "FinishDeclaringAttackers" }),
         Action::DeclareBlocker { blocker, attacker } => {
@@ -139,6 +198,22 @@ pub fn protocol_actions(observation: &PlayerObservation) -> Vec<Action> {
                 if options.is_empty() && *decision == pending.id =>
             {
                 if pending.minimum == 1 && pending.maximum == 1 {
+                    for option in &pending.options {
+                        actions.push(Action::ChooseDecision {
+                            decision: *decision,
+                            options: vec![option.id],
+                        });
+                    }
+                } else if pending.minimum == 0 && pending.maximum == 1 {
+                    // A draw-time opportunity is genuinely optional: the empty
+                    // selection declines it, while each singleton accepts one
+                    // available action. Keep every branch index-addressable so
+                    // a bot need not use the separate decision endpoint merely
+                    // to reveal a Miracle card.
+                    actions.push(Action::ChooseDecision {
+                        decision: *decision,
+                        options: Vec::new(),
+                    });
                     for option in &pending.options {
                         actions.push(Action::ChooseDecision {
                             decision: *decision,

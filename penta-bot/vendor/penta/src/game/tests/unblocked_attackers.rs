@@ -19,7 +19,7 @@ fn attack(game: &mut Game, attacker: GameObjectId, blocker: Option<GameObjectId>
             permanent.attack_defender = Some(AttackDefender::Player(PlayerId::Two));
         }
         if Some(permanent.card.id) == blocker {
-            permanent.blocking = Some(attacker);
+            permanent.blocking = vec![attacker];
         }
     }
     game.finish_declaring_blockers();

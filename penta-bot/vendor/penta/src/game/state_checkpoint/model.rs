@@ -1,22 +1,97 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-// serde hands `skip_serializing_if` a reference, so this signature is fixed.
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn is_zero_u8(value: &u8) -> bool {
-    *value == 0
+use crate::{CardDefinitionId, CounterKind};
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CounterKindSnapshot(pub(super) CounterKind);
+
+impl Serialize for CounterKindSnapshot {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.0.name())
+    }
 }
 
+impl<'de> Deserialize<'de> for CounterKindSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let name = String::deserialize(deserializer)?;
+        CounterKind::from_name(&name)
+            .map(Self)
+            .ok_or_else(|| D::Error::custom(format!("unknown counter name {name}")))
+    }
+}
+
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ExilePlayPermissionSnapshot {
+    pub(super) card: u32,
+    pub(super) player: usize,
+    pub(super) cost: String,
+    pub(super) until_end_of_turn: Option<(usize, u32)>,
+    pub(super) adventure_return_only: bool,
+    /// Additive: a checkpoint written before a permission could charge for
+    /// itself restores with no surcharge, which is what every permission but
+    /// Elite Spellbinder's carries anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) surcharge: Option<ManaCostSnapshot>,
+    /// Additive: a checkpoint written before a permission could name the
+    /// earliest turn it may be used restores without one, which is what
+    /// every permission but a foretell carries anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) not_before_turn: Option<(usize, u32)>,
+    /// Additive: a checkpoint written before a permission could say so
+    /// restores face up, which every permission but a foretell was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) face_down: bool,
+    /// Additive: a checkpoint written before hideaway existed carries no
+    /// look-only permission, which is what every game without one has.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) hidden_only: bool,
+    /// Additive: whether mana spent on this card may be of any colour.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) spend_any_color: bool,
+    /// Additive: the creature type this permission asks its holder to have
+    /// attacked with this turn, if it asks anything at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) attacked_with_subtype: Option<String>,
+    /// The holder's turn whose end step the permission runs to. Additive: a
+    /// checkpoint written before any permission reached that far restores
+    /// without one, which all of them did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) until_holder_end_step: Option<(usize, u32)>,
+}
+
+mod balance;
+mod continuation;
+mod continuous;
+mod emptiness;
+mod objects;
 mod stack;
 mod triggers;
+pub(in crate::game::state_checkpoint) use emptiness::is_zero_u16;
 pub(in crate::game::state_checkpoint) use stack::*;
 pub(in crate::game::state_checkpoint) use triggers::*;
 
-use super::model_keyword::KeywordSnapshot;
+pub(super) use balance::{BalanceActionSnapshot, BalancePhaseSnapshot, BalanceTaskSnapshot};
+pub(super) use continuation::DecisionContinuationSnapshot;
+pub(in crate::game::state_checkpoint) use continuous::*;
+pub(super) use objects::{
+    AbilityLocator, EmblemCharacteristicsLocator, FaceDownCharacteristicsSnapshot,
+    ObjectCharacteristicsSnapshot, ObjectKindSnapshot, TokenCharacteristicsLocator,
+};
+
+use super::model_keyword::{KeywordSnapshot, UpkeepKeywordSnapshot};
+pub(super) use super::model_ongoing::ResolvedOngoingEffectSnapshot;
 pub(super) use super::model_prevention::*;
 
-use super::model_animation::{AnimationSnapshot, UpkeepKeywordSnapshot};
 use super::model_procedure::{DrawReplacementSnapshot, PendingProcedureSnapshot};
-use super::model_trigger::{DelayedTriggerSnapshot, FloatingTriggerSnapshot};
+use super::model_trigger::InstalledTriggerSnapshot;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +100,12 @@ pub(super) struct GameSnapshot {
     pub(super) version: u32,
     pub(super) simulation_fingerprint: String,
     pub(super) turns_started: [u32; 2],
+    /// Damage each player has taken this turn, in total and per source
+    /// group. Absent from checkpoints that predate the accumulators.
+    #[serde(default)]
+    pub(super) damage_taken_this_turn: [u16; 2],
+    #[serde(default)]
+    pub(super) damage_taken_by_group_this_turn: Vec<Vec<u16>>,
     pub(super) next_decision_id: u32,
     pub(super) next_trigger_id: u32,
     pub(super) next_continuous_effect_timestamp: u64,
@@ -34,54 +115,136 @@ pub(super) struct GameSnapshot {
     pub(super) untap_pending: bool,
     pub(super) cleanup_pending: bool,
     pub(super) mulligans: [u8; 2],
-    pub(super) land_played_this_turn: [bool; 2],
+    pub(super) lands_played_this_turn: [u16; 2],
     pub(super) tried_to_draw_from_empty_library: [bool; 2],
     pub(super) mana: [Vec<ManaSnapshot>; 2],
     pub(super) creature_died_this_turn: bool,
+    /// Additive: a checkpoint written before the count existed restores as
+    /// zero, which is what a turn with no recorded deaths means anyway.
+    #[serde(default, skip_serializing_if = "emptiness::is_zero_u16")]
+    pub(super) creatures_died_this_turn: u16,
     pub(super) linked_exiles: Vec<[u32; 2]>,
+    /// Uses of a limited graveyard permission this turn. Additive: a
+    /// checkpoint written before it existed restores a turn in which nothing
+    /// had been played that way yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) graveyard_permission_uses: Vec<[u32; 2]>,
+    /// Additive: a checkpoint written before the rule existed restores as
+    /// false, which is what every ordinary turn means anyway.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) damage_cannot_be_prevented_this_turn: bool,
+    /// Additive: a checkpoint written before exile permissions existed
+    /// restores as empty, which is what a game with none of them means
+    /// anyway. Each entry is the card, who may play it, whether it is free,
+    /// the turn it lapses at the end of, and whether only an adventure's
+    /// creature half may be played.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) exile_play_permissions: Vec<ExilePlayPermissionSnapshot>,
+    /// Additive: a checkpoint written before the monarch existed restores
+    /// with nobody wearing the crown, which is how every game starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) monarch: Option<usize>,
     pub(super) sorcery_flash_grants: [u8; 2],
-    pub(super) additional_combat_phases: u8,
-    pub(super) noncreature_casts_locked: [bool; 2],
+    /// Who has been told they cannot gain life for the rest of the game.
+    /// Additive: a checkpoint written before this existed means nobody had
+    /// been, which is where every game starts.
+    #[serde(default, skip_serializing_if = "emptiness::is_unset_for_both")]
+    pub(super) cannot_gain_life: [bool; 2],
+    pub(super) turn_phase_queue: Vec<TurnPhaseSnapshot>,
+    pub(super) turn_phase_resume: Option<TurnPhaseResumeSnapshot>,
+    /// Resolving play prohibitions. Static restrictions remain source-derived.
+    pub(super) resolved_play_restrictions: Vec<ResolvedPlayRestrictionSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) resolved_attack_restrictions: Vec<ResolvedAttackRestrictionSnapshot>,
+    /// Resolving play permissions. Additive: a checkpoint written before
+    /// anything could grant one restores with none, which is what every game
+    /// with no such effect in it has.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) resolved_play_permissions: Vec<ResolvedPlayPermissionSnapshot>,
     pub(super) spells_cast_this_turn: [u16; 2],
     pub(super) spells_cast_last_turn: [u16; 2],
+    /// Additive: older checkpoints have no predicate-filterable cast history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) spell_cast_history_this_turn: Vec<u32>,
+    /// Spells cast over the whole game. Additive: a checkpoint written before
+    /// it was counted restores a game in which nobody has cast anything,
+    /// which is only wrong for a card that asks, and only until one is cast.
+    #[serde(default)]
+    pub(super) spells_cast_this_game: [u16; 2],
     pub(super) cards_drawn_this_turn: [u16; 2],
+    pub(super) citys_blessing: [bool; 2],
+    pub(super) permanent_left_battlefield_this_turn: [bool; 2],
+    /// Additive: a checkpoint written before the turn tracked it restores
+    /// with nobody's graveyard having lost a card, which is what every turn
+    /// starts as anyway.
+    #[serde(default)]
+    pub(super) card_left_graveyard_this_turn: [bool; 2],
+    pub(super) life_gained_this_turn: [u16; 2],
+    /// Whether each player has lost life this turn. Additive: a checkpoint
+    /// written before it existed restores a turn in which nobody has.
+    #[serde(default)]
+    pub(super) lost_life_this_turn: [bool; 2],
+    pub(super) draw_step_draw_taken: [bool; 2],
     pub(super) drawn_this_turn: [Vec<u32>; 2],
+    /// Compatibility-only wire member. Channel now reconstructs through
+    /// `ongoing_effects`; current writers always emit false for both seats.
+    pub(super) channel_active: [bool; 2],
     pub(super) defer_empty_library_loss: bool,
     pub(super) draw_replacements: [Vec<DrawReplacementSnapshot>; 2],
-    pub(super) miracle_window: Option<u32>,
     pub(super) pending_combat_attackers: Vec<u32>,
     pub(super) combat_blocked_attackers: Vec<u32>,
     pub(super) extra_turns: Vec<usize>,
     pub(super) next_regular_player: usize,
-    pub(super) channel_active: [bool; 2],
-    /// A Fog resolved this turn. Defaulted so a checkpoint written before
-    /// this field existed still decodes, which is what the open-world
-    /// contract asks of an additive member.
-    #[serde(default)]
-    pub(super) all_combat_damage_prevented: bool,
-    /// Prevention shields still waiting for damage. Additive for the same
-    /// reason the Fog flag is.
-    #[serde(default)]
-    pub(super) prevention_shields: Vec<PreventionShieldSnapshot>,
-    /// Turn-scoped prevention rules whose covered objects are determined when
-    /// damage would be dealt instead of when the effect resolves.
-    #[serde(default)]
-    pub(super) relational_damage_preventions: Vec<RelationalDamagePreventionSnapshot>,
+    /// Resolved damage-prevention rules in creation order. Static prevention
+    /// remains source-derived and therefore is not checkpointed here.
+    pub(super) damage_preventions: Vec<ResolvedDamagePreventionSnapshot>,
+    /// Resolved damage redirections in creation order. Static group
+    /// redirection remains source-derived and is not checkpointed here.
+    pub(super) damage_redirects: Vec<ResolvedDamageRedirectSnapshot>,
     pub(super) pregame: Option<PregameSnapshot>,
     pub(super) combat_damage_stage: CombatDamageStageSnapshot,
     pub(super) battlefield: Vec<PermanentSnapshot>,
     pub(super) emblems: Vec<EmblemSnapshot>,
     pub(super) stack: Vec<StackSnapshot>,
     pub(super) retired_objects: Vec<RetiredObjectSnapshot>,
+    /// What each retired object became when it changed zones, for the
+    /// objects a pending trigger might still name. Appended, so a checkpoint
+    /// written before it existed still reads -- and reads as a game where no
+    /// dying creature can find the card it became, which is what those
+    /// checkpoints actually recorded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) successors: Vec<SuccessorSnapshot>,
     pub(super) pending_events: Vec<PendingEventSnapshot>,
     pub(super) temporary_ability_grants: Vec<TemporaryAbilityGrantSnapshot>,
-    pub(super) delayed_triggers: Vec<DelayedTriggerSnapshot>,
-    pub(super) floating_triggers: Vec<FloatingTriggerSnapshot>,
+    /// Resolved duration-scoped effects that expose an activated ability.
+    /// Additive: checkpoints written before these effects existed restore
+    /// with none, which is the state of every game without one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) ongoing_effects: Vec<ResolvedOngoingEffectSnapshot>,
+    pub(super) next_installed_trigger_id: u32,
+    pub(super) installed_triggers: Vec<InstalledTriggerSnapshot>,
     pub(super) pending_triggers: Vec<PendingTriggerSnapshot>,
     pub(super) pending_procedures: Vec<PendingProcedureSnapshot>,
     pub(super) decision_state: Option<DecisionStateSnapshot>,
     pub(super) has_deferred_state: bool,
     pub(super) viewer: usize,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum TurnPhaseSnapshot {
+    Combat,
+    PostcombatMain,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) enum TurnPhaseResumeSnapshot {
+    PrecombatMain,
+    BeginningOfCombat,
+    PostcombatMain,
+    End,
+    NextTurn,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -132,17 +295,46 @@ pub(super) struct ManaPayloadLocator {
 )]
 pub(super) enum AbilityOriginSnapshot {
     Printed {
-        definition: u16,
+        definition: CardDefinitionId,
         part_id: u8,
+        ability_id: u8,
+    },
+    Token {
+        part_id: u8,
+        ability_id: u8,
+    },
+    Emblem {
+        ability_id: u8,
+    },
+    FaceDown {
         ability_id: u8,
     },
     IntrinsicBasicLand {
         land_type: BasicLandTypeSnapshot,
     },
+    IntrinsicCounter {
+        counter: CounterKindSnapshot,
+    },
     Granted {
         source: u32,
-        source_definition: u16,
+        source_definition: CardDefinitionId,
         source_part_id: u8,
+        source_ability_id: u8,
+        grant_id: u8,
+    },
+    TokenGranted {
+        source: u32,
+        source_part_id: u8,
+        source_ability_id: u8,
+        grant_id: u8,
+    },
+    EmblemGranted {
+        source: u32,
+        source_ability_id: u8,
+        grant_id: u8,
+    },
+    FaceDownGranted {
+        source: u32,
         source_ability_id: u8,
         grant_id: u8,
     },
@@ -181,45 +373,52 @@ pub(super) enum CombatDamageStageSnapshot {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(super) struct CounterSnapshot {
+    pub(super) name: String,
+    pub(super) count: u16,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_excessive_bools)]
 pub(super) struct PermanentSnapshot {
     pub(super) object_id: u32,
     pub(super) owner: usize,
+    pub(super) object_kind: ObjectKindSnapshot,
+    /// The authored token characteristics originally minted for this permanent.
+    /// A token copy legitimately has none because its single-faced copy effect
+    /// or frozen double-faced values supply its copiable characteristics;
+    /// `object_kind` still records that it is a token.
+    pub(super) token_characteristics: Option<TokenCharacteristicsLocator>,
+    /// Both intrinsic faces of a token created as a copy of a double-faced
+    /// permanent. Additive because older checkpoints could not represent this
+    /// state faithfully at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) double_faced_token_copy: Option<DoubleFacedCopiableCharacteristicsSnapshot>,
+    /// Copiable values supplied by the rule or effect that made this
+    /// permanent face down. `None` means face up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) face_down: Option<FaceDownCharacteristicsSnapshot>,
+    /// Whether the face-down mechanism grants a mana-cost turn-up permission.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) turn_up_for_mana_cost: bool,
+    pub(super) presented_part_id: u8,
     pub(super) timestamp: u64,
     pub(super) entered_controller_turn: u32,
-    pub(super) power_bonus: i16,
-    pub(super) toughness_bonus: i16,
-    /// Modifications that end when the permanent that made them untaps, as
-    /// (source object, power, toughness). Absent from checkpoints that
-    /// predate them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(super) while_source_tapped: Vec<(u32, i16, i16)>,
-    pub(super) unblockable_this_turn: bool,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(super) cannot_block_this_turn: bool,
+    /// The game turn this permanent entered, for the clauses that ask about
+    /// the turn itself rather than about its controller's turn count.
+    /// Additive: a checkpoint written before it existed restores a permanent
+    /// that entered on turn zero, which is what one that has been there all
+    /// along would say anyway.
+    #[serde(default, skip_serializing_if = "emptiness::is_zero_turn")]
+    pub(super) entered_turn: u32,
     /// Detained until this seat's next turn, with the turn count it landed on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) detained_until_turn_of: Option<(usize, u32)>,
-    /// Whether this permanent is destroyed as the current combat phase ends.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(super) destroy_at_end_of_combat: bool,
     /// Untap steps this permanent still owes before it untaps normally.
-    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    #[serde(default, skip_serializing_if = "emptiness::is_zero_u8")]
     pub(super) skipped_untap_steps: u8,
-    /// Colours painted over the printed ones, in WUBRG order, when a Lace
-    /// has resolved onto this permanent.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) color_override: Option<[bool; 5]>,
-    pub(super) combat_damage_prevented: bool,
-    pub(super) combat_damage_dealt_by_prevented: bool,
-    /// Absent from checkpoints that predate the all-damage form.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(super) damage_dealt_by_prevented: bool,
     pub(super) control_reverts_to: Option<usize>,
-    /// Whether a "can't be regenerated" effect covers this permanent for the
-    /// rest of the turn.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub(super) cannot_regenerate_this_turn: bool,
     /// The permanent sustaining a duration-scoped control change, absent for
     /// the turn-scoped form and for everything untouched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -227,52 +426,88 @@ pub(super) struct PermanentSnapshot {
     /// Whether that holder also has to stay tapped.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) control_requires_source_tapped: bool,
+    /// Whether the control source has to remain attached to this permanent.
+    /// Additive: older checkpoints contain no static attachment control state.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) control_requires_source_attached: bool,
     pub(super) chosen_player: Option<usize>,
+    /// The X the spell that made this permanent was cast for.
+    #[serde(default, skip_serializing_if = "emptiness::is_zero_u16")]
+    pub(super) cast_x: u16,
+    /// The alternative this permanent's spell was cast with, by its stable
+    /// name. Stored as a string so the wire form does not depend on the
+    /// order of a catalog enum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cast_alternative: Option<String>,
+    /// Which zone this spell was cast from, by its stable label. Additive:
+    /// a checkpoint written before the zone was recorded restores as
+    /// nothing, which is what a permanent nobody cast carries anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) cast_from_zone: Option<String>,
     pub(super) destroy_at_end: bool,
-    pub(super) counters: Vec<u16>,
+    pub(super) counters: Vec<CounterSnapshot>,
     pub(super) attached_to: Option<u32>,
+    /// The player a player-enchanting Aura is attached to. Additive: older
+    /// checkpoints restore no such Auras because none were executable then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) attached_player: Option<usize>,
+    pub(super) reconfigured_timestamp: Option<u64>,
     pub(super) exile_instead_of_dying: bool,
     pub(super) combat_damage_assignment: Vec<CombatDamageAssignmentSnapshot>,
     pub(super) regeneration_shields: u8,
     pub(super) attacked_this_turn: bool,
+    /// Additive: a checkpoint written before exert existed restores with
+    /// nothing exerted, which is what every board without one is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) exerted: bool,
+    /// Additive in the same way: a checkpoint written before saddling
+    /// existed restores with nothing saddled.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) saddled: bool,
+    /// The exhaust abilities this permanent has already spent. Additive:
+    /// a checkpoint written before exhaust existed restores with none
+    /// spent, which is what every board without one has.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) exhausted: Vec<AbilityOriginSnapshot>,
     pub(super) attacks_this_turn: u8,
+    /// The seat that controlled this permanent the last time it attacked, and
+    /// their turn count then. Absent means it has never attacked, which is
+    /// what a checkpoint written before this was recorded also means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) last_attacked_turn: Option<(usize, u32)>,
     pub(super) damage_sources: Vec<u32>,
+    #[serde(default)]
+    pub(super) was_dealt_damage_this_turn: bool,
+    #[serde(default)]
+    pub(super) dealt_damage_this_turn: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) paired_with: Option<u32>,
     pub(super) dealt_damage_to_opponent_this_turn: bool,
     pub(super) deathtouch_damage: bool,
     pub(super) created_by: Option<u32>,
-    pub(super) animation: Option<AnimationSnapshot>,
     pub(super) temporary_keywords: Vec<KeywordSnapshot>,
     pub(super) keywords_until_upkeep_of: Vec<UpkeepKeywordSnapshot>,
-    pub(super) temporary_granted_abilities: Vec<TemporaryGrantedAbilitySnapshot>,
-    pub(super) temporary_removed_abilities: Vec<TemporaryRemovedAbilitySnapshot>,
+    pub(super) resolved_continuous_effects: Vec<ResolvedContinuousEffectSnapshot>,
     pub(super) activations_this_turn: Vec<AbilityActivationSnapshot>,
+    /// Additive: a payload written before any ability capped its own
+    /// triggering carries none, which is a turn in which none has.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) triggers_this_turn: Vec<AbilityActivationSnapshot>,
+    /// Absent from a payload written before any ability counted its own
+    /// resolutions, which is why it defaults rather than being required.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) resolutions_this_turn: Vec<AbilityActivationSnapshot>,
+    /// Additive: a payload written before either flag existed restores both
+    /// as false, which is what an ordinary permanent means anyway.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) cast_at_instant_speed: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) became_aura: bool,
     pub(super) copy_effect: Option<CopiableCharacteristicsSnapshot>,
+    pub(super) copy_expiration: Option<ContinuousEffectExpirationSnapshot>,
     pub(super) copied_from: Option<CopiedFromSnapshot>,
     pub(super) text_changes: Vec<BasicLandTypeChangeSnapshot>,
     pub(super) has_dynamic_characteristics: bool,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct TemporaryGrantedAbilitySnapshot {
-    pub(super) ability: AbilityLocator,
-    pub(super) source: u32,
-    pub(super) source_definition: u16,
-    pub(super) source_part_id: u8,
-    pub(super) source_ability_id: u8,
-    pub(super) grant_id: u8,
-    pub(super) timestamp: u64,
-    pub(super) order: u16,
-    pub(super) expiration: AbilityEffectExpirationSnapshot,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct TemporaryRemovedAbilitySnapshot {
-    pub(super) effect: AppliedEffectLocator,
-    pub(super) timestamp: u64,
-    pub(super) order: u16,
-    pub(super) expiration: AbilityEffectExpirationSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -285,10 +520,36 @@ pub(super) struct AbilityActivationSnapshot {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct CopiableCharacteristicsSnapshot {
-    pub(super) definition: u16,
-    pub(super) part_id: u8,
+    pub(super) base: ObjectCharacteristicsSnapshot,
     pub(super) added_types: [bool; crate::card::CardType::COUNT],
     pub(super) added_abilities: Vec<CopiableAbilitySnapshot>,
+    /// Additive: a checkpoint written before a copy could keep its own
+    /// subtypes restores without them, which is what every copy did then.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) retain_printed_subtypes: bool,
+    /// "Except it's a 1/1", which is a copiable value of its own. Additive:
+    /// a checkpoint written before it existed restores a copy with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) base_power_toughness: Option<[i16; 2]>,
+    /// The other exceptions embalm and eternalize print. Additive for the
+    /// same reason: a checkpoint written before they existed restores a copy
+    /// that made none of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) colors: Option<[bool; 5]>,
+    #[serde(default, skip_serializing_if = "<[String]>::is_empty")]
+    pub(super) added_creature_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) no_mana_cost: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DoubleFacedCopiableCharacteristicsSnapshot {
+    pub(super) modal: bool,
+    pub(super) front_part_id: u8,
+    pub(super) back_part_id: u8,
+    pub(super) front: CopiableCharacteristicsSnapshot,
+    pub(super) back: CopiableCharacteristicsSnapshot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -298,24 +559,10 @@ pub(super) struct CopiableAbilitySnapshot {
     pub(super) ability: AbilityLocator,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct CopiedFromSnapshot {
-    pub(super) definition: u16,
-    pub(super) part_id: u8,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub(super) enum AbilityEffectExpirationSnapshot {
-    EndOfTurn,
-    UpkeepOf { seat: usize },
-    TurnOf { seat: usize, turn: u32 },
-    Never,
+    pub(super) characteristics: ObjectCharacteristicsSnapshot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -329,10 +576,12 @@ pub(super) enum RetiredObjectSnapshot {
         card: DetachedCardSnapshot,
     },
     Stack {
-        object: DetachedStackSnapshot,
+        object: Box<DetachedStackSnapshot>,
     },
+    /// Boxed: a retired permanent carries far more than a retired card, and
+    /// the enum is stored in a vector of every retired object.
     Permanent {
-        permanent: DetachedPermanentSnapshot,
+        permanent: Box<DetachedPermanentSnapshot>,
         power: Option<i16>,
         toughness: Option<i16>,
         mana_value: u16,
@@ -345,17 +594,28 @@ pub(super) enum RetiredObjectSnapshot {
 #[allow(clippy::struct_excessive_bools)]
 pub(super) struct DetachedPermanentSnapshot {
     pub(super) state: PermanentSnapshot,
-    pub(super) definition: u16,
-    pub(super) presented_part_id: u8,
     pub(super) controller: usize,
     pub(super) tapped: bool,
     pub(super) damage: u16,
     pub(super) attacking: bool,
     pub(super) attack_defender: Option<AttackDefenderSnapshot>,
     pub(super) blocked: bool,
-    pub(super) blocking: Option<u32>,
+    /// Every attacker this creature is blocking. A list because a band is
+    /// blocked as a group and one creature may be allowed several blocks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) blocking: Vec<u32>,
+    /// Whether it blocked something that has since left combat, which the
+    /// list above can no longer say. Absent from a payload written before the
+    /// distinction existed, and from the ordinary case where the list answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) blocking_this_combat: Option<bool>,
+    /// The attacking band this creature is in, shared by every member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) attacking_band: Option<u8>,
     pub(super) activated_loyalty_this_turn: bool,
     pub(super) chosen_creature_type: Option<String>,
+    /// The basic land type this permanent was told to be as it entered.
+    pub(super) chosen_basic_land_type: Option<BasicLandTypeSnapshot>,
     pub(super) chosen_card_name: Option<String>,
 }
 
@@ -381,11 +641,41 @@ pub(super) struct CombatDamageAssignmentSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(super) struct EmblemSnapshot {
     pub(super) object_id: u32,
-    pub(super) definition: u16,
+    pub(super) characteristics: EmblemCharacteristicsLocator,
     pub(super) owner: usize,
-    pub(super) presented_part_id: u8,
     pub(super) timestamp: u64,
     pub(super) entered_controller_turn: u32,
+    /// The game turn this permanent entered, for the clauses that ask about
+    /// the turn itself rather than about its controller's turn count.
+    /// Additive: a checkpoint written before it existed restores a permanent
+    /// that entered on turn zero, which is what one that has been there all
+    /// along would say anyway.
+    #[serde(default, skip_serializing_if = "emptiness::is_zero_turn")]
+    pub(super) entered_turn: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "camelCase")]
+pub(super) enum ResolvedEffectPaymentSnapshot {
+    Mana(ManaCostSnapshot),
+    Life(u16),
+    Energy(u16),
+    /// Appended after the first two, so a checkpoint written before this
+    /// payment existed still reads as one of them.
+    Mill(u16),
+    Discard(u16),
+    /// Which cards match is read back from the authored effect rather than
+    /// carried here: the predicate is a static definition, and the payment
+    /// this describes is only ever restored beside the ability that named it.
+    DiscardMatching,
+    /// Likewise: how much can be paid is read off the payer's mana rather
+    /// than written down, because the options are rebuilt from it.
+    ChosenGenericMana,
+    /// And likewise for the permanents a return payment can name.
+    ReturnPermanentMatching,
+    /// The same, for the one it sacrifices.
+    SacrificePermanentMatching,
+    SacrificeCreaturesWithTotalPower(u16),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -414,21 +704,15 @@ pub(super) struct PendingEventSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(super) struct PendingReplacementEffectSnapshot {
     pub(super) context: ReplacementEffectContextSnapshot,
-    pub(super) effect: EntryReplacementLocator,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct EntryReplacementLocator {
-    pub(super) ability: AbilityLocator,
+    pub(super) effect: ReplacementEffectLocator,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ApplicableReplacementSnapshot {
     pub(super) context: ReplacementEffectContextSnapshot,
-    pub(super) effect: EntryReplacementLocator,
-    pub(super) definition: u16,
+    pub(super) effect: ReplacementEffectLocator,
+    pub(super) presentation: ObjectCharacteristicsSnapshot,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -453,8 +737,22 @@ pub(super) struct AbilitySourceSnapshot {
     rename_all_fields = "camelCase"
 )]
 pub(super) enum EntryCompletionSnapshot {
-    LandPlayed { seat: usize },
-    SpellResolved { card: u32, definition: u16 },
+    LandPlayed {
+        seat: usize,
+    },
+    SpellResolved {
+        card: u32,
+        definition: CardDefinitionId,
+    },
+    AttachSource {
+        source: u32,
+    },
+    AttachToHost {
+        host: u32,
+    },
+    Attacking {
+        defender: AttackDefenderSnapshot,
+    },
     Setup,
     None,
 }
@@ -469,15 +767,6 @@ pub(super) enum ZoneKindSnapshot {
     Stack,
     Exile,
     Command,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct AbilityLocator {
-    pub(super) definition: u16,
-    pub(super) part_id: u8,
-    pub(super) ability_id: u8,
-    pub(super) nested: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -516,14 +805,44 @@ pub(super) struct TriggerContextSnapshot {
     pub(super) object_controller: Option<usize>,
     pub(super) event_player: Option<usize>,
     pub(super) amount: Option<i32>,
-    pub(super) chosen_objects: [Option<u32>; crate::ChoiceIndex::COUNT],
+    /// Additive: a checkpoint written before it existed restores a
+    /// resolution that names nothing damaged, which every resolution that is
+    /// not about damage does anyway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) damaged_object: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct EffectResolutionContextSnapshot {
+    pub(super) trigger: TriggerContextSnapshot,
+    pub(super) single_objects: [Option<TargetSnapshot>; crate::ObjectBindingIndex::COUNT],
+    pub(super) object_groups: [Vec<TargetSnapshot>; crate::ObjectSetBindingIndex::COUNT],
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DecisionStateSnapshot {
     pub(super) preference: DecisionPreferenceSnapshot,
+    pub(super) options: Vec<DecisionOptionSnapshot>,
+    /// Hidden-zone locations for cards whose identities are visible in the
+    /// current decision. Reconstruction mints fresh hidden objects before it
+    /// parses the continuation, so these origins let it preserve the public
+    /// object ids without guessing that the deciding seat owns the zone.
+    pub(super) card_origins: Vec<DecisionCardOriginSnapshot>,
     pub(super) continuation: DecisionContinuationSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::game::state_checkpoint) struct DecisionCardOriginSnapshot {
+    pub(in crate::game::state_checkpoint) object_id: u32,
+    pub(in crate::game::state_checkpoint) seat: usize,
+    pub(in crate::game::state_checkpoint) zone: DecisionZoneSnapshot,
+    /// Exact index within the named hidden collection. This keeps disclosed
+    /// duplicate definitions and visible option order stable under a hidden
+    /// hypothesis whose otherwise-unseen cards may be permuted.
+    pub(in crate::game::state_checkpoint) index: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -549,7 +868,7 @@ pub(super) enum TurnKindSnapshot {
 pub(super) struct ApplicableBeginTurnReplacementSnapshot {
     pub(super) source: AbilitySourceSnapshot,
     pub(super) controller: usize,
-    pub(super) definition: u16,
+    pub(super) presentation: ObjectCharacteristicsSnapshot,
     pub(super) effect: ReplacementEffectLocator,
 }
 
@@ -558,222 +877,6 @@ pub(super) struct ApplicableBeginTurnReplacementSnapshot {
 pub(super) struct DeferredBeginTurnEffectSnapshot {
     pub(super) replacement: ApplicableBeginTurnReplacementSnapshot,
     pub(super) effect: ScopedEffectSnapshot,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub(super) enum DecisionContinuationSnapshot {
-    BeginTurn {
-        player: usize,
-        turn_kind: TurnKindSnapshot,
-        applied: Vec<AbilitySourceSnapshot>,
-        replacements: Vec<ApplicableBeginTurnReplacementSnapshot>,
-        deferred: Vec<DeferredBeginTurnEffectSnapshot>,
-    },
-    SearchZone {
-        controller: usize,
-        source: ZoneKindSnapshot,
-        destination: ZoneKindSnapshot,
-        placement: ZonePlacementSnapshot,
-        reveal: bool,
-        shuffle: bool,
-        /// Additive: a checkpoint written before fetch lands existed carries
-        /// no flag and reconstructs as an untapped arrival.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        enters_tapped: bool,
-    },
-    ChooseCards {
-        controller: usize,
-        destination: ZoneKindSnapshot,
-        placement: ZonePlacementSnapshot,
-        reveal: bool,
-    },
-    DrawReplacement {
-        player: usize,
-        replacements: Vec<DrawReplacementSnapshot>,
-    },
-    BasicLandTypeTextChange {
-        target: TargetSnapshot,
-    },
-    ExileFromHand {
-        victim: usize,
-    },
-    DiscardForEffect {
-        player: usize,
-        amount: usize,
-        remaining: Vec<usize>,
-        chosen: Vec<DiscardChoiceSnapshot>,
-        cause: ZoneMoveCauseSnapshot,
-    },
-    GrislySalvage {
-        player: usize,
-        revealed: Vec<DetachedCardSnapshot>,
-    },
-    AugurOfBolas {
-        player: usize,
-        revealed: Vec<DetachedCardSnapshot>,
-    },
-    TopCardSelection {
-        player: usize,
-        revealed: Vec<DetachedCardSnapshot>,
-        selected_zone: ZoneKindSnapshot,
-        selected_placement: ZonePlacementSnapshot,
-        rest_zone: ZoneKindSnapshot,
-        rest_placement: ZonePlacementSnapshot,
-        followup: Option<EffectContinuationSnapshot>,
-    },
-    OptionalManaPayment {
-        player: usize,
-        cost: ManaCostSnapshot,
-        object: DetachedStackSnapshot,
-        ability: AbilityLocator,
-        context: TriggerContextSnapshot,
-        effect: ScopedEffectSnapshot,
-    },
-    ManaPaymentOrElse {
-        player: usize,
-        cost: ManaCostSnapshot,
-        object: DetachedStackSnapshot,
-        ability: AbilityLocator,
-        context: TriggerContextSnapshot,
-        effect: ScopedEffectSnapshot,
-    },
-    ChainLightning {
-        player: usize,
-        spell: DetachedStackSnapshot,
-        targets: Vec<TargetSnapshot>,
-    },
-    Fork {
-        player: usize,
-        spell: DetachedStackSnapshot,
-        target_lists: Vec<Vec<TargetSelectionSnapshot>>,
-    },
-    OptionalEffect {
-        object: DetachedStackSnapshot,
-        ability: AbilityLocator,
-        context: TriggerContextSnapshot,
-        effect: ScopedEffectSnapshot,
-    },
-    ChoosePermanentForEffect {
-        choice: u8,
-        continuation: EffectContinuationSnapshot,
-    },
-    BattlefieldEntryPayment {
-        context: ReplacementEffectContextSnapshot,
-        effect: ReplacementEffectLocator,
-    },
-    BattlefieldEntryReplacement {
-        candidates: Vec<ApplicableReplacementSnapshot>,
-    },
-    BattlefieldEntryCardName {
-        choices: Vec<String>,
-    },
-    BattlefieldEntryOptional {
-        context: ReplacementEffectContextSnapshot,
-    },
-    BattlefieldEntryCreatureType {
-        choices: Vec<String>,
-    },
-    BattlefieldEntryCopy {
-        choices: Vec<u32>,
-        added_types: [bool; crate::card::CardType::COUNT],
-    },
-    TriggerOrder {
-        batch: TriggerPlacementBatchSnapshot,
-        remaining: Vec<TriggerPlacementBatchSnapshot>,
-    },
-    TriggerPlacement {
-        trigger: PendingTriggerSnapshot,
-        pending: Vec<PendingTriggerSnapshot>,
-        remaining: Vec<TriggerPlacementBatchSnapshot>,
-        candidates: Vec<TargetSnapshot>,
-    },
-    MiracleReveal {
-        card: u32,
-    },
-    PileSplit {
-        owner: usize,
-    },
-    RevealedPileSplit {
-        player: usize,
-        revealed: Vec<DetachedCardSnapshot>,
-        rest: ZoneKindSnapshot,
-        placement: ZonePlacementSnapshot,
-    },
-    RevealedPileChoice {
-        player: usize,
-        first: Vec<DetachedCardSnapshot>,
-        second: Vec<DetachedCardSnapshot>,
-        rest: ZoneKindSnapshot,
-        placement: ZonePlacementSnapshot,
-    },
-    PileChoice {
-        first: Vec<u32>,
-        second: Vec<u32>,
-    },
-    SeparateIntoPiles {
-        resolving_controller: usize,
-        subject: usize,
-        items: Vec<DecisionOptionSnapshot>,
-        on_complete: String,
-    },
-    ChoosePile {
-        piles: PileSplitSnapshot,
-        on_complete: String,
-    },
-    SacrificeOfChoice {
-        followup: Option<EffectContinuationSnapshot>,
-        optional: bool,
-    },
-    DestroyOfChoice {
-        can_regenerate: bool,
-    },
-    CounterUnlessPaid {
-        spell: u32,
-        player: usize,
-        cost: ManaCostSnapshot,
-        zone: CounteredSpellZoneSnapshot,
-    },
-    RecallDiscard {
-        player: usize,
-    },
-    RecallReturn {
-        player: usize,
-    },
-    Duress {
-        victim: usize,
-        cause: ZoneMoveCauseSnapshot,
-    },
-    Balance {
-        controller: usize,
-        phase: BalancePhaseSnapshot,
-        task: BalanceTaskSnapshot,
-        remaining: Vec<BalanceTaskSnapshot>,
-    },
-    SylvanOffer {
-        player: usize,
-    },
-    SylvanSelect {
-        player: usize,
-        candidates: Vec<u32>,
-        choices_left: usize,
-    },
-    SylvanMode {
-        player: usize,
-        card: u32,
-        candidates: Vec<u32>,
-        choices_left: usize,
-    },
-    TetravusDetach {
-        source: u32,
-    },
-    TetravusAssemble {
-        source: u32,
-    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -796,41 +899,14 @@ pub(super) struct DecisionOptionSnapshot {
     pub(super) zone: DecisionZoneSnapshot,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DecisionCardSnapshot {
     pub(super) object_id: u32,
-    pub(super) definition: u16,
+    pub(super) characteristics: ObjectCharacteristicsSnapshot,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) enum BalancePhaseSnapshot {
-    Lands,
-    Hands,
-    Creatures,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct BalanceTaskSnapshot {
-    pub(super) player: usize,
-    pub(super) prompt: String,
-    pub(super) zone: DecisionZoneSnapshot,
-    pub(super) cards: Option<Vec<DetachedCardSnapshot>>,
-    pub(super) count: usize,
-    pub(super) action: BalanceActionSnapshot,
-    pub(super) cause: ZoneMoveCauseSnapshot,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) enum BalanceActionSnapshot {
-    Sacrifice,
-    Discard,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) enum DecisionZoneSnapshot {
     Hand,
@@ -852,20 +928,26 @@ pub(super) enum ZonePlacementSnapshot {
     Bottom,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) enum CounteredSpellZoneSnapshot {
-    Graveyard,
-    Exile,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct EffectContinuationSnapshot {
     pub(super) object: DetachedStackSnapshot,
     pub(super) ability: AbilityLocator,
-    pub(super) context: TriggerContextSnapshot,
+    pub(super) context: EffectResolutionContextSnapshot,
     pub(super) effect: ScopedEffectSnapshot,
+    /// Whether the follow-up reads the sacrificed permanent's toughness
+    /// rather than its power. Absent means power, which is what every
+    /// continuation written before toughness was readable meant.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) reads_toughness: bool,
+}
+
+/// One retired object and the object it became.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SuccessorSnapshot {
+    pub(super) retired: u32,
+    pub(super) became: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -880,7 +962,7 @@ pub(super) struct DiscardChoiceSnapshot {
 #[serde(rename_all = "camelCase")]
 pub(super) struct DetachedCardSnapshot {
     pub(super) object_id: u32,
-    pub(super) definition: u16,
+    pub(super) definition: CardDefinitionId,
     pub(super) owner: usize,
 }
 

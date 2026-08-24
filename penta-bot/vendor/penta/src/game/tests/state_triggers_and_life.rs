@@ -1,7 +1,20 @@
 use super::*;
+use crate::card::{PlayActionMatcherDef, PlayRestrictionDef};
 
-static MUTAVAULT_TEST_ANIMATION: crate::card::AnimationDef =
-    crate::card::AnimationDef::new(2, 2).with_all_creature_types();
+static MUTAVAULT_TEST_CHARACTERISTICS: [AppliedEffectDef; 3] = [
+    AppliedEffectDef::add_card_types(CardTypeSet::single(CardType::Creature)),
+    AppliedEffectDef::add_creature_types(CreatureTypeSetDef::ALL),
+    AppliedEffectDef::set_base_power_toughness(ValueDef::Constant(2), ValueDef::Constant(2)),
+];
+
+/// Cleanup is a step a card can name now, because Thawing Glaciers returns
+/// itself at the beginning of one. What stays true is that every step maps to
+/// exactly one label.
+#[test]
+fn every_step_including_cleanup_has_one_authored_label() {
+    assert_eq!(Game::turn_step_def(Step::Cleanup), TurnStepDef::Cleanup);
+    assert_eq!(Game::turn_step_def(Step::Upkeep), TurnStepDef::Upkeep);
+}
 
 #[test]
 fn an_empty_library_draw_waits_for_state_based_actions_and_resolution_continues() {
@@ -83,13 +96,12 @@ fn a_state_trigger_fires_when_its_condition_becomes_true_and_only_once() {
         game.pending_triggers.is_empty(),
         "an unanimated Mutavault is only a land"
     );
-    if let Some(permanent) = game
-        .battlefield
-        .iter_mut()
-        .find(|permanent| permanent.card.id == vault)
-    {
-        permanent.animation = Some(&MUTAVAULT_TEST_ANIMATION);
-    }
+    attach_constant_resolved_characteristics(
+        &mut game,
+        vault,
+        &MUTAVAULT_TEST_CHARACTERISTICS,
+        ContinuousEffectExpiration::EndOfTurn,
+    );
     game.check_state_based_actions();
     assert_eq!(
         game.pending_triggers.len(),
@@ -167,9 +179,9 @@ fn disciple_of_bolas_pays_out_the_power_of_what_it_ate() {
         .options
         .iter()
         .find(|option| {
-            option
-                .card
-                .is_some_and(|(_, def)| def == cards::SERRA_ANGEL)
+            option.card.is_some_and(|(_, characteristics)| {
+                characteristics.card_definition() == Some(cards::SERRA_ANGEL)
+            })
         })
         .expect("the Angel is a legal sacrifice");
     game.apply(
@@ -249,10 +261,16 @@ fn zealous_conscripts_borrows_a_permanent_and_gives_it_back_at_cleanup() {
         "with haste it can attack the turn it changes hands"
     );
     let mut without_haste = borrowed;
-    without_haste.temporary_granted_abilities.retain(|grant| {
+    without_haste.resolved_continuous_effects.retain(|effect| {
         !matches!(
-            grant.ability.definition,
-            DeclarativeAbilityDef::Keyword(KeywordAbility::Haste)
+            effect.kind,
+            ResolvedContinuousEffectKind::Abilities(ResolvedAbilityOperation::Add {
+                ability,
+                ..
+            }) if matches!(
+                ability.definition,
+                DeclarativeAbilityDef::Keyword(KeywordAbility::Haste)
+            )
         )
     });
     assert!(
@@ -811,9 +829,9 @@ fn aurelia_untaps_the_team_and_buys_exactly_one_extra_combat() {
         Step::PostcombatMain,
         "and the turn reached its second main afterwards"
     );
-    assert_eq!(
-        game.additional_combat_phases, 0,
-        "the extra combat was spent rather than granted every time"
+    assert!(
+        game.turn_phase_queue.is_empty() && game.turn_phase_resume.is_none(),
+        "the inserted phase sequence was spent exactly once"
     );
 }
 
@@ -852,15 +870,19 @@ fn an_attack_trigger_for_the_first_time_each_turn_does_not_loop() {
 
     attack(&mut game);
     assert_eq!(
-        game.additional_combat_phases, 1,
-        "the first attack this turn granted a combat phase"
+        game.turn_phase_queue.iter().copied().collect::<Vec<_>>(),
+        vec![TurnPhaseDef::Combat],
+        "the first attack this turn scheduled a combat phase"
     );
 
     // Attacking again in the extra combat is not the first time this turn,
     // so it grants nothing. Without that guard Aurelia never stops attacking.
     attack(&mut game);
     assert_eq!(
-        game.additional_combat_phases, 1,
-        "attacking again the same turn granted nothing further"
+        game.turn_phase_queue.iter().copied().collect::<Vec<_>>(),
+        vec![TurnPhaseDef::Combat],
+        "attacking again the same turn scheduled nothing further"
     );
 }
+
+include!("state_triggers_and_life/scheduled_phases.rs");

@@ -123,7 +123,7 @@ fn channel_pays_for_a_fireball_in_one_cast() {
     // The reason Channel is a card: the life is spendable while paying for
     // the spell, so the X the engine offers has to count it.
     let mut game = ready_game();
-    game.channel_active[0] = true;
+    resolve_channel(&mut game);
     game.battlefield
         .push(creature(10_000, cards::MOUNTAIN, PlayerId::One));
     let fireball = card(10_001, cards::FIREBALL, PlayerId::One);
@@ -146,10 +146,7 @@ fn channel_pays_for_a_fireball_in_one_cast() {
         })
         .max()
         .expect("Fireball can be cast");
-    assert_eq!(
-        biggest, 19,
-        "nineteen life is spendable; the twentieth is not"
-    );
+    assert_eq!(biggest, 20, "Channel may spend the last point of life");
 
     game.apply(
         PlayerId::One,
@@ -168,12 +165,61 @@ fn channel_pays_for_a_fireball_in_one_cast() {
 }
 
 #[test]
+fn channel_and_pay_life_mana_share_life_left_after_the_spell_cost() {
+    let mut game = ready_game();
+    game.battlefield.clear();
+    resolve_channel(&mut game);
+    let confluence = game
+        .put_onto_battlefield(PlayerId::One, cards::MANA_CONFLUENCE)
+        .expect("cataloged");
+    let deluge = card(10_050, cards::TOXIC_DELUGE, PlayerId::One);
+    let deluge_id = deluge.id;
+    game.players[PlayerId::One.index()].hand.push(deluge);
+
+    game.players[PlayerId::One.index()].life = 5;
+    let cast = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .find(|action| {
+            matches!(action, Action::CastSpell { card, choices, .. }
+                if *card == deluge_id && choices.x() == 1)
+        })
+        .expect("one spell life, one Confluence life, and two Channel life fit in five");
+
+    game.players[PlayerId::One.index()].life = 3;
+    assert!(
+        !game.is_legal_action(PlayerId::One, &cast),
+        "Channel and Mana Confluence cannot both claim life reserved by the spell",
+    );
+    assert!(game.apply(PlayerId::One, cast.clone()).is_err());
+    assert_eq!(game.players[PlayerId::One.index()].life, 3);
+    assert!(
+        game.players[PlayerId::One.index()]
+            .hand
+            .iter()
+            .any(|card| card.id == deluge_id)
+    );
+    assert!(
+        game.battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == confluence)
+            .is_some_and(|permanent| !permanent.tapped)
+    );
+
+    game.players[PlayerId::One.index()].life = 5;
+    game.apply(PlayerId::One, cast)
+        .expect("the aggregate life budget and execution agree at five");
+    assert_eq!(game.players[PlayerId::One.index()].life, 1);
+    assert_eq!(game.stack.len(), 1);
+}
+
+#[test]
 fn channel_does_not_pay_a_coloured_symbol() {
     // Channel makes {C}. It can cover the generic half of a cost and nothing
     // else, so a spell whose coloured symbol is unpayable stays unpayable
     // however much life is left.
     let mut game = ready_game();
-    game.channel_active[0] = true;
+    resolve_channel(&mut game);
     game.battlefield
         .push(creature(10_000, cards::MOUNTAIN, PlayerId::One));
     let counterspell = card(10_001, cards::COUNTERSPELL, PlayerId::One);
@@ -186,6 +232,55 @@ fn channel_does_not_pay_a_coloured_symbol() {
         "two blue is not something life can buy"
     );
     assert_eq!(game.players[0].life, 20, "and nothing was paid trying");
+}
+
+#[test]
+fn channel_pays_a_true_colorless_symbol_when_the_spell_is_applied() {
+    let definition_id = CardDefinitionId::new(59_900);
+    let mut definition = CardDefinition::new(
+        definition_id,
+        "True colorless Channel test",
+        CardSet::Magic2014,
+        false,
+        CardBehavior::Unsupported,
+    );
+    definition.rules = CardRules::new_artifact(mana_cost!("{C}"));
+    synchronize_single_part_definition(&mut definition);
+
+    let mut game = ready_game();
+    let mut definitions = game
+        .catalog
+        .definitions()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    definitions.push(definition);
+    game.catalog = CardCatalog::new(definitions).expect("the test definition is valid");
+    resolve_channel(&mut game);
+    game.players[PlayerId::One.index()].life = 3;
+    let spell = card(10_002, definition_id, PlayerId::One);
+    let spell_id = spell.id;
+    game.players[PlayerId::One.index()].hand.push(spell);
+
+    let action = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .find(|action| matches!(action, Action::CastSpell { card, .. } if *card == spell_id))
+        .expect("Channel advertises the spell because its mana can pay {C}");
+    game.apply(PlayerId::One, action)
+        .expect("the advertised true-colorless Channel payment applies");
+
+    assert_eq!(game.players[PlayerId::One.index()].life, 2);
+    assert_eq!(
+        game.players[PlayerId::One.index()].mana_pool,
+        ManaPool::default(),
+        "the one life became one {{C}} and that mana was spent",
+    );
+    assert!(
+        game.players[PlayerId::One.index()].mana.is_empty(),
+        "the attributed Channel mana was consumed",
+    );
+    assert_eq!(game.stack.len(), 1, "the paid-for spell is on the stack");
 }
 
 #[test]
@@ -483,10 +578,15 @@ fn fork_can_keep_an_original_target_that_has_become_illegal() {
 fn structured_target_predicates_are_rechecked_when_the_spell_resolves() {
     let mut game = ready_game();
     game.catalog = crate::card::catalog().unwrap();
-    let mut factory = creature(10_000, cards::MISHRA_S_FACTORY, PlayerId::Two);
-    factory.animation = Some(&abilities::MISHRAS_FACTORY_ANIMATION);
+    let factory = creature(10_000, cards::MISHRA_S_FACTORY, PlayerId::Two);
     let factory_id = factory.card.id;
     game.battlefield.push(factory);
+    let animation_timestamp = attach_constant_resolved_characteristics(
+        &mut game,
+        factory_id,
+        &TEST_MISHRAS_FACTORY_CHARACTERISTICS,
+        ContinuousEffectExpiration::EndOfTurn,
+    );
     let mut turn = spell(77, crate::card::cards::TURN_BURN, PlayerId::One, 0);
     turn.signature = Some(CastSignature::from_validated_choices(
         SpellForm::Part(CardPartId::PRIMARY),
@@ -497,7 +597,9 @@ fn structured_target_predicates_are_rechecked_when_the_spell_resolves() {
     ));
 
     assert!(!game.spell_fizzles(&turn));
-    game.battlefield[0].animation = None;
+    game.battlefield[0]
+        .resolved_continuous_effects
+        .retain(|effect| effect.timestamp != animation_timestamp);
     assert!(game.spell_fizzles(&turn));
 }
 
@@ -562,7 +664,7 @@ pub(super) fn game_with_test_fused_split(
 
 #[test]
 fn combined_spell_trigger_and_target_characteristics_union_parts() {
-    let definition_id = CardDefinitionId(10_066);
+    let definition_id = CardDefinitionId::new(10_066);
     let instant = CardRules::new_instant(ManaCost::default()).with_subtypes(&["Arcane"]);
     let sorcery = CardRules::new_sorcery(ManaCost::default()).with_subtypes(&["Lesson"]);
     let (mut game, combined, parts) = game_with_test_fused_split(definition_id, &instant, &sorcery);
@@ -587,10 +689,11 @@ fn combined_spell_trigger_and_target_characteristics_union_parts() {
         ObjectPredicateDef::Subtype("Arcane"),
         ObjectPredicateDef::Subtype("Lesson"),
     ] {
-        assert!(game.trigger_event_matches(
+        assert!(game.trigger_event_matches_for_controller(
             TriggerEventDef::SpellCast(predicate),
             &event,
             GameObjectId(99_999),
+            None,
         ));
     }
 
@@ -618,7 +721,7 @@ fn combined_spell_trigger_and_target_characteristics_union_parts() {
 
 #[test]
 fn split_card_target_characteristics_union_parts_outside_the_stack() {
-    let definition_id = CardDefinitionId(10_067);
+    let definition_id = CardDefinitionId::new(10_067);
     let instant = CardRules::new_instant(ManaCost::default()).with_subtypes(&["Arcane"]);
     let sorcery = CardRules::new_sorcery(ManaCost::default()).with_subtypes(&["Lesson"]);
     let (mut game, _, _) = game_with_test_fused_split(definition_id, &instant, &sorcery);
@@ -651,10 +754,15 @@ fn split_card_target_characteristics_union_parts_outside_the_stack() {
 fn animated_factory_keeps_types_and_last_known_stats_under_blood_moon() {
     let mut game = ready_game();
     game.catalog = crate::card::catalog().unwrap();
-    let mut factory = creature(10_000, cards::MISHRA_S_FACTORY, PlayerId::One);
-    factory.animation = Some(&abilities::MISHRAS_FACTORY_ANIMATION);
+    let factory = creature(10_000, cards::MISHRA_S_FACTORY, PlayerId::One);
     let blood_moon = creature(10_001, cards::BLOOD_MOON, PlayerId::Two);
     game.battlefield = vec![factory, blood_moon];
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_000),
+        &TEST_MISHRAS_FACTORY_CHARACTERISTICS,
+        ContinuousEffectExpiration::EndOfTurn,
+    );
 
     let snapshot = game.battlefield_exit_snapshot(&game.battlefield[0]);
     assert_eq!(snapshot.last_known.power, Some(2));
@@ -674,16 +782,18 @@ fn animated_factory_keeps_types_and_last_known_stats_under_blood_moon() {
         object: snapshot.object,
         from: ZoneKind::Battlefield,
         to: ZoneKind::Graveyard,
+        damage_sources: Vec::new(),
     };
     for card_type in [CardType::Land, CardType::Creature, CardType::Artifact] {
-        assert!(game.trigger_event_matches(
-            TriggerEventDef::ZoneChanged {
-                object: ObjectPredicateDef::HasType(card_type),
-                from: Some(ZoneKind::Battlefield),
-                to: Some(ZoneKind::Graveyard),
-            },
+        assert!(game.trigger_event_matches_for_controller(
+            TriggerEventDef::zone_changed(
+                ObjectPredicateDef::HasType(card_type),
+                Some(ZoneKind::Battlefield),
+                Some(ZoneKind::Graveyard)
+            ),
             &event,
             GameObjectId(99_999),
+            None,
         ));
     }
 }
@@ -698,6 +808,9 @@ fn black_lotus_sacrifices_for_three_red_mana() {
         source: lotus_id,
         ability: mana_ability_for(&game, lotus_id, ManaColor::Red),
         color: ManaColor::Red,
+        counters_removed: None,
+        cost_object: None,
+        combination: None,
     };
     assert!(game.legal_actions(PlayerId::One).contains(&action));
 

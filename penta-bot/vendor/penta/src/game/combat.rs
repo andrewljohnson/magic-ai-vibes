@@ -1,97 +1,30 @@
 use super::{
-    Action, AppliedEffectDef, AttackDefender, CardBehavior, CardRules, CardType,
-    CombatDamageAssignment, CombatDamageStage, CommittedTriggerEvent, ControlFlow, CounterKind,
-    EffectDef, Game, GameEvent, GameObjectId, KeywordAbility, Permanent, PlayerId, Target,
+    Action, AppliedRuleDef, AttackDefender, CardType, CombatDamageAssignment, CombatDamageStage,
+    CommittedTriggerEvent, ControlFlow, CounterKind, Game, GameEvent, GameObjectId, KeywordAbility,
+    ManaCost, Permanent, PlayerId, Target,
 };
 
+mod assignment;
+mod attacking;
+mod blocking;
 mod damage_delivery;
 
+pub(super) fn add_declaration_cost(mut total: ManaCost, cost: ManaCost) -> ManaCost {
+    total.generic = total.generic.saturating_add(cost.generic);
+    total.white = total.white.saturating_add(cost.white);
+    total.blue = total.blue.saturating_add(cost.blue);
+    total.black = total.black.saturating_add(cost.black);
+    total.red = total.red.saturating_add(cost.red);
+    total.green = total.green.saturating_add(cost.green);
+    total.colorless = total.colorless.saturating_add(cost.colorless);
+    for (total, cost) in total.hybrid.iter_mut().zip(cost.hybrid) {
+        *total = total.saturating_add(cost);
+    }
+    debug_assert!(!cost.variable_x && cost.x_multiplier == 0);
+    total
+}
+
 impl Game {
-    pub(super) fn attacker_actions(&self, player: PlayerId, moat_active: bool) -> Vec<Action> {
-        let mut defenders = vec![AttackDefender::Player(player.opponent())];
-        defenders.extend(
-            self.battlefield
-                .iter()
-                .filter(|permanent| {
-                    permanent.controller == player.opponent()
-                        && self
-                            .permanent_types(permanent)
-                            .is_some_and(|types| types.contains(CardType::Planeswalker))
-                })
-                .map(|permanent| AttackDefender::Planeswalker(permanent.card.id)),
-        );
-        self.battlefield
-            .iter()
-            .filter(|permanent| {
-                permanent.controller == player
-                    && !permanent.tapped
-                    && !permanent.attacking
-                    && permanent.detained_until_turn_of.is_none()
-                    && self.can_attack_with_moat(permanent, moat_active)
-            })
-            .flat_map(|permanent| {
-                defenders
-                    .iter()
-                    .copied()
-                    .map(|defender| Action::DeclareAttacker {
-                        attacker: permanent.card.id,
-                        defender,
-                    })
-            })
-            .collect()
-    }
-
-    #[cfg(test)]
-    pub(super) fn can_attack(&self, permanent: &Permanent) -> bool {
-        let moat_active = self.count_behavior(CardBehavior::Moat) > 0;
-        self.can_attack_with_moat(permanent, moat_active)
-    }
-
-    pub(super) fn can_attack_with_moat(&self, permanent: &Permanent, moat_active: bool) -> bool {
-        if self.base_stats(permanent).is_none() {
-            return false;
-        }
-        let flying = moat_active && self.has_flying(permanent);
-        self.can_attack_creature(permanent, moat_active, flying)
-    }
-
-    pub(super) fn can_attack_creature(
-        &self,
-        permanent: &Permanent,
-        moat_active: bool,
-        flying: bool,
-    ) -> bool {
-        if self.permanent_has_executable_keyword(permanent, KeywordAbility::Defender) {
-            return false;
-        }
-        if moat_active && !flying {
-            return false;
-        }
-        if !self.attack_restrictions_met(permanent) || self.cannot_attack(permanent) {
-            return false;
-        }
-        self.permanent_has_executable_keyword(permanent, KeywordAbility::Haste)
-            || self.turns_started[permanent.controller.index()] > permanent.entered_controller_turn
-    }
-
-    /// Whether every "can't attack unless ..." clause this creature prints is
-    /// currently satisfied. The query carries its own controller relation, so
-    /// "defending player" is read as the attacker's opponent -- which is the
-    /// only defending player there is in a two-player game.
-    fn attack_restrictions_met(&self, permanent: &Permanent) -> bool {
-        self.effective_rules(permanent)
-            .into_iter()
-            .flat_map(CardRules::ability_clauses)
-            .filter(|ability| ability.is_executable())
-            .filter_map(|ability| match ability.declarative_effect()? {
-                EffectDef::CannotAttackUnless(query) => Some(query),
-                _ => None,
-            })
-            .all(|query| {
-                self.any_battlefield_object_matches(query, permanent.card.id, permanent.controller)
-            })
-    }
-
     pub(super) fn declare_attacker(&mut self, attacker: GameObjectId, defender: AttackDefender) {
         let vigilance = self
             .battlefield
@@ -100,6 +33,7 @@ impl Game {
             .is_some_and(|permanent| {
                 self.permanent_has_executable_keyword(permanent, KeywordAbility::Vigilance)
             });
+        let turns_started = self.turns_started;
         if let Some(permanent) = self
             .battlefield
             .iter_mut()
@@ -109,13 +43,21 @@ impl Game {
             permanent.attack_defender = Some(defender);
             permanent.attacked_this_turn = true;
             permanent.attacks_this_turn = permanent.attacks_this_turn.saturating_add(1);
-        }
-        if !vigilance {
-            let _ = self.tap_permanent(attacker);
+            permanent.last_attacked_turn = Some((
+                permanent.controller,
+                turns_started[permanent.controller.index()],
+            ));
+            if !vigilance {
+                // Tapping is part of the single CR 508.1 declaration. Commit
+                // the state now for later attacker legality, but defer its
+                // trigger event until every attacker has been declared.
+                permanent.tapped = true;
+            }
         }
     }
 
     pub(super) fn finish_declaring_attackers(&mut self) {
+        self.pay_attack_declaration_cost(self.active_player);
         self.attackers_declared = true;
         self.priority = self.active_player;
         self.consecutive_passes = 0;
@@ -134,110 +76,116 @@ impl Game {
         });
         // CR 508.2: the whole declaration happens at once, so every attacker
         // is already attacking by the time any of these triggers is captured.
-        let events = attackers
+        // Declaration size and attack number are facts of this event, not
+        // mutable conditions to recheck while placing the trigger.
+        let declaration_size = u8::try_from(attackers.len()).unwrap_or(u8::MAX);
+        let listeners = self.battlefield_trigger_listeners();
+        let mut events = attackers
             .iter()
             .filter_map(|attacker| {
                 self.battlefield
                     .iter()
-                    .find(|permanent| permanent.card.id == *attacker)
-                    .map(|permanent| CommittedTriggerEvent::Attacks {
+                    .find(|permanent| permanent.card.id == *attacker && permanent.tapped)
+                    .map(|permanent| CommittedTriggerEvent::Tapped {
                         object: self.trigger_event_object(permanent),
+                        for_mana: false,
                     })
             })
             .collect::<Vec<_>>();
-        // How many creatures attacked is decided by the declaration as a
-        // whole, so it is known here and nowhere later. Every attacker gets
-        // the same total; what varies is what each watching ability asks of
-        // it.
-        let total = u8::try_from(attackers.len()).unwrap_or(u8::MAX);
-        let group = attackers
-            .iter()
-            .filter_map(|attacker| {
-                self.battlefield
-                    .iter()
-                    .find(|permanent| permanent.card.id == *attacker)
-                    .map(|permanent| CommittedTriggerEvent::AttacksInGroup {
+        events.extend(attackers.iter().filter_map(|attacker| {
+            self.battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == *attacker)
+                .map(|permanent| {
+                    let defending_player = match Self::combat_defender(permanent) {
+                        AttackDefender::Player(player) => player,
+                        AttackDefender::Planeswalker(walker) => self
+                            .battlefield
+                            .iter()
+                            .find(|candidate| candidate.card.id == walker)
+                            .map_or(permanent.controller.opponent(), |walker| walker.controller),
+                    };
+                    CommittedTriggerEvent::Attacks {
                         object: self.trigger_event_object(permanent),
-                        total,
-                    })
-            })
-            .collect::<Vec<_>>();
-        for event in &group {
-            self.capture_battlefield_triggers(event);
-        }
-        for event in &events {
-            self.capture_battlefield_triggers(event);
-        }
-    }
-
-    /// Whether a static effect on `blocker` narrows what it may block, and
-    /// this attacker is outside that. The other direction -- an attacker
-    /// forbidding a blocker -- is `blocking_is_prevented`.
-    pub(super) fn blocker_may_only_block(&self, blocker: &Permanent, attacker: &Permanent) -> bool {
-        let characteristics = self.trigger_event_object(attacker);
-        let mut restricted = false;
-        let _ = self.visit_static_applied_effects(blocker, |applied| {
-            if let AppliedEffectDef::CanBlockOnly(predicate) = applied.effect
-                && !self.trigger_object_matches(predicate, &characteristics, blocker.card.id, false)
-            {
-                restricted = true;
-                return ControlFlow::Break(());
-            }
-            ControlFlow::Continue(())
+                        declaration_size,
+                        attack_number: permanent.attacks_this_turn,
+                        defending_player,
+                    }
+                })
+        }));
+        // And the declaration itself, once: "whenever you attack" is one
+        // trigger however many creatures were declared (CR 508.1).
+        events.push(CommittedTriggerEvent::AttackersDeclared {
+            attackers: attackers
+                .iter()
+                .filter_map(|attacker| {
+                    self.battlefield
+                        .iter()
+                        .find(|permanent| permanent.card.id == *attacker)
+                        .map(|permanent| self.trigger_event_object(permanent))
+                })
+                .collect(),
         });
-        restricted
+        self.capture_battlefield_trigger_batch_from_snapshot(&listeners, &events);
     }
 
-    /// Whether a static effect on `attacker` forbids `blocker` from blocking
-    /// it, as Juggernaut forbids Walls.
-    pub(super) fn blocking_is_prevented(&self, attacker: &Permanent, blocker: &Permanent) -> bool {
+    /// Whether a static or resolved rule on `attacker` requires `blocker` to
+    /// block it, as Lure requires every creature that can. Read from the
+    /// attacker for the same reason the prohibition above is: the printed
+    /// text sits on the creature being blocked, not on the ones doing it.
+    fn must_be_blocked_by(&self, attacker: &Permanent, blocker: &Permanent) -> bool {
         let characteristics = self.trigger_event_object(blocker);
-        let mut prevented = false;
-        let result = self.visit_static_applied_effects(attacker, |applied| {
-            if let AppliedEffectDef::CannotBeBlockedBy(predicate) = applied.effect
+        let mut required = false;
+        let _ = self.visit_applied_rules(attacker, |applied| {
+            if let AppliedRuleDef::MustBeBlockedBy(predicate) = applied.rule
                 && self.trigger_object_matches(predicate, &characteristics, applied.source, false)
             {
-                prevented = true;
+                required = true;
                 return ControlFlow::Break(());
             }
             ControlFlow::Continue(())
         });
-        debug_assert!(result.is_continue() || prevented);
-        prevented
+        required
     }
 
-    /// Whether a continuous effect currently forbids this permanent from
-    /// blocking. Asked afresh, so a turn-scoped prohibition stops applying
-    /// when it expires and a static one when its source leaves.
-    /// Whether a continuous effect currently stops anything blocking this
-    /// permanent. The turn-scoped form is a flag beside it.
-    fn cannot_be_blocked(&self, permanent: &Permanent) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            if matches!(applied.effect, AppliedEffectDef::CannotBeBlocked) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
+    /// Whether this creature may still be declared as a blocker.
+    ///
+    /// Every creature may block one attacker; a rule can raise that. The
+    /// allowance counts attackers rather than declarations, which is what
+    /// makes a band cost one blocker no matter how many creatures are in it.
+    fn has_blocks_left(&self, permanent: &Permanent) -> bool {
+        let mut allowance = 1_usize;
+        let _ = self.visit_applied_rules(permanent, |applied| {
+            if let AppliedRuleDef::MayBlockAdditionalCreatures(extra) = applied.rule {
+                allowance = if extra == u8::MAX {
+                    usize::MAX
+                } else {
+                    allowance.saturating_add(usize::from(extra))
+                };
             }
-        })
-        .is_break()
-    }
-
-    /// Whether a continuous effect from anywhere forbids this creature from
-    /// attacking. The printed "can't attack unless ..." clause is a separate
-    /// question a creature asks about itself.
-    pub(super) fn cannot_attack(&self, permanent: &Permanent) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            if matches!(applied.effect, AppliedEffectDef::CannotAttack) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        })
-        .is_break()
+            ControlFlow::Continue(())
+        });
+        // Spent per band rather than per attacker: a band is one block
+        // however many creatures are in it. A lone attacker counts as its own
+        // band, so it is named by its own id.
+        let mut spent: Vec<_> = permanent
+            .blocking
+            .iter()
+            .map(|attacker| {
+                self.battlefield
+                    .iter()
+                    .find(|other| other.card.id == *attacker)
+                    .and_then(|other| other.attacking_band)
+                    .map_or((None, Some(*attacker)), |band| (Some(band), None))
+            })
+            .collect();
+        spent.sort_unstable();
+        spent.dedup();
+        spent.len() < allowance
     }
 
     pub(super) fn cannot_block(&self, permanent: &Permanent) -> bool {
-        if permanent.cannot_block_this_turn || permanent.detained_until_turn_of.is_some() {
+        if permanent.detained_until_turn_of.is_some() {
             return true;
         }
         // Unleash: the counter is what stops it blocking, so a creature that
@@ -248,42 +196,191 @@ impl Game {
         {
             return true;
         }
-        self.visit_static_applied_effects(permanent, |applied| {
-            if matches!(applied.effect, AppliedEffectDef::CannotBlock) {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        })
-        .is_break()
+        false
     }
 
+    /// The blocks this player may declare, after combat requirements have
+    /// taken the alternatives away.
+    ///
+    /// CR 509.1c asks for the maximum possible number of requirements to be
+    /// obeyed without violating a restriction. A creature that is able to
+    /// block a must-be-blocked attacker therefore has no other legal
+    /// assignment: every block it makes elsewhere obeys one requirement
+    /// fewer. Two such attackers leave it a choice between them, because it
+    /// can only block one either way.
     pub(super) fn blocker_actions(&self, player: PlayerId) -> Vec<Action> {
+        let available = self.available_blocker_actions(player);
+        let required: Vec<GameObjectId> = available
+            .iter()
+            .filter_map(|action| self.required_block(action).map(|(blocker, _)| blocker))
+            .collect();
+        if required.is_empty() {
+            return available;
+        }
+        available
+            .into_iter()
+            .filter(|action| match action {
+                Action::DeclareBlocker { blocker, .. } => {
+                    !required.contains(blocker) || self.required_block(action).is_some()
+                }
+                _ => true,
+            })
+            .collect()
+    }
+
+    /// The blocker and attacker of a declaration a requirement compels.
+    fn required_block(&self, action: &Action) -> Option<(GameObjectId, GameObjectId)> {
+        let Action::DeclareBlocker { blocker, attacker } = action else {
+            return None;
+        };
+        let find = |id: GameObjectId| {
+            self.battlefield
+                .iter()
+                .find(|permanent| permanent.card.id == id)
+        };
+        let (blocker_permanent, attacker_permanent) = (find(*blocker)?, find(*attacker)?);
+        let required = self.must_be_blocked_by(attacker_permanent, blocker_permanent)
+            || self.has_applied_rule(
+                blocker_permanent,
+                AppliedRuleDef::MustBlockEachAttackerIfAble,
+            );
+        (required
+            && self.prospective_block_adds_no_cost(
+                blocker_permanent.controller,
+                *blocker,
+                *attacker,
+            ))
+        .then_some((*blocker, *attacker))
+    }
+
+    /// Whether a requirement is still unmet, which is what stops the
+    /// defending player from finishing the declaration.
+    pub(super) fn block_requirement_outstanding(&self, available: &[Action]) -> bool {
+        available
+            .iter()
+            .any(|action| self.required_block(action).is_some())
+    }
+
+    /// How many creatures it takes to block this one. One ordinarily; two
+    /// for menace; whatever a printed "except by N or more" says. Several at
+    /// once take the largest, which is the only reading under which each of
+    /// them is still true.
+    pub(super) fn minimum_blockers(&self, attacker: &Permanent) -> usize {
+        let mut minimum = if self.permanent_has_executable_keyword(attacker, KeywordAbility::Menace)
+        {
+            2
+        } else {
+            1
+        };
+        let _ = self.visit_applied_rules(attacker, |applied| {
+            if let AppliedRuleDef::CannotBeBlockedExceptByAtLeast(required) = applied.rule {
+                minimum = minimum.max(usize::from(required));
+            }
+            ControlFlow::Continue(())
+        });
+        minimum
+    }
+
+    /// Whether some attacker that takes more than one blocker is blocked by
+    /// too few.
+    ///
+    /// CR 702.110a is a constraint on the finished declaration, not on any
+    /// single block: the first blocker is perfectly legal and only becomes
+    /// illegal by being the last. So it is checked where the declaration
+    /// ends rather than where each block is offered. Blocked by nobody is
+    /// not blocked by too few.
+    pub(super) fn menace_is_unsatisfied(&self, player: PlayerId) -> bool {
+        self.battlefield
+            .iter()
+            .filter(|permanent| permanent.attacking)
+            .any(|attacker| {
+                let minimum = self.minimum_blockers(attacker);
+                let blockers = self
+                    .battlefield
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.controller == player && candidate.is_blocking(attacker.card.id)
+                    })
+                    .count();
+                blockers > 0 && blockers < minimum
+            })
+    }
+
+    /// Whether this blocker could legally be declared against this one
+    /// attacker, ignoring how many blocks it has left. A band asks this of
+    /// every one of its members, because blocking a band blocks all of them.
+    fn blocker_may_block(&self, blocker_permanent: &Permanent, attacker: GameObjectId) -> bool {
+        let Some(attacker_permanent) = self
+            .battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == attacker)
+        else {
+            return false;
+        };
+        if blocker_permanent.is_blocking(attacker) {
+            // A second declaration against the same attacker would spend one
+            // of the blocker's allowance on a block it already has.
+            return false;
+        }
+        if self.landwalk_beats(attacker_permanent, attacker_permanent.controller.opponent())
+            || !self.block_pair_is_allowed(blocker_permanent, attacker_permanent)
+            || self.combat_is_protected(blocker_permanent, attacker_permanent)
+        {
+            return false;
+        }
+        if self.has_flying(attacker_permanent)
+            && !self.has_flying(blocker_permanent)
+            && !self.permanent_has_executable_keyword(blocker_permanent, KeywordAbility::Reach)
+        {
+            return false;
+        }
+        if self.permanent_has_executable_keyword(attacker_permanent, KeywordAbility::Intimidate)
+            && !self.is_artifact_permanent(blocker_permanent)
+        {
+            let shares_color = self
+                .permanent_colors(attacker_permanent)
+                .into_iter()
+                .zip(self.permanent_colors(blocker_permanent))
+                .any(|(attacker, blocker)| attacker && blocker);
+            if !shares_color {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The attacking bands, each named by its lowest-numbered member. A lone
+    /// attacker is a group of one, so this is every attacker when nobody has
+    /// banded.
+    fn attacking_groups(&self) -> Vec<(GameObjectId, Vec<GameObjectId>)> {
+        self.battlefield
+            .iter()
+            .filter(|permanent| permanent.attacking)
+            .filter_map(|permanent| {
+                let group = self.band_group(permanent.card.id);
+                let representative = group.iter().copied().min()?;
+                (representative == permanent.card.id).then_some((representative, group))
+            })
+            .collect()
+    }
+
+    fn available_blocker_actions(&self, player: PlayerId) -> Vec<Action> {
         let blockers: Vec<_> = self
             .battlefield
             .iter()
             .filter(|permanent| {
                 permanent.controller == player
                     && !permanent.tapped
-                    && permanent.blocking.is_none()
+                    && self.has_blocks_left(permanent)
                     && self.power(permanent).is_some()
                     && !self.cannot_block(permanent)
             })
             .map(|permanent| permanent.card.id)
             .collect();
-        let attackers: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| permanent.attacking)
-            .map(|permanent| {
-                (
-                    permanent.card.id,
-                    self.has_flying(permanent),
-                    self.landwalk_beats(permanent, permanent.controller.opponent()),
-                    self.power(permanent).unwrap_or(0),
-                )
-            })
-            .collect();
+        // One offer per band rather than per creature: blocking any member
+        // blocks the whole band, so naming a different member would be the
+        // same declaration.
+        let groups = self.attacking_groups();
         blockers
             .into_iter()
             .flat_map(|blocker| {
@@ -292,80 +389,71 @@ impl Game {
                     .iter()
                     .find(|permanent| permanent.card.id == blocker)
                     .expect("blocker is on the battlefield");
-                let blocker_can_block_flying = self.has_flying(blocker_permanent)
-                    || self
-                        .permanent_has_executable_keyword(blocker_permanent, KeywordAbility::Reach);
-                let ironclaw =
-                    self.effective_behavior(blocker_permanent) == Some(CardBehavior::IronclawOrcs);
-                attackers
-                    .iter()
-                    .filter_map(move |(attacker, flying, unblockable, power)| {
-                        let attacker_permanent = self
-                            .battlefield
-                            .iter()
-                            .find(|permanent| permanent.card.id == *attacker)
-                            .expect("attacker is on the battlefield");
-                        let intimidate = self.permanent_has_executable_keyword(
-                            attacker_permanent,
-                            KeywordAbility::Intimidate,
-                        );
-                        let shares_color = self
-                            .permanent_colors(attacker_permanent)
-                            .into_iter()
-                            .zip(self.permanent_colors(blocker_permanent))
-                            .any(|(attacker, blocker)| attacker && blocker);
-                        let can_block = !(*unblockable
-                            || attacker_permanent.unblockable_this_turn
-                            || self.cannot_be_blocked(attacker_permanent)
-                            || self.blocking_is_prevented(attacker_permanent, blocker_permanent)
-                            || self.blocker_may_only_block(blocker_permanent, attacker_permanent)
-                            || *flying && !blocker_can_block_flying
-                            || intimidate
-                                && !self.is_artifact_permanent(blocker_permanent)
-                                && !shares_color
-                            || ironclaw && *power >= 2
-                            || self.combat_is_protected(blocker_permanent, attacker_permanent));
-                        can_block.then_some(Action::DeclareBlocker {
-                            blocker,
-                            attacker: *attacker,
-                        })
+                groups.iter().filter_map(move |(attacker, group)| {
+                    (group
+                        .iter()
+                        .all(|member| self.blocker_may_block(blocker_permanent, *member))
+                        && self.prospective_block_is_affordable(
+                            player,
+                            blocker_permanent,
+                            *attacker,
+                        ))
+                    .then_some(Action::DeclareBlocker {
+                        blocker,
+                        attacker: *attacker,
                     })
+                })
             })
             .collect()
     }
 
     pub(super) fn declare_blocker(&mut self, blocker: GameObjectId, attacker: GameObjectId) {
+        // A band is blocked as a group: one declaration against any member
+        // puts the blocker in front of every creature in the band.
+        let band = self.band_group(attacker);
         if let Some(permanent) = self
             .battlefield
             .iter_mut()
             .find(|permanent| permanent.card.id == blocker)
         {
-            permanent.blocking = Some(attacker);
+            for member in &band {
+                if !permanent.blocking.contains(member) {
+                    permanent.blocking.push(*member);
+                }
+            }
         }
-        if !self.combat_blocked_attackers.contains(&attacker) {
-            self.combat_blocked_attackers.push(attacker);
+        for member in band {
+            if !self.combat_blocked_attackers.contains(&member) {
+                self.combat_blocked_attackers.push(member);
+            }
         }
     }
 
     pub(super) fn finish_declaring_blockers(&mut self) {
+        self.pay_block_declaration_cost(self.active_player.opponent());
         self.blockers_declared = true;
         self.priority = self.active_player;
         self.consecutive_passes = 0;
         let blocked = self
             .battlefield
             .iter()
-            .filter_map(|permanent| permanent.blocking)
+            .flat_map(|permanent| permanent.blocking.iter().copied())
             .collect::<Vec<_>>();
         for permanent in &mut self.battlefield {
             permanent.blocked = blocked.contains(&permanent.card.id);
+            // The declaration is the moment blocker status is established.
+            // After this, attackers can leave and empty the list above; the
+            // creatures that blocked them are still blocking creatures.
+            permanent.blocking_this_combat |= permanent.is_blocking_anything();
         }
         let assignments = self
             .battlefield
             .iter()
-            .filter_map(|permanent| {
+            .flat_map(|permanent| {
                 permanent
                     .blocking
-                    .map(|attacker| (permanent.card.id, attacker))
+                    .iter()
+                    .map(|attacker| (permanent.card.id, *attacker))
             })
             .collect::<Vec<_>>();
         if !assignments.is_empty() {
@@ -374,40 +462,70 @@ impl Game {
                 assignments,
             });
         }
-        self.capture_becomes_blocked_triggers(&blocked);
-        self.capture_blocking_relationship_triggers();
-        self.capture_unblocked_attacker_triggers(&blocked);
+        // Blocking is one declaration. Freeze its listeners and every
+        // object-local event before a triggered-mana ability can mutate the
+        // battlefield while the declaration is being published.
+        let listeners = self.battlefield_trigger_listeners();
+        let mut trigger_events = self.becomes_blocked_trigger_events(&blocked);
+        trigger_events.extend(self.blocking_relationship_trigger_events());
+        trigger_events.extend(self.unblocked_attacker_trigger_events(&blocked));
+        self.capture_battlefield_trigger_batch_from_snapshot(&listeners, &trigger_events);
     }
 
     /// CR 509.1h leaves an attacker nobody blocked unblocked, which is what
     /// these clauses read. It can only be answered once blocking is done.
-    fn capture_unblocked_attacker_triggers(&mut self, blocked: &[GameObjectId]) {
+    fn unblocked_attacker_trigger_events(
+        &self,
+        blocked: &[GameObjectId],
+    ) -> Vec<CommittedTriggerEvent> {
         let unblocked = self
             .battlefield
             .iter()
             .filter(|permanent| permanent.attacking && !blocked.contains(&permanent.card.id))
-            .map(|permanent| self.trigger_event_object(permanent))
             .collect::<Vec<_>>();
-        for object in unblocked {
-            self.capture_battlefield_triggers(&CommittedTriggerEvent::AttacksAndIsNotBlocked {
-                object,
-            });
+        let mut events = unblocked
+            .iter()
+            .map(|permanent| CommittedTriggerEvent::AttacksAndIsNotBlocked {
+                object: self.trigger_event_object(permanent),
+            })
+            .collect::<Vec<_>>();
+        // And the same set again as one batch per player it was aimed at,
+        // for "whenever one or more creatures attack you and aren't
+        // blocked". Attackers pointed at a planeswalker are left out: they
+        // are not attacking the player who controls it.
+        for defending_player in [PlayerId::One, PlayerId::Two] {
+            let attackers = unblocked
+                .iter()
+                .filter(|permanent| {
+                    Self::combat_defender(permanent) == AttackDefender::Player(defending_player)
+                })
+                .map(|permanent| self.trigger_event_object(permanent))
+                .collect::<Vec<_>>();
+            if !attackers.is_empty() {
+                events.push(CommittedTriggerEvent::UnblockedAttackersDeclared {
+                    attackers,
+                    defending_player,
+                });
+            }
         }
+        events
     }
 
     /// One event per ordered pair of a blocker and what it blocks, so a
     /// clause printed on either creature reads the other as the triggering
     /// object. "Blocks or becomes blocked by" is one clause, not two.
-    fn capture_blocking_relationship_triggers(&mut self) {
+    fn blocking_relationship_trigger_events(&self) -> Vec<CommittedTriggerEvent> {
         let pairs = self
             .battlefield
             .iter()
-            .filter_map(|permanent| {
+            .flat_map(|permanent| {
                 permanent
                     .blocking
-                    .map(|attacker| (permanent.card.id, attacker))
+                    .iter()
+                    .map(|attacker| (permanent.card.id, *attacker))
             })
             .collect::<Vec<_>>();
+        let mut events = Vec::with_capacity(pairs.len().saturating_mul(2));
         for (blocker, attacker) in pairs {
             let Some((blocker, attacker)) = self
                 .battlefield
@@ -424,37 +542,36 @@ impl Game {
                 continue;
             };
             for (creature, other) in [(blocker.clone(), attacker.clone()), (attacker, blocker)] {
-                self.capture_battlefield_triggers(&CommittedTriggerEvent::BlocksOrBecomesBlocked {
-                    creature,
-                    other,
-                });
+                events.push(CommittedTriggerEvent::BlocksOrBecomesBlocked { creature, other });
             }
         }
+        events
     }
 
     /// CR 509.1h. Each attacker becomes blocked once, however many creatures
     /// blocked it, so the event fires per attacker and carries the count the
     /// rampage-style clauses are written against.
-    fn capture_becomes_blocked_triggers(&mut self, blocked: &[GameObjectId]) {
+    fn becomes_blocked_trigger_events(
+        &self,
+        blocked: &[GameObjectId],
+    ) -> Vec<CommittedTriggerEvent> {
         let mut attackers = blocked.to_vec();
         attackers.sort_unstable();
         attackers.dedup();
-        for attacker in attackers {
-            let blockers = blocked.iter().filter(|id| **id == attacker).count();
-            let Some(object) = self
-                .battlefield
-                .iter()
-                .find(|permanent| permanent.card.id == attacker)
-                .map(|permanent| self.trigger_event_object(permanent))
-            else {
-                continue;
-            };
-            self.capture_battlefield_triggers(&CommittedTriggerEvent::BecomesBlocked {
-                object,
-                blockers_beyond_first: u16::try_from(blockers.saturating_sub(1))
-                    .unwrap_or(u16::MAX),
-            });
-        }
+        attackers
+            .into_iter()
+            .filter_map(|attacker| {
+                let blockers = blocked.iter().filter(|id| **id == attacker).count();
+                self.battlefield
+                    .iter()
+                    .find(|permanent| permanent.card.id == attacker)
+                    .map(|permanent| CommittedTriggerEvent::BecomesBlocked {
+                        object: self.trigger_event_object(permanent),
+                        blockers_beyond_first: u16::try_from(blockers.saturating_sub(1))
+                            .unwrap_or(u16::MAX),
+                    })
+            })
+            .collect()
     }
 
     pub(super) fn start_combat_damage(&mut self) {
@@ -465,18 +582,22 @@ impl Game {
         let newly_blocked = self
             .battlefield
             .iter()
-            .filter_map(|permanent| permanent.blocking)
+            .flat_map(|permanent| permanent.blocking.iter().copied())
             .collect::<Vec<_>>();
         for attacker in newly_blocked {
             if !self.combat_blocked_attackers.contains(&attacker) {
                 self.combat_blocked_attackers.push(attacker);
             }
         }
+        // Blocker status, from the same directly constructed relationships.
+        for permanent in &mut self.battlefield {
+            permanent.blocking_this_combat |= permanent.is_blocking_anything();
+        }
 
         let strike_wave_combatants = self
             .battlefield
             .iter()
-            .filter(|permanent| permanent.attacking || permanent.blocking.is_some())
+            .filter(|permanent| permanent.attacking || permanent.is_blocking_this_combat())
             .filter(|permanent| {
                 self.permanent_has_executable_keyword(permanent, KeywordAbility::FirstStrike)
                     || self
@@ -508,6 +629,9 @@ impl Game {
     }
 
     pub(super) fn deals_damage_in_current_combat_step(&self, permanent: &Permanent) -> bool {
+        if self.has_applied_rule(permanent, AppliedRuleDef::AssignsNoCombatDamage) {
+            return false;
+        }
         match &self.combat_damage_stage {
             CombatDamageStage::NotStarted | CombatDamageStage::Single => true,
             CombatDamageStage::FirstStrike {
@@ -527,135 +651,25 @@ impl Game {
         for permanent in &mut self.battlefield {
             permanent.combat_damage_assignment.clear();
         }
-        self.pending_combat_attackers = self
+        self.pending_combat_assignments = self
             .battlefield
             .iter()
-            .filter(|attacker| {
-                attacker.attacking && self.deals_damage_in_current_combat_step(attacker)
+            .filter(|permanent| {
+                // A creature blocking more than one attacker divides its
+                // damage too, so blockers join attackers in the queue.
+                (permanent.attacking || permanent.is_blocking_anything())
+                    && self.deals_damage_in_current_combat_step(permanent)
             })
             // Ask exactly when there is a real choice. One blocker and no
             // trample leaves a single legal distribution and no question; one
             // blocker plus trample is a genuine decision about how much to
             // spill past it.
-            .filter(|attacker| self.combat_assignment_actions(attacker.card.id).len() > 1)
-            .map(|attacker| attacker.card.id)
+            .filter(|permanent| self.combat_assignment_actions(permanent.card.id).len() > 1)
+            .map(|permanent| permanent.card.id)
             .collect();
-        if self.pending_combat_attackers.is_empty() {
+        if self.pending_combat_assignments.is_empty() {
             self.deal_combat_damage();
         }
-    }
-
-    /// Who assigns this attacker's combat damage. CR 702.22: banding moves
-    /// that choice to the defending player, so a creature with banding
-    /// blocking an attacker takes the decision away from the attacker's
-    /// controller. Any one banding blocker is enough.
-    pub(super) fn combat_damage_assigner(&self, attacker: GameObjectId) -> PlayerId {
-        self.battlefield
-            .iter()
-            .find(|permanent| {
-                permanent.blocking == Some(attacker)
-                    && self.permanent_has_executable_keyword(permanent, KeywordAbility::Banding)
-            })
-            .map_or(self.active_player, |blocker| blocker.controller)
-    }
-
-    pub(super) fn combat_assignment_actions(&self, attacker_id: GameObjectId) -> Vec<Action> {
-        let Some(attacker) = self
-            .battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == attacker_id)
-        else {
-            return Vec::new();
-        };
-        let power = self.power(attacker).unwrap_or(0).max(0).cast_unsigned();
-        let trample = self.has_trample(attacker);
-        let mut recipients: Vec<_> = self
-            .battlefield
-            .iter()
-            .filter(|permanent| permanent.blocking == Some(attacker_id))
-            .map(|permanent| Target::Permanent(permanent.card.id))
-            .collect();
-        recipients.sort_unstable();
-        let blocker_count = recipients.len();
-        let defender_index = trample
-            .then(|| self.combat_defender_target(attacker))
-            .flatten()
-            .map(|defender| {
-                let index = recipients.len();
-                recipients.push(defender);
-                index
-            });
-
-        damage_distributions(recipients.len(), power)
-            .into_iter()
-            .filter(|amounts| {
-                let blockers = || {
-                    recipients
-                        .iter()
-                        .take(blocker_count)
-                        .zip(amounts)
-                        .filter_map(|(target, amount)| match target {
-                            Target::Permanent(id) => Some((*id, *amount)),
-                            Target::Player(_) | Target::Card(_) | Target::Spell(_) => None,
-                        })
-                };
-                // CR 702.19b: trample only spills once every blocker has
-                // lethal damage assigned. Without defender damage, current
-                // CR 510.1c permits any division among the blockers.
-                let defender_damage = defender_index
-                    .and_then(|index| amounts.get(index))
-                    .copied()
-                    .unwrap_or(0);
-                if defender_damage == 0 {
-                    return true;
-                }
-                blockers().all(|(id, amount)| amount >= self.lethal_damage_from(id, attacker_id))
-            })
-            .map(|amounts| Action::AssignCombatDamage {
-                attacker: attacker_id,
-                assignments: recipients
-                    .iter()
-                    .copied()
-                    .zip(amounts)
-                    .map(|(recipient, amount)| CombatDamageAssignment { recipient, amount })
-                    .collect(),
-            })
-            .collect()
-    }
-
-    /// How an unassigned attacker spreads its damage: enough to kill each
-    /// blocker in turn, then the remainder over the top when it can trample
-    /// onto its defender, or onto the last blocker otherwise.
-    pub(super) fn default_damage_split(
-        &self,
-        attacker_id: GameObjectId,
-        blockers: &[GameObjectId],
-    ) -> Vec<(Target, u16)> {
-        let Some(attacker) = self
-            .battlefield
-            .iter()
-            .find(|permanent| permanent.card.id == attacker_id)
-        else {
-            return Vec::new();
-        };
-        let mut remaining = self.power(attacker).unwrap_or(0).max(0).cast_unsigned();
-        let trample = self.has_trample(attacker);
-        let mut split = Vec::with_capacity(blockers.len() + 1);
-        for blocker in blockers {
-            let amount = self
-                .lethal_damage_from(*blocker, attacker_id)
-                .min(remaining);
-            remaining -= amount;
-            split.push((Target::Permanent(*blocker), amount));
-        }
-        if remaining > 0 {
-            if trample && let Some(defender) = self.combat_defender_target(attacker) {
-                split.push((defender, remaining));
-            } else if let Some(last) = split.last_mut() {
-                last.1 += remaining;
-            }
-        }
-        split
     }
 
     pub(super) fn lethal_damage(&self, permanent_id: GameObjectId) -> u16 {
@@ -690,74 +704,46 @@ impl Game {
 
     pub(super) fn assign_combat_damage(
         &mut self,
-        attacker: GameObjectId,
+        source: GameObjectId,
         assignments: Vec<CombatDamageAssignment>,
     ) {
         if let Some(permanent) = self
             .battlefield
             .iter_mut()
-            .find(|permanent| permanent.card.id == attacker)
+            .find(|permanent| permanent.card.id == source)
         {
             permanent.combat_damage_assignment = assignments;
         }
-        self.pending_combat_attackers.remove(0);
-        if self.pending_combat_attackers.is_empty() {
+        self.pending_combat_assignments.remove(0);
+        if self.pending_combat_assignments.is_empty() {
             self.deal_combat_damage();
         }
     }
 
-    /// Whether combat damage to this recipient is prevented for the turn.
-    /// Only a permanent can carry the prevention; a player never does.
-    pub(super) fn combat_damage_is_prevented_for(&self, recipient: Target) -> bool {
-        if self.all_combat_damage_prevented {
-            return true;
+    /// "Whenever one or more creatures you control deal combat damage to one
+    /// or more players." One event for the step, published after every
+    /// creature in it has dealt its damage and before state-based actions
+    /// take the casualties away.
+    fn publish_combat_damage_to_players(&mut self) {
+        let dealt = std::mem::take(&mut self.combat_damage_to_players);
+        if dealt.is_empty() {
+            return;
         }
-        matches!(recipient, Target::Permanent(id)
-            if self
-                .battlefield
-                .iter()
-                .any(|permanent| permanent.card.id == id
-                    && (permanent.combat_damage_prevented
-                        || self.static_combat_damage_prevented(permanent, false))))
-    }
-
-    /// Whether combat damage from this permanent is prevented for the turn.
-    pub(super) fn combat_damage_is_prevented_from(&self, source: GameObjectId) -> bool {
-        if self.all_combat_damage_prevented {
-            return true;
-        }
-        self.battlefield.iter().any(|permanent| {
-            permanent.card.id == source
-                && (permanent.combat_damage_prevented
-                    || permanent.combat_damage_dealt_by_prevented
-                    || permanent.damage_dealt_by_prevented
-                    || self.static_combat_damage_prevented(permanent, true))
-        })
-    }
-
-    /// Whether a continuous effect currently stops this permanent's combat
-    /// damage in the given direction. The turn-scoped flags above are set
-    /// once and cleared at cleanup; this is asked afresh, so an Aura leaving
-    /// the battlefield mid-combat stops applying immediately.
-    fn static_combat_damage_prevented(&self, permanent: &Permanent, dealt_by: bool) -> bool {
-        self.visit_static_applied_effects(permanent, |applied| {
-            let prevented = match applied.effect {
-                AppliedEffectDef::PreventCombatDamage => true,
-                // One direction only: the permanent still takes what its
-                // blockers deal it.
-                AppliedEffectDef::PreventCombatDamageDealtBy => dealt_by,
-                _ => false,
-            };
-            if prevented {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
+        let mut players = Vec::new();
+        for (_, player) in &dealt {
+            if !players.contains(player) {
+                players.push(*player);
             }
-        })
-        .is_break()
+        }
+        let sources = dealt.into_iter().map(|(source, _)| source).collect();
+        self.capture_battlefield_triggers(&CommittedTriggerEvent::CombatDamageDealtToPlayers {
+            sources,
+            players,
+        });
     }
 
     pub(super) fn deal_combat_damage(&mut self) {
+        self.combat_damage_to_players.clear();
         let attackers: Vec<_> = self
             .battlefield
             .iter()
@@ -773,17 +759,16 @@ impl Game {
                 continue;
             };
             let power = self
-                .power(&self.battlefield[attacker_index])
+                .combat_assigned_power(&self.battlefield[attacker_index])
                 .unwrap_or(0)
                 .max(0)
                 .cast_unsigned();
-            let attacker_deals_damage = self
-                .deals_damage_in_current_combat_step(&self.battlefield[attacker_index])
-                && !self.combat_damage_is_prevented_from(attacker_id);
+            let attacker_deals_damage =
+                self.deals_damage_in_current_combat_step(&self.battlefield[attacker_index]);
             let blockers: Vec<_> = self
                 .battlefield
                 .iter()
-                .filter(|permanent| permanent.blocking == Some(attacker_id))
+                .filter(|permanent| permanent.is_blocking(attacker_id))
                 .map(|permanent| permanent.card.id)
                 .collect();
             if attacker_deals_damage && blockers.is_empty() {
@@ -796,15 +781,12 @@ impl Game {
                     continue;
                 };
                 self.deal_combat_damage_to(attacker_id, defender, power);
-            } else if !blockers.is_empty() {
-                self.exchange_blocked_combat_damage(
-                    attacker_id,
-                    attacker_index,
-                    &blockers,
-                    attacker_deals_damage,
-                );
+            } else if !blockers.is_empty() && attacker_deals_damage {
+                self.deal_attacker_combat_damage(attacker_id, attacker_index, &blockers);
             }
         }
+        self.deal_blocker_combat_damage();
+        self.publish_combat_damage_to_players();
         self.check_state_based_actions();
     }
 }

@@ -1,6 +1,9 @@
 use super::*;
 
-static MANA_VAULT_ANIMATION: AnimationDef = AnimationDef::new(2, 2);
+static MANA_VAULT_CHARACTERISTICS: [AppliedEffectDef; 2] = [
+    AppliedEffectDef::add_card_types(CardTypeSet::single(CardType::Creature)),
+    AppliedEffectDef::set_base_power_toughness(ValueDef::Constant(2), ValueDef::Constant(2)),
+];
 
 #[test]
 fn stays_tapped_and_can_be_paid_to_untap_at_upkeep() {
@@ -220,21 +223,22 @@ fn uses_declarative_ability_constructs() {
     );
     assert!(matches!(
         abilities[0].declarative_effect(),
-        Some(EffectDef::Apply {
+        Some(EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::DoesNotUntapDuringUntapStep,
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::Rule(AppliedRuleDef::DoesNotUntapDuringUntapStep),
         })
     ));
     assert!(matches!(
         abilities[1].declarative_effect(),
-        Some(EffectDef::OptionalPayment {
+        Some(EffectDef::PayOr(PayOrDef {
             payment,
-            if_paid: &EffectDef::Untap {
+            if_paid: Some(&EffectDef::Untap {
                 object: EffectRecipientDef::Source,
-            },
-        }) if payment.payer == PlayerRelation::You
-            && payment.costs == [CostDef::Mana(ManaCost::new(4, 0))]
+            }),
+            otherwise: None,
+            visibility: ChoiceVisibilityDef::Private,
+        })) if payment.payer == PlayerSetDef::Related(PlayerRelation::You)
+            && payment.cost == crate::card::EffectPaymentCostDef::Mana(ManaCost::new(4, 0))
     ));
     let DeclarativeAbilityDef::Triggered(draw) = abilities[2].definition else {
         panic!("the draw-step clause is a trigger");
@@ -259,14 +263,12 @@ fn untap_restriction_uses_its_effective_abilities() {
     game.start_next_turn();
     assert!(game.battlefield[0].tapped);
 
-    game.battlefield[0]
-        .temporary_removed_abilities
-        .push(TemporaryRemovedAbilities {
-            predicate: AbilityPredicateDef::Any,
-            timestamp: ContinuousEffectTimestamp(1),
-            order: 0,
-            expiration: AbilityEffectExpiration::Never,
-        });
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_000),
+        &[AppliedEffectDef::remove_abilities(AbilityPredicateDef::Any)],
+        ContinuousEffectExpiration::Never,
+    );
     game.start_next_turn();
     game.start_next_turn();
     assert!(
@@ -280,8 +282,13 @@ fn untap_restriction_wins_over_smokes_choice_procedure() {
     let mut game = ready_game();
     let mut vault = creature(10_000, cards::MANA_VAULT, PlayerId::One);
     vault.tapped = true;
-    vault.animation = Some(&MANA_VAULT_ANIMATION);
     game.battlefield.push(vault);
+    attach_constant_resolved_characteristics(
+        &mut game,
+        GameObjectId(10_000),
+        &MANA_VAULT_CHARACTERISTICS,
+        ContinuousEffectExpiration::Never,
+    );
     game.battlefield
         .push(creature(10_001, cards::SMOKE, PlayerId::One));
 

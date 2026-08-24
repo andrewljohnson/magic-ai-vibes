@@ -5,8 +5,8 @@ use super::json_common::{
 };
 use super::{ENGINE_VERSION, PROTOCOL_CAPABILITIES, PROTOCOL_VERSION, SIMULATION_FINGERPRINT};
 use crate::card::{
-    CardDefinition, CardRules, CardSet, CardStructure, HybridPair, ImplementationStatus, ManaCost,
-    ModeDef, PlayActionKind, PlayOptionDef, PlayRestriction, TargetSlotDef,
+    CardDefinition, CardRules, CardSet, CardStructure, FlexibleManaSymbol, ImplementationStatus,
+    ManaCost, ModeDef, PlayActionKind, PlayOptionDef, PlayRestriction, TargetSlotDef,
 };
 use crate::{CardCatalog, CardPart, Format};
 
@@ -18,12 +18,16 @@ fn mana_cost_json(cost: &ManaCost) -> Value {
         "black": cost.black,
         "red": cost.red,
         "green": cost.green,
-        // One entry per pair the cost actually carries, so a client renders
-        // the printed symbols without knowing every pair in the game.
-        "hybrid": HybridPair::ALL
+        "colorless": cost.colorless,
+        // One entry per flexible symbol the cost actually carries, so a
+        // client need not know the engine's complete symbol vocabulary.
+        "hybrid": FlexibleManaSymbol::ALL
             .into_iter()
-            .filter(|pair| cost.hybrid[pair.index()] > 0)
-            .map(|pair| json!({ "symbol": pair.symbol(), "count": cost.hybrid[pair.index()] }))
+            .filter(|symbol| cost.flexible_count(*symbol) > 0)
+            .map(|symbol| json!({
+                "symbol": symbol.symbol(),
+                "count": cost.flexible_count(symbol),
+            }))
             .collect::<Vec<_>>(),
         "variableX": cost.variable_x,
         "xMultiplier": cost.x_multiplier,
@@ -38,6 +42,9 @@ const fn implementation_status_name(status: ImplementationStatus) -> &'static st
     }
 }
 
+// Long because it is a table: one line per set, and the list only ever
+// grows. The source-organization map it mirrors is marked the same way.
+#[allow(clippy::too_many_lines)]
 const fn card_set_slug(set: CardSet) -> &'static str {
     match set {
         CardSet::Alpha => "alpha",
@@ -52,35 +59,160 @@ const fn card_set_slug(set: CardSet) -> &'static str {
         CardSet::TheDark => "the-dark",
         CardSet::FallenEmpires => "fallen-empires",
         CardSet::Promo1994 => "promo-1994",
+        CardSet::FourthEdition => "fourth-edition",
         CardSet::IceAge => "ice-age",
+        CardSet::Chronicles => "chronicles",
+        CardSet::Homelands => "homelands",
+        CardSet::Alliances => "alliances",
         CardSet::Mirage => "mirage",
         CardSet::Visions => "visions",
+        CardSet::FifthEdition => "fifth-edition",
+        CardSet::Weatherlight => "weatherlight",
         CardSet::Tempest => "tempest",
         CardSet::Stronghold => "stronghold",
+        CardSet::Exodus => "exodus",
         CardSet::PortalSecondAge => "portal-second-age",
         CardSet::UrzasSaga => "urzas-saga",
+        CardSet::UrzasLegacy => "urzas-legacy",
+        CardSet::ClassicSixthEdition => "classic-sixth-edition",
+        CardSet::UrzasDestiny => "urzas-destiny",
         CardSet::MercadianMasques => "mercadian-masques",
         CardSet::Nemesis => "nemesis",
+        CardSet::Prophecy => "prophecy",
         CardSet::Invasion => "invasion",
         CardSet::Planeshift => "planeshift",
+        CardSet::SeventhEdition => "seventh-edition",
         CardSet::Apocalypse => "apocalypse",
         CardSet::Odyssey => "odyssey",
+        CardSet::Torment => "torment",
         CardSet::Judgment => "judgment",
         CardSet::Onslaught => "onslaught",
+        CardSet::Legions => "legions",
+        CardSet::Scourge => "scourge",
+        CardSet::Mirrodin => "mirrodin",
         CardSet::Darksteel => "darksteel",
+        CardSet::FifthDawn => "fifth-dawn",
+        CardSet::ChampionsOfKamigawa => "champions_of_kamigawa",
+        CardSet::BetrayersOfKamigawa => "betrayers_of_kamigawa",
+        CardSet::MirrodinBesieged => "mirrodin-besieged",
+        CardSet::NewPhyrexia => "new-phyrexia",
         CardSet::PlanarChaos => "planar-chaos",
         CardSet::FutureSight => "future-sight",
+        CardSet::Lorwyn => "lorwyn",
+        CardSet::Conflux => "conflux",
+        CardSet::Zendikar => "zendikar",
+        CardSet::Worldwake => "worldwake",
+        CardSet::WarOfTheSpark => "war-of-the-spark",
+        CardSet::ThroneOfEldraine => "throne-of-eldraine",
+        CardSet::TherosBeyondDeath => "theros-beyond-death",
+        CardSet::ZendikarRising => "zendikar-rising",
+        CardSet::Shadowmoor => "shadowmoor",
+        CardSet::Eventide => "eventide",
+        CardSet::ShardsOfAlara => "shards-of-alara",
+        CardSet::Ixalan => "ixalan",
+        CardSet::Battlebond => "battlebond",
+        CardSet::ScarsOfMirrodin => "scars-of-mirrodin",
+        CardSet::Magic2011 => "magic-2011",
+        CardSet::RiseOfTheEldrazi => "rise-of-the-eldrazi",
         CardSet::Innistrad => "innistrad",
         CardSet::DarkAscension => "dark-ascension",
         CardSet::AvacynRestored => "avacyn-restored",
+        CardSet::Magic2012 => "magic-2012",
         CardSet::Magic2013 => "magic-2013",
         CardSet::ReturnToRavnica => "return-to-ravnica",
         CardSet::Gatecrash => "gatecrash",
         CardSet::DragonsMaze => "dragons-maze",
         CardSet::Magic2014 => "magic-2014",
+        CardSet::Magic2020 => "magic-2020",
         CardSet::Theros => "theros",
+        CardSet::Planechase2012 => "planechase-2012",
+        CardSet::Commander2013 => "commander-2013",
+        CardSet::JourneyIntoNyx => "journey-into-nyx",
+        CardSet::Conspiracy => "conspiracy",
+        CardSet::Magic2015 => "magic-2015",
+        CardSet::Commander2014 => "commander-2014",
+        CardSet::Commander2015 => "commander-2015",
         CardSet::KhansOfTarkir => "khans-of-tarkir",
+        CardSet::DragonsOfTarkir => "dragons-of-tarkir",
+        CardSet::ModernHorizons1 => "modern-horizons-1",
+        CardSet::Kaldheim => "kaldheim",
+        CardSet::Commander2018 => "commander-2018",
+        CardSet::Commander2021 => "commander-2021",
+        CardSet::StrixhavenSchoolOfMages => "strixhaven-school-of-mages",
+        CardSet::AdventuresInTheForgottenRealms => "adventures-in-the-forgotten-realms",
         CardSet::ModernHorizons2 => "modern-horizons-2",
+        CardSet::InnistradMidnightHunt => "innistrad-midnight-hunt",
+        CardSet::InnistradCrimsonVow => "innistrad-crimson-vow",
+        CardSet::InnistradCrimsonVowCommander => "innistrad-crimson-vow-commander",
+        CardSet::Ikoria => "ikoria",
+        CardSet::KamigawaNeonDynasty => "kamigawa-neon-dynasty",
+        CardSet::KamigawaNeonDynastyCommander => "kamigawa-neon-dynasty-commander",
+        CardSet::StreetsOfNewCapenna => "streets-of-new-capenna",
+        CardSet::StreetsOfNewCapennaCommander => "streets-of-new-capenna-commander",
+        CardSet::CommanderLegendsBattleForBaldursGate => "commander-legends-baldurs-gate",
+        CardSet::Dominaria => "dominaria",
+        CardSet::DominariaUnited => "dominaria-united",
+        CardSet::TheBrothersWar => "the-brothers-war",
+        CardSet::EternalMasters => "eternal-masters",
+        CardSet::EldritchMoon => "eldritch-moon",
+        CardSet::ConspiracyTakeTheCrown => "conspiracy-take-the-crown",
+        CardSet::Kaladesh => "kaladesh",
+        CardSet::AetherRevolt => "aether-revolt",
+        CardSet::Amonkhet => "amonkhet",
+        CardSet::PhyrexiaAllWillBeOne => "phyrexia-all-will-be-one",
+        CardSet::PhyrexiaAllWillBeOneCommander => "phyrexia-all-will-be-one-commander",
+        CardSet::MarchOfTheMachine => "march-of-the-machine",
+        CardSet::LordOfTheRings => "lord-of-the-rings",
+        CardSet::LordOfTheRingsCommander => "lord-of-the-rings-commander",
+        CardSet::WildsOfEldraine => "wilds-of-eldraine",
+        CardSet::LostCavernsOfIxalan => "lost-caverns-of-ixalan",
+        CardSet::MurdersAtKarlovManor => "murders-at-karlov-manor",
+        CardSet::RavnicaClueEdition => "ravnica-clue-edition",
+        CardSet::Fallout => "fallout",
+        CardSet::ModernHorizons3 => "modern-horizons-3",
+        CardSet::OutlawsOfThunderJunction => "outlaws-of-thunder-junction",
+        CardSet::TheBigScore => "the-big-score",
+        CardSet::ModernHorizons3Commander => "modern-horizons-3-commander",
+        CardSet::Bloomburrow => "bloomburrow",
+        CardSet::BloomburrowCommander => "bloomburrow-commander",
+        CardSet::DuskmournHouseOfHorror => "duskmourn-house-of-horror",
+        CardSet::DuskmournHouseOfHorrorCommander => "duskmourn-house-of-horror-commander",
+        CardSet::FoundationsJumpstart => "foundations-jumpstart",
+        CardSet::TarkirDragonstorm => "tarkir-dragonstorm",
+        CardSet::Aetherdrift => "aetherdrift",
+        CardSet::FinalFantasy => "final-fantasy",
+        CardSet::FinalFantasyCommander => "final-fantasy-commander",
+        CardSet::ThroughTheOmenpaths => "through-the-omenpaths",
+        CardSet::SaviorsOfKamigawa => "saviors-of-kamigawa",
+        CardSet::RavnicaCityOfGuilds => "ravnica-city-of-guilds",
+        CardSet::Guildpact => "guildpact",
+        CardSet::Dissension => "dissension",
+        CardSet::TimeSpiral => "time-spiral",
+        CardSet::AlaraReborn => "alara-reborn",
+        CardSet::FateReforged => "fate-reforged",
+        CardSet::BattleForZendikar => "battle-for-zendikar",
+        CardSet::MagicOrigins => "magic-origins",
+        CardSet::ShadowsOverInnistrad => "shadows-over-innistrad",
+        CardSet::HourOfDevastation => "hour-of-devastation",
+        CardSet::CoreSet2019 => "core-set-2019",
+        CardSet::RavnicaAllegiance => "ravnica-allegiance",
+        CardSet::Commander2020 => "commander-2020",
+        CardSet::MagicFoundations => "magic-foundations",
+        CardSet::AvatarTheLastAirbender => "avatar-the-last-airbender",
+        CardSet::EdgeOfEternities => "edge-of-eternities",
+        CardSet::EdgeOfEternitiesCommander => "edge-of-eternities-commander",
+        CardSet::LorwynEclipsed => "lorwyn-eclipsed",
+        CardSet::SecretsOfStrixhaven => "secrets-of-strixhaven",
+        CardSet::TeenageMutantNinjaTurtles => "teenage-mutant-ninja-turtles",
+        CardSet::PortalThreeKingdoms => "portal-three-kingdoms",
+        CardSet::Coldsnap => "coldsnap",
+        CardSet::BornOfTheGods => "born-of-the-gods",
+        CardSet::Commander2017 => "commander-2017",
+        CardSet::CommanderLegends => "commander-legends",
+        CardSet::DominariaUnitedCommander => "dominaria-united-commander",
+        CardSet::MarchOfTheMachineCommander => "march-of-the-machine-commander",
+        CardSet::LostCavernsOfIxalanCommander => "lost-caverns-of-ixalan-commander",
+        CardSet::GuildsOfRavnica => "guilds-of-ravnica",
         CardSet::Token => "token",
     }
 }
@@ -109,6 +241,16 @@ fn structure_json(structure: &CardStructure) -> Value {
             "kind": "split",
             "partIds": parts.iter().map(|part| part.0).collect::<Vec<_>>(),
             "fusedPlayOptionId": fused.map(|option| option.0),
+        }),
+        CardStructure::Room {
+            doors,
+            combined,
+            locked,
+        } => json!({
+            "kind": "room",
+            "doors": doors.iter().map(|part| part.0).collect::<Vec<_>>(),
+            "combined": combined.0,
+            "locked": locked.0,
         }),
         CardStructure::Flip { normal, flipped } => json!({
             "kind": "flip",
@@ -171,13 +313,28 @@ fn play_option_json(option: &PlayOptionDef) -> Value {
             PlayRestriction::Normal => "normal",
             PlayRestriction::FromHandOnly => "fromHandOnly",
             PlayRestriction::BeforeCombatDamage => "beforeCombatDamage",
+            PlayRestriction::BeforeBlockersDeclared => "beforeBlockersDeclared",
+            PlayRestriction::OpponentsUpkeep => "opponentsUpkeep",
+            PlayRestriction::DeclareAttackersStep => "declareAttackersStep",
+            PlayRestriction::OpponentsTurnAfterUpkeep => "opponentsTurnAfterUpkeep",
         },
-        "modes": option.modes.as_ref().map(|modes| json!({
-            "minimum": modes.minimum,
-            "maximum": modes.maximum,
-            "mayRepeat": modes.may_repeat,
-            "choices": modes.modes.iter().map(mode_json).collect::<Vec<_>>(),
-        })),
+        "modes": option.modes.as_ref().map(|modes| {
+            let mut value = json!({
+                "minimum": modes.minimum,
+                "maximum": modes.maximum,
+                "mayRepeat": modes.may_repeat,
+                "choices": modes.modes.iter().map(mode_json).collect::<Vec<_>>(),
+            });
+            // Optional, and present only for a spell whose printed maximum
+            // rises under a condition -- "if you control a Wizard as you cast
+            // this spell, you may choose two instead". Every other modal
+            // spell's shape is unchanged, and the legal actions already show
+            // which selections are available right now.
+            if let Some(conditional) = modes.conditional_maximum {
+                value["conditionalMaximum"] = json!(conditional.maximum);
+            }
+            value
+        }),
         "targets": option.targets.iter().map(target_slot_json).collect::<Vec<_>>(),
         "alternativeCosts": option.alternative_costs.iter().map(|cost| json!({
             "id": cost.id.0,
@@ -201,7 +358,7 @@ fn definition_json(catalog: &CardCatalog, format: Format, card: &CardDefinition)
     let restricted = catalog.is_restricted_in(card.id, format);
     json!({
         // Compatibility fields retained from protocol v1.
-        "definition": card.id.0,
+        "definition": card.id.get(),
         "name": card.name,
         "kind": rules.kind_name(),
         "isBasicLand": card.is_basic_land(),

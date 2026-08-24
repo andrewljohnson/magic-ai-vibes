@@ -1,4 +1,5 @@
 use super::*;
+use crate::AbilityProgramDef;
 
 #[test]
 fn supreme_verdict_destroys_every_creature() {
@@ -171,7 +172,7 @@ fn overloaded_mizzium_mortars_is_targetless_and_hits_hexproof_opposing_creatures
     let mut protected = creature(10_003, cards::SAVANNAH_LIONS, PlayerId::Two);
     protected
         .temporary_keywords
-        .push(KeywordAbility::ProtectionFrom(ManaColor::Red));
+        .push(protection_keyword(ManaColor::Red));
     let protected_id = protected.card.id;
     game.battlefield
         .extend([friendly, opposing, hexproof, protected]);
@@ -390,13 +391,14 @@ fn counterflux_uses_not_you_for_both_casting_modes() {
     let overload = counterflux.rules.ability(AbilityId(2)).unwrap();
     assert!(matches!(
         overload.effect.definition,
-        EffectDef::Counter {
-            object: EffectRecipientDef::MatchingObjects {
-                controller: PlayerRelation::NotYou,
-                ..
-            },
+        AbilityProgramDef::Effects(EffectDef::Counter {
+            object,
             ..
-        }
+        }) if object.object_query().is_some_and(|query| {
+            query.related_player == Some(PlayerSetDef::Related(PlayerRelation::NotYou))
+                && query.controller.is_none()
+                && query.owner.is_none()
+        })
     ));
 }
 
@@ -404,17 +406,16 @@ fn counterflux_uses_not_you_for_both_casting_modes() {
 fn a_non_executable_cannot_be_countered_clause_does_not_change_gameplay() {
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "This spell can't be countered.",
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
-            effect: AppliedEffectDef::CannotBeCountered,
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
+            effect: AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered),
         },
     )
     .with_source_zones(&[ZoneKind::Stack])
     .with_coverage(AbilityCoverageDef::metadata_only(
         "Test-only incomplete clause.",
     ))];
-    let definition_id = CardDefinitionId(20_000);
+    let definition_id = CardDefinitionId::new(20_000);
     let mut definition = CardDefinition::new(
         definition_id,
         "Incomplete uncounterable spell",
@@ -434,17 +435,17 @@ fn a_non_executable_cannot_be_countered_clause_does_not_change_gameplay() {
 
 #[test]
 fn a_composite_static_clause_can_make_its_source_uncounterable() {
-    static COMPONENTS: [AppliedEffectDef; 1] = [AppliedEffectDef::CannotBeCountered];
+    static COMPONENTS: [AppliedEffectDef; 1] =
+        [AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)];
     static ABILITIES: [AbilityDef; 1] = [AbilityDef::static_ability(
         "This spell can't be countered.",
-        EffectDef::Apply {
+        EffectDef::StaticApply {
             recipient: EffectRecipientDef::Source,
             effect: AppliedEffectDef::Composite(&COMPONENTS),
-            duration: EffectDurationDef::WhileSourceRemainsInZone,
         },
     )
     .with_source_zones(&[ZoneKind::Stack])];
-    let definition_id = CardDefinitionId(20_001);
+    let definition_id = CardDefinitionId::new(20_001);
     let mut definition = CardDefinition::new(
         definition_id,
         "Composite uncounterable spell",
@@ -464,7 +465,8 @@ fn a_composite_static_clause_can_make_its_source_uncounterable() {
 
 #[test]
 fn a_composite_mana_spend_effect_can_make_a_spell_uncounterable() {
-    static COMPONENTS: [AppliedEffectDef; 1] = [AppliedEffectDef::CannotBeCountered];
+    static COMPONENTS: [AppliedEffectDef; 1] =
+        [AppliedEffectDef::Rule(AppliedRuleDef::CannotBeCountered)];
     let mut object = spell(20_002, cards::SAVANNAH_LIONS, PlayerId::One, 0);
     object.applied_effects.push(AppliedStackEffect {
         source: None,
@@ -496,7 +498,7 @@ fn overload_does_not_silently_discard_selected_modal_effects() {
         ),
     ];
 
-    let definition_id = CardDefinitionId(20_003);
+    let definition_id = CardDefinitionId::new(20_003);
     let mut definition = CardDefinition::new(
         definition_id,
         "Modal overload test",

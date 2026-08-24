@@ -3,9 +3,10 @@ use super::{
     AddManaEffectDef, AlternativeCastKindDef, AlternativeCostDef, CardBehavior, CardComposition,
     CardDefinition, CardEffectStatus, CardPart, CardPrinting, CardPrintingId, CardRules, CardSet,
     CardType, CardTypeSet, CreatureStats, DeclarativeAbilityDef, EffectDef, EffectRecipientDef,
-    ImplementationStatus, LikelihoodDef, ManaColor, ManaCost, ManaCostParseErrorKind,
-    ManaRestrictionDef, ManaSelectionDef, ObjectPredicateDef, PlayOptionDef, PlayerRelation,
-    PrintedManaCost, SpellForm, TargetPredicate, TriggerEventDef, ZoneKind,
+    FlexibleManaSymbol, ImplementationStatus, LikelihoodDef, ManaColor, ManaCost,
+    ManaCostParseErrorKind, ManaRestrictionDef, ManaSelectionDef, ObjectPredicateDef,
+    PlayOptionDef, PlayerRelation, PrintedManaCost, SpellForm, TargetPredicate, TriggerEventDef,
+    ZoneKind,
 };
 use crate::{
     AbilityId, AlternativeCostId, CardDefinitionId, CardPartId, ModeId, PlayOptionId, TargetIndex,
@@ -154,12 +155,12 @@ fn modal_spell_semantics_derive_their_presentation_modes() {
             _ => None,
         }
         .expect("first positional mode")
-        .effect
-        .definition,
-        EffectDef::Counter {
+        .declarative_effect(),
+        Some(EffectDef::Counter {
             object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
             zone: ZoneKind::Graveyard,
-        }
+            placement: super::ZonePlacement::Top,
+        })
     );
     assert_eq!(
         match rules.ability_clauses()[0].definition {
@@ -167,12 +168,12 @@ fn modal_spell_semantics_derive_their_presentation_modes() {
             _ => None,
         }
         .expect("second positional mode")
-        .effect
-        .definition,
-        EffectDef::Destroy {
+        .declarative_effect(),
+        Some(EffectDef::Destroy {
             object: EffectRecipientDef::Target(TargetIndex::PRIMARY),
             can_regenerate: true,
-        }
+            then: None,
+        })
     );
     assert_eq!(rules.rules_text(), "Choose one.");
 }
@@ -232,6 +233,24 @@ fn semantic_target_labels_are_derived_from_predicates() {
         "semantic-only targets still have decision labels without a legacy projection",
     );
 
+    let linked_graveyard = AbilityTargetDef::up_to(
+        AbilityTargetPredicate::OwnedByTargetPlayer {
+            object: ObjectPredicateDef::Any,
+            zones: &[ZoneKind::Graveyard],
+            slot: TargetIndex::PRIMARY,
+        },
+        3,
+    );
+    assert_eq!(
+        linked_graveyard.label(),
+        "target card in that player's graveyard"
+    );
+    assert!(
+        linked_graveyard
+            .presentation(crate::TargetSlotId(1))
+            .is_none()
+    );
+
     let blue_spell =
         AbilityTargetDef::exactly_one_spell(ObjectPredicateDef::Color(ManaColor::Blue));
     let presentation = blue_spell
@@ -243,7 +262,7 @@ fn semantic_target_labels_are_derived_from_predicates() {
 
 #[test]
 fn printing_ids_distinguish_variants_within_one_set() {
-    let definition = CardDefinitionId(7);
+    let definition = CardDefinitionId::new(7);
     let primary = CardPrintingId::new(definition, CardSet::Alpha);
     let alternate = CardPrintingId::with_variant(definition, CardSet::Alpha, 1);
 
@@ -257,7 +276,7 @@ fn printing_ids_distinguish_variants_within_one_set() {
 
 #[test]
 fn definitions_start_with_their_primary_printing() {
-    let id = CardDefinitionId(7);
+    let id = CardDefinitionId::new(7);
     let definition = CardDefinition::new(
         id,
         "Test Card",
@@ -337,6 +356,79 @@ fn symbolic_mana_costs_parse_at_compile_time_and_runtime() {
 }
 
 #[test]
+fn every_requested_flexible_symbol_parses_and_keeps_its_rules_meaning() {
+    const COST: ManaCost = crate::mana_cost!("{2/B}{R/P}{G/U/P}{C/W}");
+    assert_eq!(COST, "{2/B}{R/P}{G/U/P}{C/W}".parse().unwrap());
+    assert_eq!(COST.to_string(), "{2/B}{R/P}{G/U/P}{C/W}");
+    assert_eq!(COST.flexible_count(FlexibleManaSymbol::TwoBlack), 1);
+    assert_eq!(COST.flexible_count(FlexibleManaSymbol::RedPhyrexian), 1);
+    assert_eq!(
+        COST.flexible_count(FlexibleManaSymbol::BlueGreenPhyrexian),
+        1
+    );
+    assert_eq!(COST.flexible_count(FlexibleManaSymbol::ColorlessWhite), 1);
+    assert_eq!(COST.mana_value(), 5, "two-brid contributes two");
+    assert_eq!(FlexibleManaSymbol::TwoBlack.generic_alternative(), Some(2));
+    assert_eq!(FlexibleManaSymbol::RedPhyrexian.generic_alternative(), None);
+    assert_eq!(FlexibleManaSymbol::RedPhyrexian.life_cost(), Some(2));
+    assert!(
+        COST.without_flexible(FlexibleManaSymbol::TwoBlack, 2)
+            .is_none(),
+        "checked removal rejects a count larger than the printed cost",
+    );
+
+    assert_eq!(crate::mana_cost!("{2/B}{2/B}{2/B}").mana_value(), 6);
+    assert_eq!(crate::mana_cost!("{C}").mana_value(), 1);
+    assert_eq!(crate::mana_cost!("{C}").to_string(), "{C}");
+    assert_eq!(crate::mana_cost!("{W/C}").to_string(), "{C/W}");
+    assert_eq!(crate::mana_cost!("{U/G/P}").to_string(), "{G/U/P}");
+}
+
+#[test]
+fn every_flexible_symbol_round_trips_through_the_runtime_parser() {
+    for symbol in FlexibleManaSymbol::ALL {
+        let printed = format!("{{{}}}", symbol.symbol());
+        let cost = printed
+            .parse::<ManaCost>()
+            .unwrap_or_else(|error| panic!("{printed} must parse: {error}"));
+        assert_eq!(cost.flexible_count(symbol), 1, "{printed}");
+        assert_eq!(cost.hybrid_total(), 1, "{printed}");
+        assert_eq!(cost.mana_value(), symbol.mana_value(), "{printed}");
+        assert_eq!(cost.to_string(), printed, "{printed}");
+    }
+}
+
+#[test]
+fn flexible_symbols_derive_every_colored_component_but_never_colorless() {
+    assert_eq!(
+        CardRules::new_instant(crate::mana_cost!("{G/W}")).colors(),
+        [true, false, false, false, true]
+    );
+    assert_eq!(
+        CardRules::new_sorcery(crate::mana_cost!("{2/B}{2/B}{2/B}")).colors(),
+        [false, false, true, false, false]
+    );
+    assert_eq!(
+        CardRules::new_instant(crate::mana_cost!("{R/P}")).colors(),
+        [false, false, false, true, false]
+    );
+    assert_eq!(
+        CardRules::new_planeswalker(crate::mana_cost!("{2}{G}{G/U/P}{U}"), &["Tamiyo"], 5).colors(),
+        [false, true, false, false, true]
+    );
+    assert_eq!(
+        CardRules::new_creature(
+            crate::mana_cost!("{C/W}{C/U}{C/B}{C/R}{C/G}"),
+            &["Eldrazi"],
+            2,
+            5,
+        )
+        .colors(),
+        [true, true, true, true, true]
+    );
+}
+
+#[test]
 fn alternative_cast_clauses_render_and_project_their_owned_costs() {
     static ABILITIES: [AbilityDef; 3] = [
         AbilityDef::spell("Draw a card.", EffectDef::None),
@@ -408,13 +500,31 @@ fn alternative_cast_clauses_render_and_project_their_owned_costs() {
 }
 
 #[test]
+fn convoke_and_mana_buyback_constructors_render_exact_rules_text() {
+    let convoke = crate::card::abilities::convoke();
+    assert_eq!(
+        convoke.rules_text(),
+        "Convoke (Your creatures can help cast this spell. Each creature you tap while casting this spell pays for {1} or one mana of that creature's color.)",
+    );
+
+    let buyback = crate::card::abilities::buyback(mana_cost!("{3}"));
+    assert_eq!(
+        buyback.rules_text(),
+        "Buyback {3} (You may pay an additional {3} as you cast this spell. If you do, put this card into your hand as it resolves.)",
+    );
+}
+
+#[test]
 fn symbolic_mana_costs_reject_invalid_or_unsupported_notation() {
     for (symbols, expected) in [
         ("", ManaCostParseErrorKind::Empty),
         ("2GG", ManaCostParseErrorKind::ExpectedOpeningBrace),
         ("{2", ManaCostParseErrorKind::UnterminatedSymbol),
         ("{}", ManaCostParseErrorKind::EmptySymbol),
-        ("{C}", ManaCostParseErrorKind::InvalidSymbol),
+        ("{S}", ManaCostParseErrorKind::InvalidSymbol),
+        ("{P/R}", ManaCostParseErrorKind::InvalidSymbol),
+        ("{G/U/Q}", ManaCostParseErrorKind::InvalidSymbol),
+        ("{2/C}", ManaCostParseErrorKind::InvalidSymbol),
         ("{2}{3}", ManaCostParseErrorKind::DuplicateGenericSymbol),
         ("{65536}", ManaCostParseErrorKind::Overflow),
     ] {
@@ -468,7 +578,7 @@ fn clause_implementation_drives_the_ordinary_play_option_gate() {
         CardEffectStatus::MetadataOnly
     );
     let metadata_definition = CardDefinition::new(
-        CardDefinitionId(8),
+        CardDefinitionId::new(8),
         "Unsupported",
         CardSet::Alpha,
         false,
@@ -518,6 +628,37 @@ fn creature_body_with_an_unimplemented_clause_is_partial() {
     assert_eq!(
         CardComposition::single("Partial creature", rules).play_options[0].effect_status,
         CardEffectStatus::Implemented
+    );
+}
+
+#[test]
+fn a_catalog_only_creature_body_can_be_explicitly_metadata_only() {
+    let rules = CardRules::new_creature(ManaCost::default(), &[], 2, 2)
+        .with_metadata_only_creature_body()
+        .with_abilities(&DEFERRED_CLAUSE);
+
+    assert_eq!(
+        rules.implementation_status(),
+        ImplementationStatus::MetadataOnly
+    );
+    assert_eq!(
+        CardComposition::single("Catalog-only creature", rules).play_options[0].effect_status,
+        CardEffectStatus::MetadataOnly
+    );
+}
+
+#[test]
+fn a_catalog_only_creature_body_needs_no_synthetic_deferred_clause() {
+    let rules =
+        CardRules::new_creature(ManaCost::default(), &[], 2, 2).with_metadata_only_creature_body();
+
+    assert_eq!(
+        rules.implementation_status(),
+        ImplementationStatus::MetadataOnly
+    );
+    assert_eq!(
+        CardComposition::single("Catalog-only creature", rules).play_options[0].effect_status,
+        CardEffectStatus::MetadataOnly
     );
 }
 
@@ -640,11 +781,11 @@ fn ability_category_is_explicit_and_not_inferred_from_effect() {
     const MANA_ABILITY: AbilityDef = AbilityDef::activated_mana("Add green.", COSTS, ADD_MANA);
     const ORDINARY_TRIGGER: AbilityDef = AbilityDef::triggered(
         "Add green when this dies.",
-        TriggerEventDef::ZoneChanged {
-            object: ObjectPredicateDef::Source,
-            from: Some(super::ZoneKind::Battlefield),
-            to: Some(super::ZoneKind::Graveyard),
-        },
+        TriggerEventDef::zone_changed(
+            ObjectPredicateDef::Source,
+            Some(super::ZoneKind::Battlefield),
+            Some(super::ZoneKind::Graveyard),
+        ),
         ADD_MANA,
     );
     const TURN_FACE_UP: AbilityDef = AbilityDef::special_action(

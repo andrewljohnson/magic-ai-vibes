@@ -1,5 +1,5 @@
 use super::*;
-use crate::ImplementationStatus;
+use crate::{AbilityProgramDef, ImplementationStatus};
 
 #[test]
 fn mogg_fanatic_and_seal_of_fire_pay_sacrifice_before_dealing_damage() {
@@ -12,8 +12,9 @@ fn mogg_fanatic_and_seal_of_fire_pay_sacrifice_before_dealing_damage() {
             source,
             ability: primary_ability(definition),
             targets: activated_targets(Target::Player(PlayerId::Two)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         };
 
         assert!(game.legal_actions(PlayerId::One).contains(&activation));
@@ -111,10 +112,11 @@ fn hydroblast_and_pyroblast_are_complete_opposite_color_modal_answers() {
         );
         assert!(matches!(
             modes[1].effect.definition,
-            EffectDef::Destroy {
+            AbilityProgramDef::Effects(EffectDef::Destroy {
                 can_regenerate: true,
+                then: None,
                 ..
-            }
+            })
         ));
     }
 }
@@ -129,6 +131,9 @@ fn lotus_petal_sacrifices_for_one_mana_of_the_chosen_color() {
         source,
         ability: mana_ability_for(&game, source, ManaColor::Blue),
         color: ManaColor::Blue,
+        counters_removed: None,
+        cost_object: None,
+        combination: None,
     };
 
     assert!(game.legal_actions(PlayerId::One).contains(&action));
@@ -198,8 +203,9 @@ fn seal_of_cleansing_and_monk_realist_destroy_enchantments_at_their_printed_timi
             source: seal_id,
             ability: primary_ability(cards::SEAL_OF_CLEANSING),
             targets: activated_targets(Target::Permanent(artifact_id)),
-            cost_object: None,
+            cost_objects: Vec::new(),
             x: 0,
+            modes: Vec::new(),
         },
     )
     .unwrap();
@@ -436,5 +442,111 @@ fn fact_or_fiction_uses_an_opponents_split_and_its_controllers_choice() {
     assert_eq!(
         game.players[PlayerId::One.index()].library[0].definition,
         cards::SWAMP
+    );
+}
+
+/// Sedge Troll is the repository's standing regeneration subject, and its two
+/// toughness is what makes Incinerate's three damage lethal. The rider is an
+/// engine question rather than a format one, so the pool it comes from does
+/// not matter here.
+fn troll_with_an_armed_shield() -> (Game, GameObjectId) {
+    let mut game = ready_game();
+    let troll = creature(10_001, cards::SEDGE_TROLL, PlayerId::One);
+    let troll_id = troll.card.id;
+    game.battlefield.push(troll);
+    game.players[PlayerId::One.index()].mana_pool.black = 1;
+
+    let regenerate = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .find(|action| {
+            matches!(action, Action::ActivateAbility { source, .. } if *source == troll_id)
+        })
+        .expect("the Troll offers its regeneration ability");
+    game.apply(PlayerId::One, regenerate)
+        .expect("the shield is armed");
+    drain_pending(&mut game);
+    (game, troll_id)
+}
+
+fn incinerate(game: &mut Game, target: Target) {
+    let spell = card(10_000, cards::INCINERATE, PlayerId::One);
+    let spell_id = spell.id;
+    game.players[PlayerId::One.index()].hand.push(spell);
+    let pool = &mut game.players[PlayerId::One.index()].mana_pool;
+    pool.red = 1;
+    pool.colorless = 1;
+    game.apply(
+        PlayerId::One,
+        cast_action(spell_id, vec![target], Vec::new(), 0),
+    )
+    .expect("Incinerate is cast");
+    drain_pending(game);
+}
+
+#[test]
+fn incinerate_denies_regeneration_to_the_creature_it_burned() {
+    let (mut game, troll_id) = troll_with_an_armed_shield();
+
+    incinerate(&mut game, Target::Permanent(troll_id));
+
+    assert!(
+        !game
+            .battlefield
+            .iter()
+            .any(|permanent| permanent.card.id == troll_id),
+        "the armed shield could not save a creature Incinerate burned"
+    );
+}
+
+/// The other half of the rider, and the reason it cannot be written as an
+/// ordinary two-step sequence: a creature that was named but dealt nothing
+/// regenerates as usual. Healing Salve's shield eats all three points, so the
+/// Troll is a target Incinerate never damaged.
+#[test]
+fn a_creature_whose_damage_was_prevented_still_regenerates() {
+    let (mut game, troll_id) = troll_with_an_armed_shield();
+
+    let salve = card(10_002, cards::HEALING_SALVE, PlayerId::One);
+    let salve_id = salve.id;
+    game.players[PlayerId::One.index()].hand.push(salve);
+    game.players[PlayerId::One.index()].mana_pool.white = 1;
+    let prevention = game
+        .legal_actions(PlayerId::One)
+        .into_iter()
+        .find(|action| match action {
+            Action::CastSpell { card, choices, .. } => {
+                *card == salve_id
+                    && choices
+                        .iter_targets()
+                        .any(|chosen| *chosen == Target::Permanent(troll_id))
+            }
+            _ => false,
+        })
+        .expect("Healing Salve can shield the Troll");
+    game.apply(PlayerId::One, prevention)
+        .expect("the shield is cast");
+    drain_pending(&mut game);
+
+    incinerate(&mut game, Target::Permanent(troll_id));
+    assert_eq!(
+        game.battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == troll_id)
+            .expect("prevention kept the Troll alive")
+            .damage,
+        0,
+        "all three points were prevented",
+    );
+
+    // Now something Incinerate had nothing to do with kills it, and the shield
+    // it armed is still good.
+    game.damage_target_from(None, Some(Target::Permanent(troll_id)), 2);
+    drain_pending(&mut game);
+    assert!(
+        game.battlefield
+            .iter()
+            .any(|permanent| permanent.card.id == troll_id),
+        "the Troll regenerated, because Incinerate never dealt it damage"
     );
 }

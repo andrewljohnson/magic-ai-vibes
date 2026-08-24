@@ -1,11 +1,17 @@
-use crate::ids::{AbilityId, AlternativeCostId, ModeId, TargetIndex};
+use crate::ids::{ModeId, ObjectBindingIndex, TargetIndex};
 
 use super::{
-    AbilityCostDef, AbilityCostList, AbilityDef, AbilityTargetDef, AlternativeCostDef,
-    BasicLandType, CardBehavior, CounterKind, EffectDef, ImplementationStatus, ManaColor, ManaCost,
+    AbilityCostDef, AbilityCostList, AbilityDef, AbilityTargetDef, BasicLandType, CardBehavior,
+    CardSupertype, CardType, ConditionDef, CounterKind, EffectDef, ImplementationStatus,
     ObjectPredicateDef, ObjectQueryDef, PlayerRelation, ReplacementConditionDef,
-    ReplacementEventDef, TriggerEventDef, ZoneKind,
+    ReplacementEffectDef, ReplacementEventDef, TriggerEventDef, ValueDef, ZoneKind,
 };
+
+mod alternative_casts;
+mod optional_additional_costs;
+
+pub use alternative_casts::*;
+pub use optional_additional_costs::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SpellAbilityDef {
@@ -15,8 +21,67 @@ pub enum SpellAbilityDef {
         /// it names. Unlike a target this is spent rather than pointed at, so
         /// it is not checked again on resolution.
         additional_cost: Option<SpellAdditionalCostDef>,
+        /// A printed "as an additional cost to cast this spell, pay N life".
+        /// Life is spent rather than named, so unlike the cost above it
+        /// selects nothing and enumerates nothing -- except when the amount
+        /// is X, which the caster chooses as the spell is cast.
+        life_cost: Option<SpellLifeCostDef>,
+        /// Where the card goes after a successful resolution. This is part of
+        /// a spell's shared stack procedure rather than an instruction that
+        /// can move the resolving object while it is off the stack.
+        resolution_destination: SpellResolutionDestinationDef,
     },
     Modal(ModalSpellDef),
+}
+
+/// The card's normal post-resolution destination after it has successfully
+/// completed its instructions. Countered spells never use this: they follow
+/// the countering effect's destination instead. A destination can also carry
+/// an instruction that remains meaningful when the spell is a copy, such as
+/// shuffling its owner's library.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SpellResolutionDestinationDef {
+    Graveyard,
+    /// Its owner's hand, which is what buyback buys (CR 702.27a).
+    Hand,
+    Exile,
+    /// Exile the card only when this spell was cast from its owner's hand,
+    /// and bury it otherwise. Rebound (CR 702.87a) is the only clause that
+    /// says this, and it has to: the cast rebound offers comes from exile,
+    /// and that one goes to the graveyard like any other spell.
+    ExileIfCastFromHand,
+    /// Exile the card "on an adventure" (CR 715.3d): its owner may cast it
+    /// later from exile, as the creature it is on the other half. Only the
+    /// alternate half of an Adventure card resolves this way.
+    ExileOnAdventure,
+    /// Exile the card and put these counters on its new object. A zone change
+    /// happens before the counters are added, so prior-zone counters cannot
+    /// leak into exile.
+    ExileWithCounters(&'static [(CounterKind, u16)]),
+    /// Move the card to its owner's library, then shuffle it. The shuffle is
+    /// still part of the resolution when another effect replaces the move, or
+    /// when this resolving spell is a copy with no card to move.
+    LibraryShuffled,
+}
+
+/// Where an additional cost's count comes from.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SpellAdditionalCostCountDef {
+    /// The printed number, which is what almost every cost names.
+    #[default]
+    Printed,
+    /// The X the spell is cast for. Flash of Insight's flashback exiles as
+    /// many blue cards as its X, so the cost cannot be known until that X is
+    /// chosen.
+    ChosenX,
+    /// One for each mode chosen past the first, which is escalate
+    /// (CR 702.120a). A spell with one mode pays nothing extra.
+    ModesBeyondFirst,
+    /// Collect evidence N (CR 701.58a): not a number of cards at all, but a
+    /// total mana value the chosen cards have to reach between them. How
+    /// many that takes is whatever the graveyard makes it -- one card of
+    /// mana value six, or six of one.
+    TotalManaValueAtLeast(u8),
 }
 
 /// An additional cost that selects objects to spend. The zone decides what
@@ -27,6 +92,153 @@ pub struct SpellAdditionalCostDef {
     pub object: ObjectPredicateDef,
     pub zone: ZoneKind,
     pub count: u8,
+    /// Where the count comes from, when it is not the printed number above.
+    pub counted: SpellAdditionalCostCountDef,
+    pub spend: SpendModeDef,
+    /// A second way to pay the same printed cost. "Sacrifice a creature or
+    /// discard a card" is one cost with two ways to pay it, and which one is
+    /// paid is settled as the spell is cast rather than asked afterwards --
+    /// the chosen objects travel with the action either way.
+    ///
+    /// Held behind a reference so a cost stays one word wider than the
+    /// predicate it carries. Both halves spend what they name the same way;
+    /// what differs is the zone they name it in.
+    pub or: Option<&'static SpellAdditionalCostDef>,
+    /// A way to pay the same printed cost with life instead of objects.
+    /// "Discard a card or pay 3 life" is one cost with two ways to pay it,
+    /// and only one of them names anything: paying the life spends no
+    /// object at all, which is how the payment is told apart afterwards.
+    pub or_life: Option<u8>,
+}
+
+/// A printed "as an additional cost to cast this spell, pay N life".
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SpellLifeCostDef {
+    pub amount: u8,
+    /// The amount is X rather than the fixed number above. Toxic Deluge is
+    /// cast for as much life as its caster is willing to spend, and every
+    /// clause that reads X reads that same choice.
+    pub amount_is_x: bool,
+}
+
+impl SpellLifeCostDef {
+    #[must_use]
+    pub const fn new(amount: u8) -> Self {
+        Self {
+            amount,
+            amount_is_x: false,
+        }
+    }
+
+    /// "Pay X life", chosen as the spell is cast.
+    #[must_use]
+    pub const fn variable() -> Self {
+        Self {
+            amount: 0,
+            amount_is_x: true,
+        }
+    }
+}
+
+/// What spending a named object actually does to it.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum SpendModeDef {
+    /// Whatever the object's zone implies, which is what almost every printed
+    /// cost means: a permanent is sacrificed, a card in a graveyard is
+    /// exiled, and a card in hand is discarded.
+    #[default]
+    ByZone,
+    /// Exiled rather than put in a graveyard. "Exile a red card from your
+    /// hand" spends it without ever making it a graveyard card.
+    Exile,
+    /// Returned to its owner's hand. The free-spell cycle pays this way: the
+    /// lands come back rather than being lost.
+    ReturnToHand,
+}
+
+impl SpellAdditionalCostDef {
+    #[must_use]
+    pub const fn new(object: ObjectPredicateDef, zone: ZoneKind, count: u8) -> Self {
+        Self {
+            or_life: None,
+            object,
+            zone,
+            count,
+            counted: SpellAdditionalCostCountDef::Printed,
+            spend: SpendModeDef::ByZone,
+            or: None,
+        }
+    }
+
+    /// Where the number of objects comes from, when the printed count is
+    /// not it -- an X, an escalate surcharge, or a total mana value to
+    /// reach.
+    #[must_use]
+    pub const fn counted(mut self, counted: SpellAdditionalCostCountDef) -> Self {
+        self.counted = counted;
+        self
+    }
+
+    /// "... or <the other way>." The caster picks one of the two.
+    #[must_use]
+    pub const fn or(mut self, alternative: &'static SpellAdditionalCostDef) -> Self {
+        self.or = Some(alternative);
+        self
+    }
+
+    /// "... or pay N life." The same cost, paid with life rather than with
+    /// anything the clause names.
+    #[must_use]
+    pub const fn or_pay_life(mut self, life: u8) -> Self {
+        self.or_life = Some(life);
+        self
+    }
+
+    /// The life every alternative way of paying this cost would take,
+    /// smallest first. Empty when nothing about it may be paid with life.
+    #[must_use]
+    pub fn life_alternatives(self) -> Vec<u8> {
+        let mut life = self
+            .alternatives()
+            .into_iter()
+            .filter_map(|cost| cost.or_life)
+            .collect::<Vec<_>>();
+        life.sort_unstable();
+        life.dedup();
+        life
+    }
+
+    /// This cost and every alternative way of paying it, in printed order.
+    #[must_use]
+    pub fn alternatives(self) -> Vec<Self> {
+        let mut costs = vec![self];
+        let mut next = self.or;
+        while let Some(cost) = next {
+            costs.push(*cost);
+            next = cost.or;
+        }
+        costs
+    }
+
+    /// The same cost, counted in X rather than in a printed number.
+    #[must_use]
+    pub const fn counted_in_x(mut self) -> Self {
+        self.counted = SpellAdditionalCostCountDef::ChosenX;
+        self
+    }
+
+    /// Escalate: the same cost, paid once for each mode past the first.
+    #[must_use]
+    pub const fn counted_per_extra_mode(mut self) -> Self {
+        self.counted = SpellAdditionalCostCountDef::ModesBeyondFirst;
+        self
+    }
+
+    #[must_use]
+    pub const fn spent(mut self, spend: SpendModeDef) -> Self {
+        self.spend = spend;
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -38,6 +250,23 @@ pub struct ModalSpellDef {
     pub maximum: u8,
     /// Some spells explicitly allow the same mode to be chosen more than once.
     pub may_repeat: bool,
+    /// A cost paid as the whole spell is cast, on top of its mana. Escalate
+    /// is the only one printed on a modal spell, and it belongs to the spell
+    /// rather than to any mode: what varies is how many modes were chosen.
+    pub additional_cost: Option<SpellAdditionalCostDef>,
+    /// A printed "if <condition> as you cast this spell, you may choose two
+    /// instead". The larger maximum applies when the condition holds where
+    /// the spell is offered; it never lowers the printed one, and the
+    /// minimum is unaffected because the extra mode is always optional.
+    pub conditional_maximum: Option<ConditionalModeMaximumDef>,
+}
+
+/// The two halves of "you may choose two instead": what has to be true, and
+/// how many modes that allows.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ConditionalModeMaximumDef {
+    pub condition: ConditionDef,
+    pub maximum: u8,
 }
 
 impl ModalSpellDef {
@@ -53,7 +282,16 @@ impl ModalSpellDef {
             minimum,
             maximum,
             may_repeat,
+            additional_cost: None,
+            conditional_maximum: None,
         }
+    }
+
+    /// "If <condition> as you cast this spell, you may choose two instead."
+    #[must_use]
+    pub const fn with_conditional_maximum(mut self, condition: ConditionDef, maximum: u8) -> Self {
+        self.conditional_maximum = Some(ConditionalModeMaximumDef { condition, maximum });
+        self
     }
 
     #[must_use]
@@ -68,6 +306,8 @@ impl SpellAbilityDef {
         Self::Nonmodal {
             targets: &[],
             additional_cost: None,
+            life_cost: None,
+            resolution_destination: SpellResolutionDestinationDef::Graveyard,
         }
     }
 
@@ -80,10 +320,14 @@ impl SpellAbilityDef {
     pub const fn with_targets(self, targets: &'static [AbilityTargetDef]) -> Self {
         match self {
             Self::Nonmodal {
-                additional_cost, ..
+                additional_cost,
+                life_cost,
+                ..
             } => Self::Nonmodal {
                 targets,
                 additional_cost,
+                life_cost,
+                resolution_destination: self.resolution_destination(),
             },
             Self::Modal(_) => panic!("targets belong on modal spell branches"),
         }
@@ -95,11 +339,54 @@ impl SpellAbilityDef {
     #[must_use]
     pub const fn with_additional_cost(self, cost: SpellAdditionalCostDef) -> Self {
         match self {
-            Self::Nonmodal { targets, .. } => Self::Nonmodal {
+            Self::Nonmodal {
+                targets,
+                life_cost,
+                resolution_destination,
+                ..
+            } => Self::Nonmodal {
                 targets,
                 additional_cost: Some(cost),
+                life_cost,
+                resolution_destination,
             },
-            Self::Modal(_) => panic!("an additional cost belongs to a whole spell"),
+            // Escalate is printed on a modal spell and belongs to the whole
+            // of it; what varies is how many modes it was cast with.
+            Self::Modal(modal) => Self::Modal(ModalSpellDef {
+                additional_cost: Some(cost),
+                ..modal
+            }),
+        }
+    }
+
+    /// "As an additional cost to cast this spell, pay N life."
+    ///
+    /// # Panics
+    ///
+    /// Panics for a modal wrapper, which has no single cost to attach.
+    #[must_use]
+    pub const fn with_life_cost(self, cost: SpellLifeCostDef) -> Self {
+        match self {
+            Self::Nonmodal {
+                targets,
+                additional_cost,
+                resolution_destination,
+                ..
+            } => Self::Nonmodal {
+                targets,
+                additional_cost,
+                life_cost: Some(cost),
+                resolution_destination,
+            },
+            Self::Modal(_) => panic!("a life cost belongs to a whole spell"),
+        }
+    }
+
+    #[must_use]
+    pub const fn life_cost(self) -> Option<SpellLifeCostDef> {
+        match self {
+            Self::Nonmodal { life_cost, .. } => life_cost,
+            Self::Modal(_) => None,
         }
     }
 
@@ -109,7 +396,41 @@ impl SpellAbilityDef {
             Self::Nonmodal {
                 additional_cost, ..
             } => additional_cost,
-            Self::Modal(_) => None,
+            Self::Modal(modal) => modal.additional_cost,
+        }
+    }
+
+    /// Changes the ordinary destination used after this spell resolves. Modal
+    /// wrappers share one spell object and therefore one destination.
+    #[must_use]
+    pub const fn with_resolution_destination(
+        self,
+        destination: SpellResolutionDestinationDef,
+    ) -> Self {
+        match self {
+            Self::Nonmodal {
+                targets,
+                additional_cost,
+                life_cost,
+                ..
+            } => Self::Nonmodal {
+                targets,
+                additional_cost,
+                life_cost,
+                resolution_destination: destination,
+            },
+            Self::Modal(modal) => Self::Modal(modal),
+        }
+    }
+
+    #[must_use]
+    pub const fn resolution_destination(self) -> SpellResolutionDestinationDef {
+        match self {
+            Self::Nonmodal {
+                resolution_destination,
+                ..
+            } => resolution_destination,
+            Self::Modal(_) => SpellResolutionDestinationDef::Graveyard,
         }
     }
 
@@ -176,10 +497,25 @@ pub enum ActivationTimingDef {
     YourTurn,
     /// Only during the upkeep step of a turn its controller is taking.
     YourUpkeep,
+    /// Only during an upkeep step, whoever is taking the turn. Tolaria opens
+    /// on both, which is what makes it an answer to an attack.
+    AnyUpkeep,
+    /// Only during the combat phase, whoever is taking the turn. Every step
+    /// from the beginning of combat through the end of combat, which is what
+    /// lets an animated artifact block as well as attack.
+    DuringCombat,
+    /// Only during the end-of-combat step. Combat is over and the damage is
+    /// dealt, so a land shooting an attacker here is finishing off something
+    /// that survived rather than stopping it.
+    EndOfCombat,
     /// Only when its controller could cast a sorcery: their own main phase,
     /// with the stack empty. Unlike the windows above, this one does depend
     /// on the stack, because that is what "as a sorcery" means.
     SorcerySpeed,
+    /// The ninjutsu window: the priority round the attack declaration
+    /// opens. It is the only moment an attacker can be both unblocked and
+    /// still able to be swapped out, which is the whole of the mechanic.
+    AfterAttackersDeclared,
     /// "Activate only before the combat damage step." The window is open all
     /// turn until damage is about to be dealt, on either player's turn, which
     /// is what makes the ability something the attacker can be surprised by.
@@ -197,6 +533,26 @@ pub struct ActivatedAbilityDef {
     /// each turn" clause allows this ability to be activated per turn from
     /// one object. `None` is the ordinary unlimited case.
     pub activation_limit: Option<u8>,
+    /// Exhaust (CR 702.184a): "Activate each exhaust ability only once."
+    /// A cap on the permanent's whole lifetime rather than on its turn,
+    /// which is why it is counted apart from the limit above -- that one
+    /// clears when the turn does, and this one never clears.
+    pub exhaust: bool,
+    /// Whether anyone may activate it, not just the permanent's controller.
+    /// The permanent stays the ability's source whoever pays, so the damage
+    /// it deals is still the permanent's damage.
+    pub any_player_may_activate: bool,
+    /// A printed "activate only if ..." restriction, checked where the
+    /// activation is offered rather than where it resolves -- an ability
+    /// whose condition is false is not a legal action at all, which is what
+    /// threshold means.
+    pub condition: Option<&'static TriggerConditionDef>,
+    /// "Choose one --", for an activated ability that prints modes. The
+    /// choice is made as the ability is activated rather than as it
+    /// resolves (CR 601.2b), so it travels with the action; each mode is a
+    /// clause of its own with its own targets, exactly as a modal spell's
+    /// modes are.
+    pub modes: Option<ModalSpellDef>,
 }
 
 impl ActivatedAbilityDef {
@@ -214,7 +570,34 @@ impl ActivatedAbilityDef {
             procedure: AbilityProcedureDef::Shared,
             timing: ActivationTimingDef::Any,
             activation_limit: None,
+            exhaust: false,
+            any_player_may_activate: false,
+            condition: None,
+            modes: None,
         }
+    }
+
+    /// "Choose one --" on an activated ability.
+    #[must_use]
+    pub const fn with_modes(mut self, modes: ModalSpellDef) -> Self {
+        self.modes = Some(modes);
+        self
+    }
+
+    /// "Any player may activate this ability." The permanent stays the
+    /// source, so what it does is still the permanent's doing.
+    #[must_use]
+    pub const fn open_to_any_player(mut self) -> Self {
+        self.any_player_may_activate = true;
+        self
+    }
+
+    /// "Activate only if ...", the restriction threshold and its relatives
+    /// print. It gates the offer, not the resolution.
+    #[must_use]
+    pub const fn only_if(mut self, condition: &'static TriggerConditionDef) -> Self {
+        self.condition = Some(condition);
+        self
     }
 
     #[must_use]
@@ -238,6 +621,13 @@ impl ActivatedAbilityDef {
     #[must_use]
     pub const fn with_timing(mut self, timing: ActivationTimingDef) -> Self {
         self.timing = timing;
+        self
+    }
+
+    /// Exhaust: once per object, for as long as that object is there.
+    #[must_use]
+    pub const fn exhausting(mut self) -> Self {
+        self.exhaust = true;
         self
     }
 
@@ -265,235 +655,36 @@ pub enum ComparisonDef {
     Greater,
 }
 
-/// An intervening-if condition, the "if ..." clause a trigger reads before it
-/// does anything. Rule 603.4 checks such a condition twice: once when the
-/// ability would go on the stack, and again as it resolves.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum TriggerConditionDef {
-    /// Whether the original source object is still on the battlefield.
-    SourceOnBattlefield,
-    /// Whether the source permanent is currently untapped.
-    SourceUntapped,
-    /// How many objects the query matches, against a printed number.
-    ObjectCount {
-        query: ObjectQueryDef,
-        comparison: ComparisonDef,
-        amount: u8,
-    },
-    /// Whose turn it is, relative to the ability's controller.
-    ActivePlayer(PlayerRelation),
-    /// How many spells a matching player cast during the turn before this
-    /// one. "No spells were cast last turn" is every player at zero, and "a
-    /// player cast two or more" is any player at two.
-    SpellsCastLastTurn {
-        /// Whether every matching player has to satisfy the comparison or
-        /// only one. "No spells were cast last turn" is every player at zero;
-        /// "a player cast two or more" is one player at two.
-        quantifier: QuantifierDef,
-        player: PlayerRelation,
-        comparison: ComparisonDef,
-        amount: u8,
-    },
-    /// How much loyalty the ability's own source has left.
-    SourceLoyalty {
-        comparison: ComparisonDef,
-        amount: u8,
-    },
-    /// How many times this ability has been activated from its source this
-    /// turn, counting the activation now resolving.
-    SourceActivationsThisTurn {
-        comparison: ComparisonDef,
-        amount: u8,
-    },
-    /// Whether this ability's own source has dealt damage to an opponent of
-    /// its controller at any point this turn, by any means.
-    SourceDealtDamageToOpponentThisTurn,
-    /// Whether the ability's own source is tapped, using last-known
-    /// information if it has left the battlefield.
-    SourceIsTapped,
-    /// Whether this ability's controller controls a creature whose power is
-    /// at least every other creature's, which is what "the greatest power or
-    /// tied for the greatest power" asks. False when no creature is on the
-    /// battlefield at all.
-    ControlsGreatestPowerCreature,
-    /// Whether what the ability's source is attached to matches. This is what
-    /// "as long as equipped creature is a Human" asks, and it is read live so
-    /// the answer follows the Equipment as it moves.
-    AttachedPermanentMatches { object: ObjectPredicateDef },
-    /// How many counters of one kind the ability's own source carries. This
-    /// is what "as long as there are exactly three tide counters on this
-    /// creature" asks, and it is read live rather than captured.
-    SourceCounters {
-        kind: CounterKind,
-        comparison: ComparisonDef,
-        amount: u8,
-    },
-    /// Whether what a target slot points at still matches. Read when the
-    /// condition is checked, so a delayed effect can ask about the target as
-    /// it is then rather than as it was.
-    TargetMatches {
-        slot: TargetIndex,
-        object: ObjectPredicateDef,
-    },
-}
-
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TriggeredAbilityDef {
     pub source_zones: &'static [ZoneKind],
     pub event: TriggerEventDef,
+    /// "This ability triggers only once each turn." A cap on how often one
+    /// object's copy of this ability may trigger per turn; `None` is the
+    /// ordinary unlimited case. Checked where the trigger is captured, so a
+    /// capped ability past its count simply does not trigger.
+    pub trigger_limit: Option<u8>,
     pub targets: &'static [AbilityTargetDef],
+    /// An Oracle exception to rule 608.2b: the ability continues resolving
+    /// even when every target has become illegal. Illegal targets remain
+    /// unaffected; only the ordinary all-targets-illegal early exit is
+    /// suppressed.
+    pub resolves_with_illegal_targets: bool,
     pub procedure: AbilityProcedureDef,
     /// Held by reference so that this definition stays small enough to pass
     /// around by value alongside a captured trigger.
     pub condition: Option<&'static TriggerConditionDef>,
-}
-
-impl TriggeredAbilityDef {
-    #[must_use]
-    pub const fn new(event: TriggerEventDef) -> Self {
-        Self {
-            source_zones: &[ZoneKind::Battlefield],
-            event,
-            targets: &[],
-            procedure: AbilityProcedureDef::Shared,
-            condition: None,
-        }
-    }
-
-    #[must_use]
-    pub const fn with_condition(mut self, condition: &'static TriggerConditionDef) -> Self {
-        self.condition = Some(condition);
-        self
-    }
-
-    #[must_use]
-    pub const fn with_source_zones(mut self, source_zones: &'static [ZoneKind]) -> Self {
-        self.source_zones = source_zones;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_targets(mut self, targets: &'static [AbilityTargetDef]) -> Self {
-        self.targets = targets;
-        self
-    }
-
-    #[must_use]
-    pub const fn with_procedure(mut self, procedure: AbilityProcedureDef) -> Self {
-        self.procedure = procedure;
-        self
-    }
+    /// "Choose one --" on a trigger. The mode is chosen as the ability is
+    /// put onto the stack (CR 603.3c), which is why it is settled during
+    /// placement beside target selection rather than as the ability
+    /// resolves. Exactly one mode: a trigger carries one effect, so a
+    /// clause choosing two would have nowhere to put the second.
+    pub modes: Option<ModalSpellDef>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct StaticAbilityDef {
     pub source_zones: &'static [ZoneKind],
-}
-
-/// The rules procedure and mana cost supplied by a printed
-/// alternative-casting keyword.
-///
-/// A play option exposes a derived [`AlternativeCostDef`] whose identity is
-/// the positional [`AbilityId`] of this clause. An overload clause uses its
-/// [`AbilityDef::effect`] as the targetless text-replacement result; flashback
-/// uses `EffectDef::None` and changes where the card may be cast and where it
-/// goes after the stack.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct AlternativeCastAbilityDef {
-    pub mana_cost: AlternativeCastManaCostDef,
-    pub kind: AlternativeCastKindDef,
-    /// Rules text for the spell as modified by this alternative, when the
-    /// procedure changes its visible instructions (as overload does).
-    pub stack_text: Option<&'static str>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AlternativeCastKindDef {
-    Flashback,
-    Overload,
-    /// Cast from hand only in the window opened by drawing the card, as the
-    /// first card drawn that turn.
-    Miracle,
-}
-
-/// How an alternative-casting ability determines the cost it supplies.
-///
-/// Printed abilities normally carry a fixed cost. A granted ability such as
-/// Snapcaster Mage's flashback instead reads the mana cost of the card that
-/// gained it, after a concrete play option has selected the spell form.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum AlternativeCastManaCostDef {
-    Fixed(ManaCost),
-    ThisCardManaCost,
-}
-
-impl AlternativeCastManaCostDef {
-    #[must_use]
-    pub const fn resolve(self, card_mana_cost: Option<ManaCost>) -> Option<ManaCost> {
-        match self {
-            Self::Fixed(mana_cost) => Some(mana_cost),
-            Self::ThisCardManaCost => card_mana_cost,
-        }
-    }
-}
-
-impl AlternativeCastKindDef {
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Flashback => "Flashback",
-            Self::Overload => "Overload",
-            Self::Miracle => "Miracle",
-        }
-    }
-}
-
-impl AlternativeCastAbilityDef {
-    #[must_use]
-    pub fn rules_text(self) -> String {
-        match (self.kind, self.mana_cost) {
-            (AlternativeCastKindDef::Flashback, AlternativeCastManaCostDef::Fixed(mana_cost)) => {
-                format!(
-                    "Flashback {mana_cost} (You may cast this card from your graveyard for its flashback cost. Then exile it.)",
-                )
-            }
-            (
-                AlternativeCastKindDef::Flashback,
-                AlternativeCastManaCostDef::ThisCardManaCost,
-            ) => "Flashback—the flashback cost is equal to this card's mana cost. (You may cast this card from your graveyard for its flashback cost. Then exile it.)".into(),
-            (AlternativeCastKindDef::Overload, AlternativeCastManaCostDef::Fixed(mana_cost)) => {
-                format!(
-                    "Overload {mana_cost} (You may cast this spell for its overload cost. If you do, change \"target\" in its text to \"each.\")",
-                )
-            }
-            (
-                AlternativeCastKindDef::Overload,
-                AlternativeCastManaCostDef::ThisCardManaCost,
-            ) => "Overload—the overload cost is equal to this card's mana cost. (You may cast this spell for its overload cost. If you do, change \"target\" in its text to \"each.\")".into(),
-            (AlternativeCastKindDef::Miracle, AlternativeCastManaCostDef::Fixed(mana_cost)) => {
-                format!(
-                    "Miracle {mana_cost} (You may cast this card for its miracle cost when you draw it if it's the first card you drew this turn.)",
-                )
-            }
-            (
-                AlternativeCastKindDef::Miracle,
-                AlternativeCastManaCostDef::ThisCardManaCost,
-            ) => "Miracle—the miracle cost is equal to this card's mana cost. (You may cast this card for its miracle cost when you draw it if it's the first card you drew this turn.)".into(),
-        }
-    }
-
-    #[must_use]
-    pub fn alternative_cost(
-        self,
-        ability: AbilityId,
-        card_mana_cost: Option<ManaCost>,
-    ) -> Option<AlternativeCostDef> {
-        Some(AlternativeCostDef {
-            id: AlternativeCostId(ability.0),
-            label: self.kind.label().into(),
-            mana_cost: self.mana_cost.resolve(card_mana_cost)?,
-        })
-    }
 }
 
 /// A replacement ability changes how an event happens and never uses the
@@ -513,7 +704,7 @@ impl ReplacementAbilityDef {
     pub const fn new() -> Self {
         Self {
             source_zones: &[ZoneKind::Battlefield],
-            event: ReplacementEventDef::EntersBattlefield,
+            event: ReplacementEventDef::SourceEntersBattlefield,
             condition: None,
             optional: false,
         }
@@ -591,86 +782,6 @@ impl Default for StaticAbilityDef {
     }
 }
 
-/// A keyword ability carried as an ordinary, ordered rules clause.
-///
-/// The clause's [`AbilityCoverageDef`] says whether the engine currently
-/// executes the keyword. This keeps unimplemented keywords such as banding
-/// visible and accurately reflected in aggregate coverage without hiding them
-/// in card-level booleans.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum KeywordAbility {
-    Flying,
-    Trample,
-    Haste,
-    FirstStrike,
-    DoubleStrike,
-    Banding,
-    Vigilance,
-    Defender,
-    Deathtouch,
-    Lifelink,
-    Reach,
-    Flash,
-    Hexproof,
-    Shroud,
-    /// Unleash. The engine implements both halves: an optional +1/+1 counter
-    /// as the permanent enters, and no blocking while it carries one.
-    Unleash,
-    Intimidate,
-    Undying,
-    Indestructible,
-    /// "Attacks each combat if able." Not a printed keyword, but it behaves
-    /// like one: a static requirement with no parameters that several cards
-    /// state in the same words.
-    AttacksEachCombatIfAble,
-    /// CR 702.14. One keyword parameterized by land type: the creature cannot
-    /// be blocked as long as the defending player controls a land of that
-    /// type. The printed variants differ only in which type they name.
-    Landwalk(BasicLandType),
-    /// Landwalk naming a land supertype.
-    LegendaryLandwalk,
-    ProtectionFrom(ManaColor),
-}
-
-impl KeywordAbility {
-    /// A dense index for the keywords that carry no parameter, so a set of
-    /// them fits in a bitmask. Protection is excluded: it is really one
-    /// keyword per color.
-    #[must_use]
-    pub const fn simple_index(self) -> Option<u32> {
-        Some(match self {
-            Self::Flying => 0,
-            Self::Trample => 1,
-            Self::Haste => 2,
-            Self::FirstStrike => 3,
-            Self::DoubleStrike => 4,
-            Self::Banding => 5,
-            Self::Vigilance => 6,
-            Self::Defender => 7,
-            Self::Deathtouch => 8,
-            Self::Lifelink => 9,
-            Self::Reach => 10,
-            Self::Flash => 11,
-            Self::Hexproof => 12,
-            Self::Intimidate => 13,
-            Self::Undying => 14,
-            Self::AttacksEachCombatIfAble => 16,
-            Self::Indestructible => 18,
-            Self::Shroud => 19,
-            Self::Unleash => 26,
-            // One index per land type, so a set of landwalks still packs into
-            // the same bitmask as the parameterless keywords.
-            Self::Landwalk(BasicLandType::Plains) => 20,
-            Self::Landwalk(BasicLandType::Island) => 21,
-            Self::Landwalk(BasicLandType::Swamp) => 22,
-            Self::Landwalk(BasicLandType::Mountain) => 23,
-            Self::Landwalk(BasicLandType::Forest) => 24,
-            Self::LegendaryLandwalk => 25,
-            Self::ProtectionFrom(_) => return None,
-        })
-    }
-}
-
 /// The rules category and structural procedure of an ability. Text and
 /// implementation coverage live on [`AbilityDef`] so every printed clause has
 /// one canonical text string regardless of how it executes. Identity is
@@ -685,6 +796,7 @@ pub enum DeclarativeAbilityDef {
     Static(StaticAbilityDef),
     Replacement(ReplacementAbilityDef),
     AlternativeCast(AlternativeCastAbilityDef),
+    OptionalAdditionalCost(OptionalAdditionalCostAbilityDef),
     SpecialAction(SpecialActionDef),
     Keyword(KeywordAbility),
     /// Transitional structural marker for a clause still dispatched through
@@ -714,8 +826,19 @@ pub enum EffectExecutionDef {
 /// migration target, but the shared resolver must not execute that definition
 /// until the execution kind becomes [`EffectExecutionDef::Declarative`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum AbilityProgramDef {
+    Effects(EffectDef),
+    Replacement(ReplacementEffectDef),
+}
+
+/// The structured program and the resolver responsible for executing it.
+///
+/// Replacement programs are typed separately because they mutate a
+/// prospective event and preserve that event across any decisions they make;
+/// they are not resolving stack effects.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct AbilityEffectDef {
-    pub definition: EffectDef,
+    pub definition: AbilityProgramDef,
     pub execution: EffectExecutionDef,
 }
 
@@ -723,7 +846,15 @@ impl AbilityEffectDef {
     #[must_use]
     pub const fn declarative(definition: EffectDef) -> Self {
         Self {
-            definition,
+            definition: AbilityProgramDef::Effects(definition),
+            execution: EffectExecutionDef::Declarative,
+        }
+    }
+
+    #[must_use]
+    pub const fn replacement_program(definition: ReplacementEffectDef) -> Self {
+        Self {
+            definition: AbilityProgramDef::Replacement(definition),
             execution: EffectExecutionDef::Declarative,
         }
     }
@@ -736,9 +867,23 @@ impl AbilityEffectDef {
 
     #[must_use]
     pub const fn declarative_definition(self) -> Option<EffectDef> {
-        match self.execution {
-            EffectExecutionDef::Declarative => Some(self.definition),
-            EffectExecutionDef::Custom(_) | EffectExecutionDef::CardOwned => None,
+        match (self.execution, self.definition) {
+            (EffectExecutionDef::Declarative, AbilityProgramDef::Effects(definition)) => {
+                Some(definition)
+            }
+            (EffectExecutionDef::Declarative, AbilityProgramDef::Replacement(_))
+            | (EffectExecutionDef::Custom(_) | EffectExecutionDef::CardOwned, _) => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn declarative_replacement(self) -> Option<ReplacementEffectDef> {
+        match (self.execution, self.definition) {
+            (EffectExecutionDef::Declarative, AbilityProgramDef::Replacement(definition)) => {
+                Some(definition)
+            }
+            (EffectExecutionDef::Declarative, AbilityProgramDef::Effects(_))
+            | (EffectExecutionDef::Custom(_) | EffectExecutionDef::CardOwned, _) => None,
         }
     }
 
@@ -800,3 +945,7 @@ impl AbilityCoverageDef {
         !matches!(self.status, ImplementationStatus::MetadataOnly)
     }
 }
+
+include!("ability_kinds/conditions.rs");
+include!("ability_kinds/keywords.rs");
+include!("ability_kinds/triggered.rs");

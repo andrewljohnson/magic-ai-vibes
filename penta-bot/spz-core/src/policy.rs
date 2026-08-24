@@ -13,6 +13,7 @@
 
 use penta::{Action, Game, PlayerId, PlayerObservation};
 use penta::protocol::protocol_actions;
+use crate::extract::perm_def_or;
 
 use crate::extract::features;
 use crate::net::Mlp;
@@ -353,9 +354,9 @@ impl Policy {
             // invisible-upside guard.
             let mut inst_def: std::collections::HashMap<u32, u16> =
                 std::collections::HashMap::new();
-            for (id, d) in &obs.hand { inst_def.insert(id.0, d.0); }
+            for (id, d) in &obs.hand { inst_def.insert(id.0, d.get() as u16); }
             for perm in &obs.battlefield {
-                inst_def.insert(perm.id.0, perm.definition.0);
+                inst_def.insert(perm.id.0, perm_def_or(perm));
             }
             for &i in &testable {
                 let def = match &actions[i] {
@@ -466,7 +467,7 @@ struct DomState {
 }
 
 fn bf_key(perm: &penta::PermanentObservation) -> (u16, i16, i16) {
-    (perm.definition.0, perm.power.unwrap_or(i16::MIN),
+    (perm_def_or(perm), perm.power.unwrap_or(i16::MIN),
      perm.toughness.unwrap_or(i16::MIN))
 }
 
@@ -505,8 +506,8 @@ impl DomState {
             opp_hand: obs.opponent_hand_size,
             opp_life: obs.life_totals[oi],
             opp_bf,
-            opp_gy: multiset(obs.graveyards[oi].iter().map(|(_, d)| d.0)),
-            opp_exile: multiset(obs.exiles[oi].iter().map(|(_, d)| d.0)),
+            opp_gy: multiset(obs.graveyards[oi].iter().map(|(_, d)| d.get() as u16)),
+            opp_exile: multiset(obs.exiles[oi].iter().map(|(_, d)| d.get() as u16)),
         }
     }
 

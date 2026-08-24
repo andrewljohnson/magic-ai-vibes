@@ -8,46 +8,43 @@ gain has to be structural.** The missing structure is a value function.
 
 ---
 
-## BLOCKED: the public server is seven wire epochs ahead
+## Current direction: protocol 29, then deploy
 
-Discovered 2026-08-24 trying to deploy. Registration is refused before a
-single game:
+The public server refused protocol 22 with `409 incompatible_bot`
+(server 29, bot 21 -- we were not declaring a version at all). Both halves
+are now fixed.
 
-    409 {"code":"incompatible_bot",
-         "server":{"protocolVersion":29,"capabilities":["reconstruction.checkpoint.v8"]},
-         "bot":{"protocolVersion":21}}
+**Done.**
+* The bot declares `{protocolVersion, capabilities, requiredCapabilities}`
+  at registration and heartbeat, with an EMPTY capability list. The docs
+  are explicit that a bot which only reads `legalActions` must not echo the
+  server's capabilities without implementing them.
+* `engine-p29/` built from `lacker/penta` 12366c87 (rustc 1.97.1),
+  protocol 29.
+* `vendor/penta` upgraded and our two vendor patches re-applied
+  (`core_game`, `into_core_game` -- both marked SPZ VENDOR PATCH).
+* `spz-core` ported to the new API and all 17 tests pass. The changes were
+  mechanical but real: `CardDefinitionId` privatised its field (`.get()`),
+  `PermanentObservation.definition` became
+  `characteristics: ObjectCharacteristics` (an enum -- tokens, emblems and
+  face-down objects have NO card definition, so every read now handles
+  None), `AbilityOrigin` split into seven variants, and
+  `ActivateAbility.cost_object` became a `cost_objects` list.
 
-`protocolVersion` is the breaking bot-wire EPOCH. Our engine (0.7.0) speaks
-22; `penta.lacker.workers.dev` speaks 29.
+**The trained nets survive, which was not obvious.** The new catalog holds
+8862 cards against our pinned 244, and marks 981 legal against our 128.
+But all 128 of our definitions are still present with the SAME ids and
+names, and the 14 built-in decks use only 107 of them. Feature slots come
+from the sorted set of LEGAL definitions, so pinning legality back to the
+original 128 (`pinned-catalog-p29.json`) reproduces the exact layout --
+`action_dim=184` on both. No retraining forced by the upgrade.
 
-Fixed already: the bot never declared `{protocolVersion, capabilities,
-requiredCapabilities}` at all, so the server defaulted it to 21. It now
-sends its real manifest at registration and heartbeat, with an EMPTY
-capability list -- the docs are explicit that a bot which only reads
-`legalActions` must not echo the server's advertised capabilities without
-implementing them.
-
-That is necessary but not sufficient: 22 != 29 either way.
-
-**The upgrade is not just a rebuild, and this is the part to think about
-before starting.** The local penta checkout is 173 commits behind, and 120
-of those are `Catalog <card>` commits. Our pinned catalog holds 244 cards,
-and the feature layout indexes card DEFINITIONS directly (`t.defs` in
-`action_feat.rs`, and the belief block's per-definition counts). A larger
-card pool moves every feature slot after it, so **the trained nets do not
-transfer** -- upgrading the engine most likely means retraining.
-
-Protocol 22 also introduced `simulationFingerprint` precisely so trained
-weights can be pinned to the simulation that produced them, and ours will
-not match.
-
-→ Options, in the order a human should weigh them:
-  1. Stay on 22 and keep improving offline. The 54.3% number is real and
-     measured; it just cannot be played on the public server today.
-  2. Upgrade the engine and retrain from scratch on the new catalog. The
-     loop is now known to work end to end, so this is time rather than
-     research -- roughly a day of self-play to get back to parity.
-  3. Ask upstream whether a protocol-22 compatibility window exists.
+**Next.**
+1. Confirm the 54.3% net still plays at strength on protocol 29 (gating).
+2. Retrain/continue on protocol 29 from the existing checkpoint.
+3. Register and deploy. `hosted_bot.py --az deploy_v1 --az-iters 128`.
+4. Fix what `playout_log.py` found -- see RESULTS. Attacking into a
+   strictly better blocker is ~0.86/game and is the biggest.
 
 ## THE NEXT FEW THINGS (ordered, 2026-08-22)
 

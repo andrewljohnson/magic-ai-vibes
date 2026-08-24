@@ -88,11 +88,19 @@ fn old_school_ring_offers_owned_exile_and_sideboard_then_resumes_the_draws() {
     assert!(game.observe(PlayerId::Two).decision.is_none());
     assert!(decision.options.iter().any(|option| {
         option.zone == DecisionZone::Exile
-            && option.card == Some((exiled_ring, cards::RING_OF_MARUF))
+            && option.card
+                == Some((
+                    exiled_ring,
+                    ObjectCharacteristics::card(cards::RING_OF_MARUF, CardPartId::PRIMARY),
+                ))
     }));
     assert!(decision.options.iter().any(|option| {
         option.zone == DecisionZone::OutsideGame
-            && option.card == Some((outside_id, cards::SERRA_ANGEL))
+            && option.card
+                == Some((
+                    outside_id,
+                    ObjectCharacteristics::card(cards::SERRA_ANGEL, CardPartId::PRIMARY),
+                ))
     }));
     assert_eq!(game.players[0].library.len(), 3);
     assert_eq!(game.cards_drawn_this_turn[0], 0);
@@ -138,7 +146,7 @@ fn old_school_ring_offers_owned_exile_and_sideboard_then_resumes_the_draws() {
 #[test]
 fn non_old_school_ring_uses_oracle_outside_game_source_only() {
     let mut game = ready_game();
-    game.format = Format::IsdRtrStandard;
+    game.format = Format::IsdM14Standard;
     set_outside_game(&mut game, PlayerId::One, &[cards::SERRA_ANGEL]);
     let exiled_ring = resolve_ring_activation(&mut game);
 
@@ -169,7 +177,7 @@ fn non_old_school_ring_uses_oracle_outside_game_source_only() {
 #[test]
 fn an_impossible_ring_choice_still_replaces_the_draw_without_decking() {
     let mut game = ready_game();
-    game.format = Format::IsdRtrStandard;
+    game.format = Format::IsdM14Standard;
     game.players[0].outside_game.clear();
     game.players[0].library.clear();
     resolve_ring_activation(&mut game);
@@ -294,6 +302,7 @@ fn replacement_effect_tail_finishes_before_later_draws_and_outer_effects() {
             reveal: false,
             destination: ZoneKind::Hand,
             placement: ZonePlacement::Top,
+            arrival_effect: None,
         },
         EffectDef::LoseLife {
             recipient: EffectRecipientDef::Controller,
@@ -317,8 +326,10 @@ fn replacement_effect_tail_finishes_before_later_draws_and_outer_effects() {
     stack_library(&mut game, &[(12_075, cards::MOUNTAIN)]);
     let source = spell(12_076, cards::SIGN_IN_BLOOD, PlayerId::One, 0);
     game.draw_replacements[0].push_back(DrawReplacement {
+        optional: false,
+        installed: true,
         object: Box::new(source.clone()),
-        context: TriggerContext::empty(),
+        context: TriggerContext::empty().into(),
         effect: ScopedEffect::primary(EffectDef::Sequence(&REPLACEMENT_EFFECTS)),
     });
     let event_start = game.events().len();
@@ -363,16 +374,20 @@ fn the_affected_player_chooses_between_multiple_draw_replacements() {
     let source = spell(12_091, cards::RING_OF_MARUF, PlayerId::One, 0);
     game.draw_replacements[0].extend([
         DrawReplacement {
+            optional: false,
+            installed: true,
             object: Box::new(source.clone()),
-            context: TriggerContext::empty(),
+            context: TriggerContext::empty().into(),
             effect: ScopedEffect::primary(EffectDef::LoseLife {
                 recipient: EffectRecipientDef::Controller,
                 amount: ValueDef::Constant(1),
             }),
         },
         DrawReplacement {
+            optional: false,
+            installed: true,
             object: Box::new(source),
-            context: TriggerContext::empty(),
+            context: TriggerContext::empty().into(),
             effect: ScopedEffect::primary(EffectDef::GainLife {
                 recipient: EffectRecipientDef::Controller,
                 amount: ValueDef::Constant(2),
@@ -388,7 +403,7 @@ fn the_affected_player_chooses_between_multiple_draw_replacements() {
         PlayerId::One,
         Action::ChooseDecision {
             decision: decision.id,
-            options: vec![1],
+            options: vec![2],
         },
     )
     .unwrap();
@@ -421,16 +436,20 @@ fn a_chosen_replacement_finishes_its_draw_before_the_original_instruction_resume
     let source = spell(12_096, cards::RING_OF_MARUF, PlayerId::One, 0);
     game.draw_replacements[0].extend([
         DrawReplacement {
+            optional: false,
+            installed: true,
             object: Box::new(source.clone()),
-            context: TriggerContext::empty(),
+            context: TriggerContext::empty().into(),
             effect: ScopedEffect::primary(EffectDef::DrawCards {
                 recipient: EffectRecipientDef::Controller,
                 amount: ValueDef::Constant(1),
             }),
         },
         DrawReplacement {
+            optional: false,
+            installed: true,
             object: Box::new(source.clone()),
-            context: TriggerContext::empty(),
+            context: TriggerContext::empty().into(),
             effect: ScopedEffect::primary(EffectDef::LoseLife {
                 recipient: EffectRecipientDef::Controller,
                 amount: ValueDef::Constant(3),
@@ -452,7 +471,7 @@ fn a_chosen_replacement_finishes_its_draw_before_the_original_instruction_resume
             // The chosen replacement draws one. The unchosen replacement
             // applies to that nested draw and consumes it before the original
             // instruction's second draw can happen.
-            options: vec![0],
+            options: vec![1],
         },
     )
     .unwrap();
@@ -522,8 +541,10 @@ fn the_draw_step_finishes_only_after_ring_is_answered_and_replacements_expire() 
 
     // A second Ring effect that is never used lapses in cleanup.
     game.draw_replacements[0].push_back(DrawReplacement {
+        optional: false,
+        installed: true,
         object: Box::new(spell(12_200, cards::RING_OF_MARUF, PlayerId::One, 0)),
-        context: TriggerContext::empty(),
+        context: TriggerContext::empty().into(),
         effect: ScopedEffect::primary(EffectDef::None),
     });
     game.finish_cleanup();

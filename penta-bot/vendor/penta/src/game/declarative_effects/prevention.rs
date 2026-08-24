@@ -1,221 +1,222 @@
+use crate::card::{
+    DamageCoverageDef, DamageKindDef, DamagePreventionCapacityDef, DamagePreventionFollowUpDef,
+    DamageRecipientMatcherDef, DamageSourceGroupDef, DamageSourceMatcherDef, EffectDef,
+    EffectRecipientDef,
+};
+
+use super::super::prevention_state::{
+    ResolvedDamagePrevention, ResolvedDamagePreventionCapacity, ResolvedDamagePreventionCoverage,
+    ResolvedDamageRecipientMatcher, ResolvedDamageSourceMatcher,
+};
 use super::super::{
-    DamageSourceGroupDef, EffectDef, EffectRecipientDef, Game, PreventionShield,
-    RelationalDamagePrevention, RelationalSourceFilter, ScopedEffect, ShieldCoverageDef,
-    StackObject, Target, TriggerContext,
+    AbilityId, AbilitySourceRef, EffectResolutionContext, Game, RelationalSourceFilter,
+    ScopedEffect, StackObject, Target,
 };
 
 impl Game {
-    /// Records a turn-long prevention naming a group of sources. The group
-    /// crosses from card vocabulary to engine vocabulary here, since only the
-    /// engine's form has to survive a checkpoint.
-    fn prevent_player_damage_from_group(
-        &mut self,
-        player: EffectRecipientDef,
-        source: DamageSourceGroupDef,
-        object: &StackObject,
-        context: TriggerContext,
-        scoped: ScopedEffect,
-    ) {
-        let filter = match source {
-            DamageSourceGroupDef::CreaturesWithFlying => {
-                RelationalSourceFilter::CreaturesWithFlying
-            }
-            DamageSourceGroupDef::AttackingCreaturesWithoutFlying => {
-                RelationalSourceFilter::AttackingCreaturesWithoutFlying
-            }
-        };
-        for target in self.effect_recipients(player, object, context, scoped) {
-            if let Target::Player(player) = target {
-                self.relational_damage_preventions
-                    .push(RelationalDamagePrevention::ToPlayerFrom {
-                        player,
-                        source: filter,
-                    });
-            }
-        }
-    }
-
-    /// Marks each recipient as dealing no damage for the rest of the turn,
-    /// either combat damage alone or every kind.
-    fn silence_damage_sources(
-        &mut self,
-        recipient: EffectRecipientDef,
-        every_kind: bool,
-        object: &StackObject,
-        context: TriggerContext,
-        scoped: ScopedEffect,
-    ) {
-        for target in self.effect_recipients(recipient, object, context, scoped) {
-            if let Target::Permanent(id) = target
-                && let Some(permanent) = self
-                    .battlefield
-                    .iter_mut()
-                    .find(|permanent| permanent.card.id == id)
-            {
-                if every_kind {
-                    permanent.damage_dealt_by_prevented = true;
-                } else {
-                    permanent.combat_damage_dealt_by_prevented = true;
-                }
-            }
-        }
-    }
-
     pub(super) fn resolve_prevention_effect(
         &mut self,
         scoped: ScopedEffect,
         object: &StackObject,
-        context: TriggerContext,
+        context: &EffectResolutionContext,
     ) {
-        match scoped.effect {
-            EffectDef::PreventNextDamage {
-                object: recipient,
-                amount,
-            } => {
+        let EffectDef::PreventDamage {
+            prevention,
+            duration,
+        } = scoped.effect
+        else {
+            unreachable!("resolve_prevention_effect called for a non-prevention effect");
+        };
+
+        let Some(source) =
+            self.resolve_damage_source_matcher(prevention.matcher.source, object, context, scoped)
+        else {
+            return;
+        };
+        let recipients = self.resolve_damage_recipient_matchers(
+            prevention.matcher.recipient,
+            object,
+            context,
+            scoped,
+        );
+        if recipients.is_empty() {
+            return;
+        }
+
+        let capacity = match prevention.capacity {
+            DamagePreventionCapacityDef::Amount(amount) => {
                 let amount = self
                     .effect_value(amount, object, context, scoped)
                     .max(0)
                     .try_into()
                     .unwrap_or(u16::MAX);
-                for target in self.effect_recipients(recipient, object, context, scoped) {
-                    self.prevention_shields.push(PreventionShield {
-                        recipient: target,
-                        remaining: Some(amount),
-                        source: None,
-                        coverage: ShieldCoverageDef::All,
-                        gain_life: false,
-                    });
+                if amount == 0 {
+                    return;
                 }
+                ResolvedDamagePreventionCapacity::Amount(amount)
             }
-            EffectDef::ChooseDamageSource { .. } => {
-                self.resolve_damage_source_choice(scoped, object, context);
-            }
-            EffectDef::PreventNextDamageFromSource { .. } => {
-                self.install_damage_source_shield(scoped, object, context);
-            }
-            EffectDef::PreventAllDamageThisTurn { object: recipient } => {
-                for target in self.effect_recipients(recipient, object, context, scoped) {
-                    self.prevention_shields.push(PreventionShield {
-                        recipient: target,
-                        remaining: None,
-                        source: None,
-                        coverage: ShieldCoverageDef::All,
-                        gain_life: false,
-                    });
+            DamagePreventionCapacityDef::Events(events) => {
+                if events == 0 {
+                    return;
                 }
+                ResolvedDamagePreventionCapacity::Events(u16::from(events))
             }
-            EffectDef::PreventAllCombatDamageThisTurn => {
-                self.all_combat_damage_prevented = true;
-            }
-            EffectDef::PreventCombatDamageThisTurn { object: recipient } => {
-                for target in self.effect_recipients(recipient, object, context, scoped) {
-                    if let Target::Permanent(id) = target
-                        && let Some(permanent) = self
-                            .battlefield
-                            .iter_mut()
-                            .find(|permanent| permanent.card.id == id)
-                    {
-                        permanent.combat_damage_prevented = true;
-                    }
-                }
-            }
-            EffectDef::PreventCombatDamageDealtByThisTurn { object: recipient } => {
-                self.silence_damage_sources(recipient, false, object, context, scoped);
-            }
-            EffectDef::PreventDamageDealtByThisTurn { object: recipient } => {
-                self.silence_damage_sources(recipient, true, object, context, scoped);
-            }
-            EffectDef::PreventDamageToPlayerAndControlledCreaturesThisTurn { player } => {
-                for target in self.effect_recipients(player, object, context, scoped) {
-                    if let Target::Player(player) = target {
-                        self.relational_damage_preventions.push(
-                            RelationalDamagePrevention::ToPlayerAndControlledCreatures(player),
-                        );
-                    }
-                }
-            }
-            EffectDef::PreventDamageToPlayerFromThisTurn { player, source } => {
-                self.prevent_player_damage_from_group(player, source, object, context, scoped);
-            }
-            EffectDef::PreventAllCombatDamageExceptSourceThisTurn { source } => {
-                let source = self
-                    .effect_recipients(source, object, context, scoped)
+            DamagePreventionCapacityDef::Unlimited => ResolvedDamagePreventionCapacity::Unlimited,
+        };
+        let coverage = match prevention.coverage {
+            DamageCoverageDef::All => ResolvedDamagePreventionCoverage::All,
+            DamageCoverageDef::HalfRoundedDown => ResolvedDamagePreventionCoverage::HalfRoundedDown,
+        };
+        let gain_life = match prevention.follow_up {
+            Some(DamagePreventionFollowUpDef::GainLife(player)) => self
+                .effect_recipients(EffectRecipientDef::player(player), object, context, scoped)
+                .into_iter()
+                .find_map(|target| match target {
+                    Target::Player(player) => Some(player),
+                    Target::Card(_) | Target::Permanent(_) | Target::Spell(_) => None,
+                }),
+            None => None,
+        };
+        let source_ability = AbilitySourceRef {
+            object: object.source.unwrap_or(object.id),
+            ability: object.ability_origin().unwrap_or_else(|| {
+                Self::authored_ability_origin(object.presentation(), AbilityId::PRIMARY)
+            }),
+        };
+        let timestamp = self.allocate_continuous_effect_timestamp();
+        let expiration = Self::continuous_effect_expiration(
+            duration,
+            object.controller,
+            self.turns_started[object.controller.index()],
+        );
+        let combat_only = matches!(prevention.matcher.kind, DamageKindDef::Combat);
+
+        self.damage_preventions
+            .extend(
+                recipients
                     .into_iter()
-                    .find_map(|target| match target {
-                        Target::Permanent(id) | Target::Spell(id) | Target::Card(id) => Some(id),
-                        Target::Player(_) => None,
-                    });
-                if let Some(source) = source {
-                    self.relational_damage_preventions
-                        .push(RelationalDamagePrevention::FromAllExcept(source));
-                }
-            }
-            _ => unreachable!("resolve_prevention_effect called for a non-prevention effect"),
-        }
+                    .map(|recipient| ResolvedDamagePrevention {
+                        source,
+                        recipient,
+                        combat_only,
+                        capacity,
+                        coverage,
+                        gain_life,
+                        source_ability,
+                        timestamp,
+                        expiration,
+                    }),
+            );
     }
 
-    fn resolve_damage_source_choice(
-        &mut self,
-        scoped: ScopedEffect,
+    fn resolve_damage_source_matcher(
+        &self,
+        matcher: DamageSourceMatcherDef,
         object: &StackObject,
-        context: TriggerContext,
-    ) {
-        let EffectDef::ChooseDamageSource {
-            choice,
-            chooser,
-            object: predicate,
-            then,
-        } = scoped.effect
-        else {
-            unreachable!("damage source choice helper called for a different effect");
-        };
-        for chooser in self.effect_recipients(chooser, object, context, scoped) {
-            if let Target::Player(chooser) = chooser {
-                self.queue_damage_source_choice(
-                    choice,
-                    chooser,
-                    predicate,
-                    object,
-                    context,
-                    scoped.with_effect(*then),
+        context: &EffectResolutionContext,
+        scoped: ScopedEffect,
+    ) -> Option<ResolvedDamageSourceMatcher> {
+        match matcher {
+            DamageSourceMatcherDef::Any => Some(ResolvedDamageSourceMatcher::Any),
+            DamageSourceMatcherDef::AffectedObject => {
+                debug_assert!(
+                    false,
+                    "AffectedObject is only meaningful for a static effect"
                 );
+                None
+            }
+            DamageSourceMatcherDef::Object(reference)
+            | DamageSourceMatcherDef::Except(reference) => {
+                let referenced = self
+                    .effect_recipients(
+                        EffectRecipientDef::object(reference),
+                        object,
+                        context,
+                        scoped,
+                    )
+                    .into_iter()
+                    .find_map(target_object_id)?;
+                Some(if matches!(matcher, DamageSourceMatcherDef::Object(_)) {
+                    ResolvedDamageSourceMatcher::Exact(referenced)
+                } else {
+                    ResolvedDamageSourceMatcher::Except(referenced)
+                })
+            }
+            DamageSourceMatcherDef::Matching(predicate) => {
+                Some(ResolvedDamageSourceMatcher::Matching {
+                    predicate,
+                    relative_to: object.source.unwrap_or(object.id),
+                })
+            }
+            DamageSourceMatcherDef::Group(group) => {
+                Some(ResolvedDamageSourceMatcher::Group(match group {
+                    DamageSourceGroupDef::CreaturesWithFlying => {
+                        RelationalSourceFilter::CreaturesWithFlying
+                    }
+                    DamageSourceGroupDef::AttackingCreaturesWithoutFlying => {
+                        RelationalSourceFilter::AttackingCreaturesWithoutFlying
+                    }
+                    DamageSourceGroupDef::Artifacts => RelationalSourceFilter::Artifacts,
+                    DamageSourceGroupDef::UnblockedCreatures => {
+                        RelationalSourceFilter::UnblockedCreatures
+                    }
+                }))
             }
         }
     }
 
-    fn install_damage_source_shield(
-        &mut self,
-        scoped: ScopedEffect,
+    fn resolve_damage_recipient_matchers(
+        &self,
+        matcher: DamageRecipientMatcherDef,
         object: &StackObject,
-        context: TriggerContext,
-    ) {
-        let EffectDef::PreventNextDamageFromSource {
-            object: recipient,
-            source,
-            coverage,
-            gain_life,
-        } = scoped.effect
-        else {
-            unreachable!("damage source shield helper called for a different effect");
-        };
-        let named = self
-            .effect_recipients(source, object, context, scoped)
-            .into_iter()
-            .find_map(|target| match target {
-                Target::Permanent(id) | Target::Spell(id) | Target::Card(id) => Some(id),
-                Target::Player(_) => None,
-            });
-        let Some(named) = named else {
-            return;
-        };
-        for target in self.effect_recipients(recipient, object, context, scoped) {
-            self.prevention_shields.push(PreventionShield {
-                recipient: target,
-                remaining: None,
-                source: Some(named),
-                coverage,
-                gain_life,
-            });
+        context: &EffectResolutionContext,
+        scoped: ScopedEffect,
+    ) -> Vec<ResolvedDamageRecipientMatcher> {
+        match matcher {
+            DamageRecipientMatcherDef::Any => vec![ResolvedDamageRecipientMatcher::Any],
+            DamageRecipientMatcherDef::AffectedObject => {
+                debug_assert!(
+                    false,
+                    "AffectedObject is only meaningful for a static effect"
+                );
+                Vec::new()
+            }
+            DamageRecipientMatcherDef::PlayerOrPlaneswalker => {
+                debug_assert!(
+                    false,
+                    "PlayerOrPlaneswalker is only meaningful for a trigger"
+                );
+                Vec::new()
+            }
+            DamageRecipientMatcherDef::MatchingObject(_) => {
+                debug_assert!(
+                    false,
+                    "MatchingObject is only meaningful for a trigger or a static shield"
+                );
+                Vec::new()
+            }
+            DamageRecipientMatcherDef::Recipients(recipients) => self
+                .effect_recipients(recipients, object, context, scoped)
+                .into_iter()
+                .map(ResolvedDamageRecipientMatcher::Exact)
+                .collect(),
+            DamageRecipientMatcherDef::PlayerAndCreaturesControlledBy(player) => self
+                .effect_recipients(EffectRecipientDef::player(player), object, context, scoped)
+                .into_iter()
+                .filter_map(|target| match target {
+                    Target::Player(player) => {
+                        Some(ResolvedDamageRecipientMatcher::PlayerAndCreaturesControlledBy(player))
+                    }
+                    Target::Card(_) | Target::Permanent(_) | Target::Spell(_) => None,
+                })
+                .collect(),
         }
+    }
+}
+
+fn target_object_id(target: Target) -> Option<super::super::GameObjectId> {
+    match target {
+        Target::Card(id) | Target::Permanent(id) | Target::Spell(id) => Some(id),
+        Target::Player(_) => None,
     }
 }

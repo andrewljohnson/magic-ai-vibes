@@ -3,15 +3,16 @@ use serde_json::{Value, json};
 use super::action_json::action_json;
 use super::json_common::{
     ability_origin_json, cast_signature_json, decision_visibility_name, decision_zone_name,
-    defender_json, seat_name, step_name, target_json,
+    defender_json, object_characteristics_json, object_characteristics_name, seat_name, step_name,
+    target_json,
 };
 use super::{ENGINE_VERSION, PROTOCOL_CAPABILITIES, PROTOCOL_VERSION, SIMULATION_FINGERPRINT};
 use crate::card::SpellForm;
 use crate::casting::CastSignature;
 use crate::game::{DecisionKind, DecisionObservation, DecisionOrderSemantics, StackObservation};
 use crate::{
-    AbilityOrigin, Action, CardCatalog, Format, GameObjectId, GameResult, PlayerObservation,
-    StackObjectKind, WinReason,
+    AbilityOrigin, Action, CardCatalog, Format, GameObjectId, GameResult, PhysicalFaceObservation,
+    PhysicalFaceSide, PlayerObservation, StackObjectKind, WinReason,
 };
 
 fn card_name(catalog: &CardCatalog, definition: crate::CardDefinitionId) -> Value {
@@ -20,24 +21,28 @@ fn card_name(catalog: &CardCatalog, definition: crate::CardDefinitionId) -> Valu
         .map_or(Value::Null, |card| Value::from(card.name.clone()))
 }
 
-pub(super) fn card_part_name(
-    catalog: &CardCatalog,
-    definition: crate::CardDefinitionId,
-    part: crate::CardPartId,
-) -> Value {
-    catalog.get(definition).map_or(Value::Null, |card| {
-        Value::from(
-            card.part(part)
-                .map_or_else(|| card.name.clone(), |part| part.name.clone()),
-        )
+fn physical_face_json(face: PhysicalFaceObservation) -> Value {
+    json!({
+        "kind": match face.kind {
+            crate::DoubleFacedKind::Transforming => "transforming",
+            crate::DoubleFacedKind::Modal => "modal",
+        },
+        "side": match face.side {
+            PhysicalFaceSide::Front => "front",
+            PhysicalFaceSide::Back => "back",
+        },
     })
 }
 
 fn stack_card_name(
     catalog: &CardCatalog,
-    definition: crate::CardDefinitionId,
+    characteristics: crate::ObjectCharacteristics,
     signature: Option<&CastSignature>,
 ) -> Value {
+    let crate::ObjectCharacteristics::Card { definition, .. } = characteristics else {
+        return object_characteristics_name(catalog, characteristics)
+            .map_or(Value::Null, Value::from);
+    };
     let Some(card) = catalog.get(definition) else {
         return Value::Null;
     };
@@ -57,6 +62,24 @@ fn stack_card_name(
     Value::from(resolved.unwrap_or_else(|| card.name.clone()))
 }
 
+fn presented_object_json(
+    catalog: &CardCatalog,
+    object: GameObjectId,
+    characteristics: crate::ObjectCharacteristics,
+) -> Value {
+    let mut value = json!({
+        "objectId": object.0,
+        "instance": object.0,
+        "characteristics": object_characteristics_json(characteristics),
+        "name": object_characteristics_name(catalog, characteristics),
+    });
+    if let crate::ObjectCharacteristics::Card { definition, part } = characteristics {
+        value["definition"] = Value::from(definition.get());
+        value["presentedPartId"] = Value::from(part.0);
+    }
+    value
+}
+
 fn card_list_json(
     catalog: &CardCatalog,
     cards: &[(GameObjectId, crate::CardDefinitionId)],
@@ -68,7 +91,7 @@ fn card_list_json(
                 json!({
                     "objectId": instance.0,
                     "instance": instance.0,
-                    "definition": definition.0,
+                    "definition": definition.get(),
                     "name": card_name(catalog, *definition),
                 })
             })
@@ -96,6 +119,7 @@ pub(super) fn decision_json(catalog: &CardCatalog, decision: &DecisionObservatio
             DecisionKind::TriggerOrder => "TriggerOrder",
             DecisionKind::TriggerPlacement => "TriggerPlacement",
         },
+        "sourceObjectId": decision.source.map(|source| source.0),
         "prompt": decision.prompt,
         "visibility": decision_visibility_name(decision.visibility),
         "minimum": decision.minimum,
@@ -105,13 +129,12 @@ pub(super) fn decision_json(catalog: &CardCatalog, decision: &DecisionObservatio
             "id": option.id,
             "triggerId": matches!(decision.kind, DecisionKind::TriggerOrder).then_some(option.id),
             "label": option.label,
-            "card": option.card.map(|(instance, definition)| json!({
-                "objectId": instance.0,
-                "instance": instance.0,
-                "definition": definition.0,
-                "name": card_name(catalog, definition),
-            })),
-            "members": card_list_json(catalog, &option.members),
+            "card": option.card.map(|(object, characteristics)| {
+                presented_object_json(catalog, object, characteristics)
+            }),
+            "members": option.members.iter().map(|(object, characteristics)| {
+                presented_object_json(catalog, *object, *characteristics)
+            }).collect::<Vec<_>>(),
             "abilityText": option.ability_text,
             "zone": decision_zone_name(option.zone),
         })).collect::<Vec<_>>(),
@@ -133,6 +156,7 @@ fn result_json(result: GameResult) -> Value {
                 WinReason::OpponentConceded => "OpponentConceded",
                 WinReason::OpponentLostAllLife => "OpponentLostAllLife",
                 WinReason::OpponentLostToAnEffect => "OpponentLostToAnEffect",
+                WinReason::WonByAnEffect => "WonByAnEffect",
                 WinReason::OpponentTriedToDrawFromEmptyLibrary =>
                     "OpponentTriedToDrawFromEmptyLibrary",
                 WinReason::OpponentRanOutOfTime => "OpponentRanOutOfTime",
@@ -146,29 +170,47 @@ fn permanent_observation_json(
     catalog: &CardCatalog,
     permanent: &crate::PermanentObservation,
 ) -> Value {
-    json!({
+    let mut value = json!({
         "objectId": permanent.id.0,
         "instance": permanent.id.0,
-        "definition": permanent.definition.0,
-        "presentedPartId": permanent.presented.0,
-        "name": card_part_name(catalog, permanent.definition, permanent.presented),
+        "characteristics": object_characteristics_json(permanent.characteristics),
+        "name": object_characteristics_name(catalog, permanent.characteristics),
+        "token": permanent.token,
+        "hasIndividualState": permanent.has_individual_state,
         "controller": seat_name(permanent.controller),
+        "faceDown": permanent.face_down,
+        "phasedOut": permanent.phased_out,
         "chosenCardName": permanent.chosen_card_name.as_deref(),
         "chosenCreatureType": permanent.chosen_creature_type.as_deref(),
+        "chosenBasicLandType": permanent.chosen_basic_land_type.map(crate::card::BasicLandType::subtype),
         "tapped": permanent.tapped,
         "power": permanent.power,
         "toughness": permanent.toughness,
         "damage": permanent.damage,
+        "counters": permanent.counters.iter().map(|counter| json!({
+            "name": counter.name,
+            "count": counter.count,
+        })).collect::<Vec<_>>(),
         "loyalty": permanent.loyalty,
         "loyaltyAbilityUsedThisTurn": permanent.loyalty_ability_used_this_turn,
         "attacking": permanent.attacking,
         "attackDefender": permanent.attack_defender.map(defender_json),
         "blockedThisCombat": permanent.blocked_this_combat,
-        "blocking": permanent.blocking.map(|id| id.0),
+        "blocking": permanent.blocking.iter().map(|id| id.0).collect::<Vec<_>>(),
+        "blockingThisCombat": permanent.blocking_this_combat,
+        "attackingBand": permanent.attacking_band,
         "flying": permanent.flying,
         "canAttack": permanent.can_attack,
         "enteredThisTurn": permanent.entered_this_turn,
-    })
+    });
+    if let crate::ObjectCharacteristics::Card { definition, part } = permanent.characteristics {
+        value["definition"] = Value::from(definition.get());
+        value["presentedPartId"] = Value::from(part.0);
+    }
+    if let Some(face) = permanent.physical_face {
+        value["physicalFace"] = physical_face_json(face);
+    }
+    value
 }
 
 fn emblem_observation_json(emblem: &crate::EmblemObservation) -> Value {
@@ -229,6 +271,15 @@ pub fn observation_json_for_format(
         "regularCombatDamagePending": observation.regular_combat_damage_pending,
         "life": observation.life_totals,
         "poison": observation.poison_counters,
+        "energy": observation.energy_counters,
+        "playerCounters": observation.counters.each_ref().map(|counters| counters.iter().map(|counter| json!({
+            "name": counter.name,
+            "count": counter.count,
+        })).collect::<Vec<_>>()),
+        // Optional, and present only while someone holds the crown. A game
+        // in which nobody ever becomes the monarch has the shape it always
+        // had.
+        "monarch": observation.monarch.map(seat_name),
         "manaPools": [
             mana_pool_json(&observation.mana_pools[0]),
             mana_pool_json(&observation.mana_pools[1]),
@@ -240,6 +291,9 @@ pub fn observation_json_for_format(
             "cards": card_list_json(catalog, cards),
         })),
         "librarySizes": observation.library_sizes,
+        "revealedLibraryTop": observation
+            .revealed_library_top
+            .map(|card| card_list_json(catalog, &[card])),
         "graveyards": [
             card_list_json(catalog, &observation.graveyards[0]),
             card_list_json(catalog, &observation.graveyards[1]),
@@ -248,6 +302,17 @@ pub fn observation_json_for_format(
             card_list_json(catalog, &observation.exiles[0]),
             card_list_json(catalog, &observation.exiles[1]),
         ],
+        // A card lying face down in exile is absent from the list above
+        // rather than shown, so it is counted here instead -- the same way a
+        // hand is a size rather than a list.
+        "faceDownExileSizes": observation.face_down_exile_sizes,
+        "cardCounters": observation.card_counters.iter().map(|object| json!({
+            "objectId": object.object.0,
+            "counters": object.counters.iter().map(|counter| json!({
+                "name": counter.name,
+                "count": counter.count,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
         "battlefield": observation.battlefield.iter().map(|permanent| permanent_observation_json(catalog, permanent)).collect::<Vec<_>>(),
         "emblems": observation.emblems.iter().map(emblem_observation_json).collect::<Vec<_>>(),
         "stack": observation
@@ -271,9 +336,17 @@ pub fn observation_json_for_format(
 pub(super) fn stack_object_json(catalog: &CardCatalog, object: &StackObservation) -> Value {
     let ability_id = object.ability.and_then(|origin| match origin {
         AbilityOrigin::Printed { ability, .. } => Some(ability.0),
-        AbilityOrigin::IntrinsicBasicLand(_) | AbilityOrigin::Granted { .. } => None,
+        AbilityOrigin::Token { .. }
+        | AbilityOrigin::Emblem { .. }
+        | AbilityOrigin::FaceDown { .. }
+        | AbilityOrigin::IntrinsicBasicLand(_)
+        | AbilityOrigin::IntrinsicCounter(_)
+        | AbilityOrigin::Granted { .. }
+        | AbilityOrigin::TokenGranted { .. }
+        | AbilityOrigin::EmblemGranted { .. }
+        | AbilityOrigin::FaceDownGranted { .. } => None,
     });
-    json!({
+    let mut value = json!({
         "objectId": object.id.0,
         "stackId": object.id.0,
         // Compatibility alias: this is a game object, not physical lineage.
@@ -289,8 +362,8 @@ pub(super) fn stack_object_json(catalog: &CardCatalog, object: &StackObservation
             StackObjectKind::ActivatedAbility => "ActivatedAbility",
             StackObjectKind::TriggeredAbility => "TriggeredAbility",
         },
-        "definition": object.definition.0,
-        "name": stack_card_name(catalog, object.definition, object.signature.as_ref()),
+        "characteristics": object_characteristics_json(object.characteristics),
+        "name": stack_card_name(catalog, object.characteristics, object.signature.as_ref()),
         "controller": seat_name(object.controller),
         "counterable": object.counterable,
         "signature": object.signature.as_ref().map(cast_signature_json),
@@ -306,5 +379,10 @@ pub(super) fn stack_object_json(catalog: &CardCatalog, object: &StackObservation
             .map(|permanent| permanent.0)
             .collect::<Vec<_>>(),
         "x": object.x,
-    })
+    });
+    if let crate::ObjectCharacteristics::Card { definition, part } = object.characteristics {
+        value["definition"] = Value::from(definition.get());
+        value["presentedPartId"] = Value::from(part.0);
+    }
+    value
 }

@@ -1,119 +1,31 @@
 use super::{
     AbilityCostDef, AbilityDef, AbilityOrigin, AbilityProcedureDef, Action, ActivatedAbilityDef,
     AddManaEffectDef, AppliedStackEffect, CardBehavior, CardType, CharacteristicContext,
-    CounterKind, DeclarativeAbilityDef, EffectDef, Game, GameObjectId, Mana, ManaAbilityActivation,
-    ManaColor, ManaCost, ManaPaymentPurpose, ManaPool, ManaRestrictionDef, ManaSelectionDef,
-    ManaSource, ManaSpendEffectDef, Permanent, PlayerId, RetiredObject, StackObject,
-    TriggerEventObject, ZoneKind, fold_restricted_x, pay_cost_with_orders,
+    ConditionDef, DeclarativeAbilityDef, EffectDef, Game, GameObjectId, Mana,
+    ManaAbilityActivation, ManaActivationChoices, ManaColor, ManaCost, ManaPaymentPurpose,
+    ManaPool, ManaRestrictionDef, ManaSelectionDef, ManaSource, ManaSpendEffectDef,
+    ObjectCountConditionDef, Permanent, PlayerId, RetiredObject, StackObject, TriggerContext,
+    TriggerEventObject, ZoneKind, pay_cost_with_generic_strategy,
 };
+use crate::AbilityProgramDef;
+use crate::card::{AbilityCostList, ManaSplit};
+
+mod eligibility;
+mod pricing;
+include!("mana_runtime/nonpermanent.rs");
 
 impl Game {
-    pub(super) fn mana_ability_is_usable(
-        &self,
-        permanent: &Permanent,
-        definition: ActivatedAbilityDef,
-    ) -> bool {
-        let taps_source = definition.costs.contains(&AbilityCostDef::TapSource);
-        definition.source_zones.contains(&ZoneKind::Battlefield)
-            && !definition.costs.as_slice().is_empty()
-            && definition
-                .costs
-                .iter()
-                .filter(|cost| {
-                    matches!(
-                        cost,
-                        AbilityCostDef::SacrificeSource | AbilityCostDef::ExileSource
-                    )
-                })
-                .count()
-                <= 1
-            && !(taps_source && (permanent.tapped || !self.can_use_tap_ability(permanent)))
-            && definition
-                .costs
-                .iter()
-                .all(|cost| Self::mana_ability_cost_is_supported(definition, cost))
-            && definition.costs.iter().all(|cost| match cost {
-                AbilityCostDef::Mana(cost) => self.pool_covers_cost(permanent.controller, *cost),
-                AbilityCostDef::PayLife(amount) => {
-                    self.players[permanent.controller.index()].life
-                        >= i16::try_from(*amount).unwrap_or(i16::MAX)
-                }
-                AbilityCostDef::RemoveCountersFromSource { .. }
-                | AbilityCostDef::TapSource
-                | AbilityCostDef::UntapSource
-                | AbilityCostDef::SacrificeSource
-                | AbilityCostDef::DiscardSource
-                | AbilityCostDef::DiscardCards(_)
-                | AbilityCostDef::SacrificePermanent { .. }
-                | AbilityCostDef::TapPermanent { .. }
-                | AbilityCostDef::ExileSource
-                | AbilityCostDef::Loyalty(_)
-                | AbilityCostDef::ExileCardFromGraveyard(_)
-                | AbilityCostDef::Special(_) => true,
-            })
-            && Self::source_counter_costs_are_payable(permanent, definition.costs.as_slice())
-    }
-
-    /// Whether the runtime can pay this cost as part of a mana ability.
-    ///
-    /// A mana cost is payable only out of the pool, so the ability also has
-    /// to spend its source: one that could be activated again and again
-    /// without changing the board would have nothing to stop it. That is
-    /// also why hybrid and {X} are excluded -- both would need a choice the
-    /// activation has no room to carry.
-    pub(super) fn mana_ability_cost_is_supported(
-        definition: ActivatedAbilityDef,
-        cost: &AbilityCostDef,
-    ) -> bool {
-        match cost {
-            AbilityCostDef::TapSource
-            | AbilityCostDef::SacrificeSource
-            | AbilityCostDef::ExileSource
-            | AbilityCostDef::RemoveCountersFromSource { .. }
-            | AbilityCostDef::PayLife(_) => true,
-            AbilityCostDef::Mana(mana) => {
-                !mana.variable_x
-                    && mana.hybrid.iter().all(|count| *count == 0)
-                    && definition.costs.iter().any(|cost| {
-                        matches!(
-                            cost,
-                            AbilityCostDef::TapSource
-                                | AbilityCostDef::SacrificeSource
-                                | AbilityCostDef::ExileSource
-                        )
-                    })
-            }
-            AbilityCostDef::UntapSource
-            | AbilityCostDef::DiscardSource
-            | AbilityCostDef::DiscardCards(_)
-            | AbilityCostDef::SacrificePermanent { .. }
-            | AbilityCostDef::TapPermanent { .. }
-            | AbilityCostDef::Loyalty(_)
-            | AbilityCostDef::ExileCardFromGraveyard(_)
-            | AbilityCostDef::Special(_) => false,
-        }
-    }
-
-    pub(super) fn source_counter_costs_are_payable(
-        permanent: &Permanent,
-        costs: &[AbilityCostDef],
-    ) -> bool {
-        let mut required = [0_u32; CounterKind::COUNT];
-        for cost in costs {
-            if let AbilityCostDef::RemoveCountersFromSource { kind, amount } = cost {
-                required[kind.index()] = required[kind.index()].saturating_add(u32::from(*amount));
-            }
-        }
-        CounterKind::ALL
-            .into_iter()
-            .all(|kind| u32::from(permanent.counters(kind)) >= required[kind.index()])
-    }
-
     pub(super) fn mana_ability_activations(
         &self,
         permanent: &Permanent,
     ) -> Vec<ManaAbilityActivation> {
         let mut activations = Vec::new();
+        // "Activated abilities can't be activated" covers mana abilities too,
+        // and they are enumerated here rather than with the rest, so the
+        // prohibition has to be read in both places.
+        if self.activated_abilities_are_prohibited(permanent) {
+            return activations;
+        }
         self.for_each_effective_ability(permanent, |effective| {
             let ability = effective.ability;
             if !ability.is_executable() {
@@ -122,13 +34,43 @@ impl Game {
             let DeclarativeAbilityDef::ActivatedMana(definition) = ability.definition else {
                 return;
             };
-            if !self.mana_ability_is_usable(permanent, definition) {
+            if !self.mana_ability_is_usable(permanent, &definition) {
+                return;
+            }
+            // A mana ability is enumerated here rather than with the rest, so
+            // the two restrictions a printed "activate only during your turn
+            // and only once each turn" imposes have to be read here too.
+            if !self.activation_timing_allows(permanent.controller, definition.timing) {
+                return;
+            }
+            if definition.activation_limit.is_some_and(|limit| {
+                permanent
+                    .activations_this_turn
+                    .iter()
+                    .any(|(origin, count)| *origin == effective.origin && *count >= limit)
+            }) {
+                return;
+            }
+            // And so does "activate only if you control a Swamp or a
+            // Forest". A false condition means there is no legal activation
+            // at all, which for a mana ability means the land does not
+            // produce that colour and nothing can be planned around it.
+            if definition.condition.is_some_and(|condition| {
+                !self.trigger_condition_holds(
+                    condition,
+                    permanent.card.id,
+                    permanent.controller,
+                    TriggerContext::empty(),
+                    Some(effective.origin),
+                    None,
+                )
+            }) {
                 return;
             }
             activations.extend(self.mana_activations_for(
                 permanent,
                 effective.origin,
-                definition,
+                &definition,
                 &ability,
             ));
         });
@@ -136,7 +78,7 @@ impl Game {
     }
 
     fn shared_add_mana_effect(
-        definition: ActivatedAbilityDef,
+        definition: &ActivatedAbilityDef,
         ability: &AbilityDef,
     ) -> Option<AddManaEffectDef> {
         if definition.procedure != AbilityProcedureDef::Shared
@@ -144,51 +86,276 @@ impl Game {
         {
             return None;
         }
-        let EffectDef::AddMana(effect) = ability.effect.definition else {
-            return None;
-        };
-        Some(effect)
+        match ability.declarative_effect() {
+            Some(EffectDef::AddMana(effect)) => Some(effect),
+            // "Add {G} for each +1/+1 counter on this creature" is a fixed
+            // amount at the moment it is offered; the caller resolves the
+            // value against the permanent before the activation is built.
+            Some(EffectDef::AddManaEqualTo { color, amount }) => {
+                Some(AddManaEffectDef::one(color).with_variable_amount(amount))
+            }
+            _ => None,
+        }
     }
 
-    fn is_legacy_fellwar_stone_mana_ability(
-        definition: ActivatedAbilityDef,
-        ability: &AbilityDef,
+    /// Whether a condition standing outside any resolving effect holds, read
+    /// from the battlefield as it is now. `All` is the conjunction a card
+    /// spells out when it names more than one permanent.
+    pub(in crate::game) fn static_condition_holds(
+        &self,
+        condition: ConditionDef,
+        controller: PlayerId,
+        source: GameObjectId,
     ) -> bool {
-        definition.procedure == AbilityProcedureDef::Legacy
-            && matches!(ability.effect.definition, EffectDef::Special(_))
-            && ability.custom_behavior() == Some(CardBehavior::FellwarStone)
+        match condition {
+            ConditionDef::Exists(query) => self.any_object_matches_query_with_prospective(
+                query,
+                controller,
+                source,
+                TriggerContext::empty(),
+                None,
+            ),
+            ConditionDef::All(conditions) => conditions
+                .iter()
+                .all(|condition| self.static_condition_holds(*condition, controller, source)),
+            ConditionDef::ObjectCount(counting) => {
+                let ObjectCountConditionDef {
+                    query,
+                    comparison,
+                    amount,
+                } = *counting;
+                let mut count = 0_usize;
+                let _ = self.visit_objects_matching_query_with_prospective(
+                    query,
+                    controller,
+                    source,
+                    TriggerContext::empty(),
+                    None,
+                    None,
+                    |_| {
+                        count += 1;
+                        std::ops::ControlFlow::Continue(())
+                    },
+                );
+                crate::game::effect_support::compare(&count, comparison, &usize::from(amount))
+            }
+        }
+    }
+
+    /// How much mana this effect actually produces, with any "add ... instead"
+    /// clause resolved against the board. Read once as the activation is
+    /// built, so every later reader -- payment planning, the pool, the
+    /// spend -- sees one consistent number.
+    pub(in crate::game) fn mana_amount_for(
+        &self,
+        effect: AddManaEffectDef,
+        controller: PlayerId,
+        source: GameObjectId,
+    ) -> u16 {
+        effect
+            .amount_override
+            .filter(|override_| {
+                self.static_condition_holds(override_.condition, controller, source)
+            })
+            .map_or(effect.amount, |override_| override_.amount)
+    }
+
+    /// Which "one mana of any type a land could produce" ability this is, if
+    /// either. Fellwar Stone reads the opponent's lands and Reflecting Pool
+    /// reads its controller's own; both compute their colours from the board
+    /// rather than declaring them.
+    fn borrowed_mana_ability_behavior(
+        definition: &ActivatedAbilityDef,
+        ability: &AbilityDef,
+    ) -> Option<CardBehavior> {
+        if definition.procedure != AbilityProcedureDef::Legacy
+            || !matches!(
+                ability.effect.definition,
+                AbilityProgramDef::Effects(EffectDef::Special(_))
+            )
+        {
+            return None;
+        }
+        match ability.custom_behavior() {
+            Some(behavior @ (CardBehavior::FellwarStone | CardBehavior::ReflectingPool)) => {
+                Some(behavior)
+            }
+            _ => None,
+        }
     }
 
     /// The concrete activations one mana ability offers, which is one per
     /// colour it can produce.
+    /// Which permanents a mana ability's "Sacrifice a <thing>" cost could
+    /// take, one per activation. An ability with no such cost yields a single
+    /// `None`, so the enumeration below runs once for it rather than not at
+    /// all.
+    fn mana_ability_cost_candidates(
+        &self,
+        permanent: &Permanent,
+        definition: &ActivatedAbilityDef,
+    ) -> Vec<Option<GameObjectId>> {
+        let Some(cost) = definition.costs.iter().find(|cost| {
+            matches!(
+                cost,
+                AbilityCostDef::SacrificePermanent { .. } | AbilityCostDef::ExileCardFromHand(_)
+            )
+        }) else {
+            return vec![None];
+        };
+        match cost {
+            AbilityCostDef::SacrificePermanent { object, controller } => self
+                .battlefield
+                .iter()
+                .filter(|candidate| {
+                    self.player_relation_matches(
+                        candidate.controller,
+                        *controller,
+                        permanent.controller,
+                        TriggerContext::empty(),
+                    ) && self.trigger_object_matches(
+                        *object,
+                        &self.trigger_event_object(candidate),
+                        permanent.card.id,
+                        false,
+                    )
+                })
+                .map(|candidate| Some(candidate.card.id))
+                .collect(),
+            AbilityCostDef::ExileCardFromHand(object) => self.players[permanent.controller.index()]
+                .hand
+                .iter()
+                .filter(|card| {
+                    self.card_object_matches(*object, card, ZoneKind::Hand, permanent.card.id)
+                })
+                .map(|card| Some(card.id))
+                .collect(),
+            _ => unreachable!("candidate cost was filtered above"),
+        }
+    }
+
     pub(super) fn mana_activations_for(
         &self,
         permanent: &Permanent,
         origin: AbilityOrigin,
-        definition: ActivatedAbilityDef,
+        definition: &ActivatedAbilityDef,
         ability: &AbilityDef,
     ) -> Vec<ManaAbilityActivation> {
         let mut activations = Vec::new();
-        if let Some(effect) = Self::shared_add_mana_effect(definition, ability) {
-            let mut add_activation = |color| {
-                activations.push(ManaAbilityActivation {
-                    source: permanent.card.id,
-                    ability: origin,
-                    color,
-                    costs: definition.costs,
-                    effect,
-                });
+        if let Some(mut effect) = Self::shared_add_mana_effect(definition, ability) {
+            // Resolved here rather than at payment time so that the amount
+            // the planner counts on is the amount the pool receives.
+            if let Some(value) = effect.variable_amount {
+                effect.amount = self.mana_ability_value(value, permanent);
+            }
+            effect.amount = self.mana_amount_for(effect, permanent.controller, permanent.card.id);
+            // "Remove any number of storage counters" is a choice of size, so
+            // it becomes one activation per size rather than one activation
+            // carrying an unanswered question. Each carries a sized removal,
+            // and the amount it produces is the same number.
+            let sizes = match Self::variable_counter_removal(definition) {
+                Some(kind) => (1..=permanent.counters(kind))
+                    .map(|removed| {
+                        let costs = AbilityCostList::two(
+                            AbilityCostDef::TapSource,
+                            AbilityCostDef::RemoveCountersFromSource {
+                                kind,
+                                amount: removed,
+                            },
+                        );
+                        (costs, removed, Some(removed))
+                    })
+                    .collect::<Vec<_>>(),
+                None => vec![(definition.costs, effect.amount, None)],
             };
-            match effect.mana {
-                ManaSelectionDef::One(color) => add_activation(color),
-                ManaSelectionDef::Choice(colors) => {
-                    for color in colors {
-                        add_activation(*color);
+            // "Sacrifice a Goblin" is a choice of which one, and a mana
+            // ability has no window in which to ask: like the counter sizes
+            // above, each candidate becomes its own activation.
+            let sacrifices = self.mana_ability_cost_candidates(permanent, definition);
+            let mut add_activation =
+                |color, costs, amount, counters_removed, cost_object, combination| {
+                    activations.push(ManaAbilityActivation {
+                        source: permanent.card.id,
+                        ability: origin,
+                        color,
+                        costs,
+                        effect: AddManaEffectDef { amount, ..effect },
+                        counters_removed,
+                        cost_object,
+                        combination,
+                    });
+                };
+            for (costs, amount, counters_removed) in sizes {
+                for cost_object in &sacrifices {
+                    match effect.mana {
+                        ManaSelectionDef::One(color) => {
+                            add_activation(
+                                color,
+                                costs,
+                                amount,
+                                counters_removed,
+                                *cost_object,
+                                None,
+                            );
+                        }
+                        ManaSelectionDef::Choice(colors) => {
+                            for color in colors {
+                                add_activation(
+                                    *color,
+                                    costs,
+                                    amount,
+                                    counters_removed,
+                                    *cost_object,
+                                    None,
+                                );
+                            }
+                        }
+                        // Imprint: which colours this makes was settled when
+                        // the card was exiled, so the list comes off the
+                        // board rather than off the printed clause. A
+                        // permanent that imprinted nothing offers nothing.
+                        ManaSelectionDef::ColorsOfLinkedExiles => {
+                            for color in self.linked_exile_colors(permanent.card.id) {
+                                add_activation(
+                                    color,
+                                    costs,
+                                    amount,
+                                    counters_removed,
+                                    *cost_object,
+                                    None,
+                                );
+                            }
+                        }
+                        // "In any combination of" divides one amount across
+                        // several types, so each division is its own
+                        // activation. `color` names the first type the
+                        // division actually produces, so that the planner
+                        // still reads a colour off every activation.
+                        ManaSelectionDef::Combination(colors) => {
+                            for combination in Self::mana_combinations(colors, amount) {
+                                let Some((color, _)) = combination.iter().next() else {
+                                    continue;
+                                };
+                                add_activation(
+                                    color,
+                                    costs,
+                                    amount,
+                                    counters_removed,
+                                    *cost_object,
+                                    Some(combination),
+                                );
+                            }
+                        }
                     }
                 }
             }
-        } else if Self::is_legacy_fellwar_stone_mana_ability(definition, ability) {
-            activations.extend(self.fellwar_stone_activations(permanent, origin, definition.costs));
+        } else if let Some(behavior) = Self::borrowed_mana_ability_behavior(definition, ability) {
+            activations.extend(self.borrowed_mana_activations(
+                permanent,
+                behavior,
+                origin,
+                definition.costs,
+            ));
         }
 
         activations
@@ -197,14 +364,15 @@ impl Game {
     /// One activation per colour Fellwar Stone can currently produce. The
     /// set is read off the battlefield, so it has to be recomputed rather
     /// than frozen on the ability.
-    pub(super) fn fellwar_stone_activations(
+    pub(super) fn borrowed_mana_activations(
         &self,
         permanent: &Permanent,
+        behavior: CardBehavior,
         ability: AbilityOrigin,
         costs: crate::card::AbilityCostList,
     ) -> Vec<ManaAbilityActivation> {
         let mut visiting = Vec::new();
-        self.fellwar_stone_colors(permanent, &mut visiting)
+        self.borrowed_mana_colors(permanent, behavior, &mut visiting)
             .into_iter()
             .map(|color| ManaAbilityActivation {
                 source: permanent.card.id,
@@ -212,30 +380,43 @@ impl Game {
                 color,
                 costs,
                 effect: AddManaEffectDef::one(color),
+                counters_removed: None,
+                cost_object: None,
+                combination: None,
             })
             .collect()
     }
 
-    pub(super) fn fellwar_stone_colors(
+    /// Every mana one of these abilities could presently make. Fellwar Stone
+    /// says "any color", so colourless is not one of the answers; Reflecting
+    /// Pool says "any type", so it is.
+    pub(super) fn borrowed_mana_colors(
         &self,
         permanent: &Permanent,
+        behavior: CardBehavior,
         visiting: &mut Vec<GameObjectId>,
     ) -> Vec<ManaColor> {
         if visiting.contains(&permanent.card.id) {
             return Vec::new();
         }
+        let own_lands = behavior == CardBehavior::ReflectingPool;
+        let lender = if own_lands {
+            permanent.controller
+        } else {
+            permanent.controller.opponent()
+        };
         visiting.push(permanent.card.id);
         let mut colors = self
             .battlefield
             .iter()
             .filter(|candidate| {
-                candidate.controller == permanent.controller.opponent()
+                candidate.controller == lender
                     && self
                         .permanent_types(candidate)
                         .is_some_and(|types| types.contains(CardType::Land))
             })
             .flat_map(|candidate| self.colors_permanent_could_produce(candidate, visiting))
-            .filter(|color| *color != ManaColor::Colorless)
+            .filter(|color| own_lands || *color != ManaColor::Colorless)
             .collect::<Vec<_>>();
         visiting.pop();
         colors.sort_unstable();
@@ -260,13 +441,36 @@ impl Game {
             else {
                 return;
             };
-            if let Some(effect) = Self::shared_add_mana_effect(definition, &effective.ability) {
+            // "Could produce" is asked to decide whether a cost can be paid,
+            // so an ability whose printed condition is false produces
+            // nothing: planning around it would build a payment that cannot
+            // actually be made.
+            if definition.condition.is_some_and(|condition| {
+                !self.trigger_condition_holds(
+                    condition,
+                    permanent.card.id,
+                    permanent.controller,
+                    TriggerContext::empty(),
+                    Some(effective.origin),
+                    None,
+                )
+            }) {
+                return;
+            }
+            if let Some(effect) = Self::shared_add_mana_effect(&definition, &effective.ability) {
                 match effect.mana {
                     ManaSelectionDef::One(kind) => colors.push(kind),
-                    ManaSelectionDef::Choice(kinds) => colors.extend_from_slice(kinds),
+                    ManaSelectionDef::Choice(kinds) | ManaSelectionDef::Combination(kinds) => {
+                        colors.extend_from_slice(kinds);
+                    }
+                    ManaSelectionDef::ColorsOfLinkedExiles => {
+                        colors.extend(self.linked_exile_colors(permanent.card.id));
+                    }
                 }
-            } else if Self::is_legacy_fellwar_stone_mana_ability(definition, &effective.ability) {
-                colors.extend(self.fellwar_stone_colors(permanent, visiting));
+            } else if let Some(behavior) =
+                Self::borrowed_mana_ability_behavior(&definition, &effective.ability)
+            {
+                colors.extend(self.borrowed_mana_colors(permanent, behavior, visiting));
             }
         });
         colors.sort_unstable();
@@ -279,19 +483,72 @@ impl Game {
         permanent: &Permanent,
         ability: AbilityOrigin,
         color: ManaColor,
+        choices: ManaActivationChoices,
     ) -> Option<ManaAbilityActivation> {
         self.mana_ability_activations(permanent)
             .into_iter()
-            .find(|activation| activation.ability == ability && activation.color == color)
+            .find(|activation| {
+                activation.ability == ability
+                    && activation.color == color
+                    // Source, ability, and colour name one storage land's
+                    // ability three times over; the size is what tells them
+                    // apart, and for a sacrifice cost the permanent does.
+                    && activation.counters_removed == choices.counters_removed
+                    && activation.cost_object == choices.cost_object
+                    && activation.combination == choices.combination
+            })
     }
 
-    pub(super) fn mana_production(activation: ManaAbilityActivation) -> ManaPool {
+    /// Every way to divide `amount` mana across `colors`, in a stable order.
+    /// A division that produces none of a type simply leaves it out, so "add
+    /// two in any combination of {U} and/or {R}" enumerates three ways rather
+    /// than naming both types every time.
+    fn mana_combinations(colors: &'static [ManaColor], amount: u16) -> Vec<ManaSplit> {
+        let mut divisions = vec![ManaSplit::empty()];
+        for (index, color) in colors.iter().enumerate() {
+            let last = index + 1 == colors.len();
+            let mut next = Vec::new();
+            for division in divisions {
+                let remaining = amount - division.total();
+                // The final type takes whatever is left: choosing for it too
+                // would enumerate divisions that do not add up.
+                let range = if last {
+                    remaining..=remaining
+                } else {
+                    0..=remaining
+                };
+                for taken in range {
+                    let mut division = division;
+                    division.add(*color, taken);
+                    next.push(division);
+                }
+            }
+            divisions = next;
+        }
+        divisions.sort_unstable();
+        divisions.dedup();
+        divisions
+    }
+
+    pub(super) fn mana_production(activation: &ManaAbilityActivation) -> ManaPool {
         let mut pool = ManaPool::default();
+        if let Some(combination) = activation.combination {
+            for (color, amount) in combination.iter() {
+                pool.add_color(color, amount);
+            }
+            if let Some(also) = activation.effect.also {
+                pool.add_color(also, 1);
+            }
+            return pool;
+        }
         pool.add_color(activation.color, activation.effect.amount);
+        if let Some(also) = activation.effect.also {
+            pool.add_color(also, 1);
+        }
         pool
     }
 
-    pub(super) fn mana_for_activation(activation: ManaAbilityActivation) -> Vec<Mana> {
+    pub(super) fn mana_for_activation(activation: &ManaAbilityActivation) -> Vec<Mana> {
         let mana = Mana::from_ability(
             activation.color,
             ManaSource {
@@ -301,7 +558,38 @@ impl Game {
             activation.effect.restrictions,
             activation.effect.spend_effects,
         );
-        vec![mana; usize::from(activation.effect.amount)]
+        let mut produced = match activation.combination {
+            Some(combination) => combination
+                .iter()
+                .flat_map(|(color, amount)| {
+                    let mana = Mana::from_ability(
+                        color,
+                        ManaSource {
+                            object: activation.source,
+                            ability: activation.ability,
+                        },
+                        activation.effect.restrictions,
+                        activation.effect.spend_effects,
+                    );
+                    vec![mana; usize::from(amount)]
+                })
+                .collect(),
+            None => vec![mana; usize::from(activation.effect.amount)],
+        };
+        // The second colour carries the same source and riders: it is the
+        // same activation, not a second one.
+        if let Some(also) = activation.effect.also {
+            produced.push(Mana::from_ability(
+                also,
+                ManaSource {
+                    object: activation.source,
+                    ability: activation.ability,
+                },
+                activation.effect.restrictions,
+                activation.effect.spend_effects,
+            ));
+        }
+        produced
     }
 
     pub(super) fn add_mana(&mut self, player: PlayerId, mana: impl IntoIterator<Item = Mana>) {
@@ -335,6 +623,7 @@ impl Game {
                 definition,
                 controller,
                 form,
+                ..
             } => self
                 .printed_trigger_event_object(
                     *object,
@@ -392,31 +681,19 @@ impl Game {
             })
     }
 
-    /// The colour a spell's printed cost demands for X, if it prints such a
-    /// restriction. Read from the compatibility primary-part view: no
-    /// multi-part card prints one today.
-    pub(super) fn x_spend_restriction(&self, purpose: &ManaPaymentPurpose) -> Option<ManaColor> {
-        let ManaPaymentPurpose::Spell { definition, .. } = purpose else {
-            return None;
-        };
-        self.catalog.get(*definition)?.rules.x_spend_restriction()
-    }
-
-    pub(super) fn restrict_x(
-        &self,
-        cost: ManaCost,
-        x: u16,
-        purpose: &ManaPaymentPurpose,
-    ) -> (ManaCost, u16) {
-        self.x_spend_restriction(purpose)
-            .map_or((cost, x), |color| fold_restricted_x(cost, x, color))
-    }
-
     pub(super) fn mana_can_pay_for(&self, mana: Mana, purpose: &ManaPaymentPurpose) -> bool {
         mana.restrictions
             .iter()
             .all(|restriction| match restriction {
                 ManaRestrictionDef::CastSpell(predicate) => self
+                    .payment_object(purpose)
+                    .is_some_and(|(object, is_spell)| {
+                        is_spell
+                            && self.trigger_object_matches(*predicate, &object, object.id, true)
+                    }),
+                // Nothing to check when the payment is not a cast: what the
+                // clause forbids is one kind of spell, not one kind of use.
+                ManaRestrictionDef::CannotCastSpell(predicate) => !self
                     .payment_object(purpose)
                     .is_some_and(|(object, is_spell)| {
                         is_spell
@@ -499,27 +776,6 @@ impl Game {
         eligible
     }
 
-    /// Turns life into the {C} this payment is short, one point at a time,
-    /// so the ordinary payment below finds a pool that can cover the cost.
-    pub(super) fn channel_for_shortfall(
-        &mut self,
-        player: PlayerId,
-        cost: ManaCost,
-        x: u16,
-        purpose: &ManaPaymentPurpose,
-    ) {
-        let available = self.channel_mana_available(player);
-        if available == 0 {
-            return;
-        }
-        let pool = self.eligible_mana_pool(player, purpose);
-        let needed = Self::generic_shortfall(pool, cost, x).min(available);
-        for _ in 0..needed {
-            self.players[player.index()].life -= 1;
-            self.add_unrestricted_mana(player, ManaColor::Colorless, 1);
-        }
-    }
-
     pub(super) fn pay_player_cost_for(
         &mut self,
         player: PlayerId,
@@ -529,7 +785,7 @@ impl Game {
     ) -> Vec<Mana> {
         let (cost, x) = self.restrict_x(cost, x, purpose);
         self.reconcile_mana(player);
-        self.channel_for_shortfall(player, cost, x, purpose);
+        self.activate_repeatable_life_mana_for_shortfall(player, cost, x, purpose);
         let before = self.eligible_mana_pool(player, purpose);
         let mut after = before;
         let has_eligible_spend_effect = |color| {
@@ -541,7 +797,7 @@ impl Game {
         };
         // A hybrid symbol prefers whichever of its colours carries a rider
         // this payment can use.
-        let hybrid_preference = |color: ManaColor| !has_eligible_spend_effect(color);
+        let hybrid_preference = |color: ManaColor| u16::from(!has_eligible_spend_effect(color));
         let mut generic_order = [
             ManaColor::Colorless,
             ManaColor::Green,
@@ -551,7 +807,28 @@ impl Game {
             ManaColor::Blue,
         ];
         generic_order.sort_by_key(|color| !has_eligible_spend_effect(*color));
-        pay_cost_with_orders(&mut after, cost, x, &hybrid_preference, &generic_order);
+        let spread_generic_colors = self.payment_counts_colors_spent(purpose);
+        if spread_generic_colors {
+            // Converge counts colours, so the generic portion reaches first
+            // for a colour the coloured symbols have not already spent, and
+            // reaches for colourless last of all: it is a mana type rather
+            // than a colour and adds nothing to the count.
+            generic_order.sort_by_key(|color| {
+                (
+                    *color == ManaColor::Colorless,
+                    super::mana_planning::mana_cost_amount(cost, *color) > 0,
+                    !has_eligible_spend_effect(*color),
+                )
+            });
+        }
+        pay_cost_with_generic_strategy(
+            &mut after,
+            cost,
+            x,
+            &hybrid_preference,
+            &generic_order,
+            spread_generic_colors,
+        );
         let mut spent = Vec::new();
         for color in [
             ManaColor::White,
@@ -586,6 +863,18 @@ impl Game {
             }
         }
         spent
+    }
+
+    /// Whether the spell being paid for reads how many colours paid for it.
+    /// Only converge asks, and only converge changes how the generic portion
+    /// is spread.
+    fn payment_counts_colors_spent(&self, purpose: &ManaPaymentPurpose) -> bool {
+        let ManaPaymentPurpose::Spell { definition, .. } = purpose else {
+            return false;
+        };
+        self.catalog
+            .get(*definition)
+            .is_some_and(|card| card.rules.counts_colors_of_mana_spent())
     }
 
     pub(super) fn pay_player_cost(
@@ -648,8 +937,28 @@ impl Game {
         x: u16,
         purpose: &ManaPaymentPurpose,
     ) -> bool {
-        self.assigned_mana_activations_for(player, cost, x, purpose)
+        self.plan_mana_activations_for(player, cost, x, None, purpose)
             .is_some()
+    }
+
+    pub(super) fn can_pay_cost_for_reserving_with_life(
+        &self,
+        player: PlayerId,
+        cost: ManaCost,
+        x: u16,
+        purpose: &ManaPaymentPurpose,
+        reserved: &[GameObjectId],
+        life_available: u16,
+    ) -> bool {
+        self.assigned_mana_activations_for_reserving_with_life(
+            player,
+            cost,
+            x,
+            purpose,
+            reserved,
+            life_available,
+        )
+        .is_some()
     }
 
     pub(super) fn add_mana_actions(&self, player: PlayerId, actions: &mut Vec<Action>) {
@@ -663,8 +972,24 @@ impl Game {
                     source: activation.source,
                     ability: activation.ability,
                     color: activation.color,
+                    counters_removed: activation.counters_removed,
+                    cost_object: activation.cost_object,
+                    combination: activation.combination,
                 },
             ));
         }
+        actions.extend(
+            self.hand_mana_ability_activations(player)
+                .into_iter()
+                .chain(self.ongoing_mana_ability_activations(player))
+                .map(|activation| Action::ActivateManaAbility {
+                    source: activation.source,
+                    ability: activation.ability,
+                    color: activation.color,
+                    counters_removed: activation.counters_removed,
+                    cost_object: activation.cost_object,
+                    combination: activation.combination,
+                }),
+        );
     }
 }

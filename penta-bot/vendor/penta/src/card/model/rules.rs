@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
-use crate::ids::{AbilityId, AlternativeCostId, ModeId};
+use crate::ids::{AbilityId, AdditionalCostId, AlternativeCostId, ModeId};
 
 use super::{
-    AbilityDef, AlternativeCostDef, CardBehavior, CardSupertype, CardType, CardTypeSet, ColorSet,
-    DeclarativeAbilityDef, HybridPair, ImplementationStatus, KeywordAbility, ManaColor, ManaCost,
-    ModeSetDef, PlayRestriction, PrintedManaCost,
+    AbilityDef, AdditionalCostDef, AlternativeCostDef, CardBehavior, CardSupertype, CardType,
+    CardTypeSet, ColorSet, DeclarativeAbilityDef, FlexibleManaSymbol, ImplementationStatus,
+    KeywordAbility, ManaColor, ManaCost, ModeSetDef, ObjectPredicateDef, PlayRestriction,
+    PrintedManaCost,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -51,6 +52,19 @@ impl AttachedAbilityDef {
         }
     }
 
+    /// The stable identity of a printed optional additional-cost clause.
+    #[must_use]
+    pub const fn additional_cost_id(self) -> Option<AdditionalCostId> {
+        if matches!(
+            self.definition.definition,
+            DeclarativeAbilityDef::OptionalAdditionalCost(_)
+        ) {
+            Some(AdditionalCostId(self.id.0))
+        } else {
+            None
+        }
+    }
+
     /// Materializes the play-option view of a printed alternative cost.
     #[must_use]
     pub fn alternative_cost(self, card_mana_cost: Option<ManaCost>) -> Option<AlternativeCostDef> {
@@ -58,6 +72,17 @@ impl AttachedAbilityDef {
             return None;
         };
         definition.alternative_cost(self.id, card_mana_cost)
+    }
+
+    /// Materializes the play-option view of a printed optional additional
+    /// cost.
+    #[must_use]
+    pub fn additional_cost(self) -> Option<AdditionalCostDef> {
+        let DeclarativeAbilityDef::OptionalAdditionalCost(definition) = self.definition.definition
+        else {
+            return None;
+        };
+        Some(definition.additional_cost(self.id))
     }
 }
 
@@ -72,8 +97,8 @@ impl CardAbilityList {
     }
 }
 
-/// Declarative rules metadata kept beside a card's catalog identity.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Declarative rules metadata for one card or token face.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct CardRules {
     card_types: CardTypeSet,
@@ -82,6 +107,9 @@ pub struct CardRules {
     pub(super) printed_mana_cost: PrintedManaCost,
     pub(super) starting_loyalty: Option<u16>,
     pub(super) creature_stats: Option<CreatureStats>,
+    /// Whether the ordinary creature spell/permanent rules represented by
+    /// `creature_stats` are part of this definition's executable coverage.
+    creature_body_is_executable: bool,
     /// Ordered printed rules clauses. Abilities supplied by the rules, such as
     /// those intrinsic to basic land types, are derived by the game engine.
     abilities: CardAbilityList,
@@ -92,21 +120,45 @@ pub struct CardRules {
     /// "Spend only black mana on X." The X portion of the cost stops being
     /// generic and has to come from this colour.
     x_spend_restriction: Option<ManaColor>,
+    /// The printed "enchant ..." restriction, for an Aura that does not
+    /// announce what it will enchant as it is cast. Every ordinary Aura
+    /// targets its host from the stack, so the restriction is read off that
+    /// target slot; one that attaches later has no such slot and says it
+    /// here instead.
+    enchant: Option<ObjectPredicateDef>,
+    /// Whether this spell's own text counts the colours of mana spent to
+    /// cast it -- the converge ability word. It changes nothing about what
+    /// the spell costs; what it changes is how the generic portion is paid,
+    /// because a payment that drains one colour before touching the next
+    /// would count one colour where the caster plainly meant several.
+    counts_colors_of_mana_spent: bool,
     /// "This spell costs {1} more to cast for each target beyond the first."
     additional_generic_per_extra_target: u16,
+    /// The printed morph cost, which is what turning this permanent face up
+    /// costs. It is read off the physical card rather than off the
+    /// permanent's presented rules: a face-down permanent has no abilities,
+    /// and turning it face up is a special action rather than one of them
+    /// (CR 702.37b).
+    pub(super) morph: Option<ManaCost>,
 }
 
-/// Whether any hybrid symbol in this cost can be paid with one colour.
+/// Whether any flexible symbol in this cost contains one colour.
 const fn hybrid_includes(cost: ManaCost, color: ManaColor) -> bool {
     let mut index = 0;
-    while index < HybridPair::COUNT {
-        if cost.hybrid[index] > 0 && HybridPair::ALL[index].contains(color) {
+    while index < FlexibleManaSymbol::COUNT {
+        let symbol = FlexibleManaSymbol::ALL[index];
+        if cost.flexible_count(symbol) > 0 && symbol.contains_color(color) {
             return true;
         }
         index += 1;
     }
     false
 }
+
+/// The one subtype every Vehicle prints.
+static VEHICLE_SUBTYPES: &[&str] = &["Vehicle"];
+
+const VEHICLE: &[u8] = b"Vehicle";
 
 impl CardRules {
     const fn base(card_types: CardTypeSet, printed_mana_cost: PrintedManaCost) -> Self {
@@ -137,12 +189,55 @@ impl CardRules {
             printed_mana_cost,
             starting_loyalty: None,
             creature_stats: None,
+            creature_body_is_executable: true,
             abilities: CardAbilityList::None,
             colors,
             play_restriction: PlayRestriction::Normal,
             x_spend_restriction: None,
+            counts_colors_of_mana_spent: false,
+            enchant: None,
             additional_generic_per_extra_target: 0,
+            morph: None,
         }
+    }
+
+    /// Materializes the ordinary rules view of compact inline
+    /// characteristics. Virtual and face-down values keep abilities behind a
+    /// slice so a clause that creates another object does not make the
+    /// declarative schema recursively sized.
+    pub(super) const fn from_inline_characteristics(
+        card_types: CardTypeSet,
+        supertypes: [bool; CardSupertype::COUNT],
+        subtypes: &'static [&'static str],
+        colors: ColorSet,
+        creature_stats: Option<CreatureStats>,
+        abilities: &'static [AbilityDef],
+    ) -> Self {
+        let mut rules = Self::base(card_types, PrintedManaCost::None);
+        rules.supertypes = supertypes;
+        rules.subtypes = subtypes;
+        rules.colors = colors;
+        rules.creature_stats = creature_stats;
+        rules.abilities = if abilities.is_empty() {
+            CardAbilityList::None
+        } else {
+            CardAbilityList::Many(abilities)
+        };
+        rules
+    }
+
+    /// Records a printed morph cost. The permission to cast the card face
+    /// down is a separate declared clause, so that a card carrying one
+    /// without the other fails catalog validation rather than half-working.
+    #[must_use]
+    pub const fn with_morph(mut self, cost: ManaCost) -> Self {
+        self.morph = Some(cost);
+        self
+    }
+
+    #[must_use]
+    pub const fn morph_cost(&self) -> Option<ManaCost> {
+        self.morph
     }
 
     #[must_use]
@@ -161,12 +256,71 @@ impl CardRules {
         rules
     }
 
-    /// An emblem has abilities and nothing else: no types, no cost, and no
-    /// body. It is never in a zone a card can be in, so it needs none of the
-    /// characteristics the rest of the model is built around.
+    /// A Vehicle (CR 301.7): an artifact with printed power and toughness
+    /// that is not a creature until something crews it.
+    ///
+    /// The stats are on the card rather than granted by the crewing, which
+    /// is why this is its own constructor: `with_creature_stats` is for
+    /// cards whose type line already says creature, and a Vehicle's does
+    /// not until an effect adds it.
     #[must_use]
-    pub const fn new_emblem() -> Self {
-        Self::base(CardTypeSet::single(CardType::Emblem), PrintedManaCost::None)
+    pub const fn new_vehicle(mana_cost: ManaCost, power: i16, toughness: i16) -> Self {
+        let mut rules = Self::base(
+            CardTypeSet::single(CardType::Artifact),
+            PrintedManaCost::Cost(mana_cost),
+        );
+        rules.subtypes = VEHICLE_SUBTYPES;
+        rules.creature_stats = Some(CreatureStats { power, toughness });
+        rules
+    }
+
+    /// Keeps printed creature characteristics as metadata without exposing
+    /// the baseline creature spell or permanent as executable behavior.
+    #[must_use]
+    pub const fn with_metadata_only_creature_body(mut self) -> Self {
+        self.creature_body_is_executable = false;
+        self
+    }
+
+    /// Whether this is a Vehicle, which is the one noncreature card type
+    /// that prints power and toughness.
+    #[must_use]
+    pub const fn is_vehicle(&self) -> bool {
+        let mut index = 0;
+        while index < self.subtypes.len() {
+            // Compared byte by byte because the coherence check that reads
+            // this runs in a const context, where `==` on strings does not.
+            let candidate = self.subtypes[index].as_bytes();
+            if candidate.len() == VEHICLE.len() {
+                let mut byte = 0;
+                while byte < candidate.len() && candidate[byte] == VEHICLE[byte] {
+                    byte += 1;
+                }
+                if byte == candidate.len() {
+                    return true;
+                }
+            }
+            index += 1;
+        }
+        false
+    }
+
+    #[must_use]
+    pub const fn has_executable_creature_body(&self) -> bool {
+        self.creature_stats.is_some() && self.creature_body_is_executable
+    }
+
+    /// Whether this printed creature exists only as catalog metadata and must
+    /// not be exposed as a face-up gameplay object.
+    #[must_use]
+    pub const fn has_metadata_only_creature_body(&self) -> bool {
+        self.creature_stats.is_some() && !self.creature_body_is_executable
+    }
+
+    /// Adapts an emblem's ability slice to shared runtime ability machinery
+    /// without inventing card characteristics for the emblem itself.
+    pub(crate) const fn from_emblem_abilities(abilities: &'static [AbilityDef]) -> Self {
+        Self::base(CardTypeSet::empty(), PrintedManaCost::None).with_abilities(abilities)
     }
 
     #[must_use]
@@ -178,6 +332,24 @@ impl CardRules {
         let mut rules = Self::base(
             CardTypeSet::single(CardType::Creature),
             PrintedManaCost::None,
+        );
+        rules.subtypes = subtypes;
+        rules.creature_stats = Some(CreatureStats { power, toughness });
+        rules
+    }
+
+    /// An enchantment creature: one card that is both, as the Glimmers and
+    /// the Theros gods print it.
+    #[must_use]
+    pub const fn new_enchantment_creature(
+        mana_cost: ManaCost,
+        subtypes: &'static [&'static str],
+        power: i16,
+        toughness: i16,
+    ) -> Self {
+        let mut rules = Self::base(
+            CardTypeSet::single(CardType::Enchantment).with(CardType::Creature),
+            PrintedManaCost::Cost(mana_cost),
         );
         rules.subtypes = subtypes;
         rules.creature_stats = Some(CreatureStats { power, toughness });
@@ -227,6 +399,30 @@ impl CardRules {
         Self::base(
             CardTypeSet::single(CardType::Artifact),
             PrintedManaCost::Cost(mana_cost),
+        )
+    }
+
+    /// An artifact with no mana cost, which is what a noncreature artifact
+    /// token is. Its subtypes carry the artifact type a card can name -- a
+    /// Food is sacrificed by things that look for one.
+    #[must_use]
+    pub const fn new_artifact_without_mana_cost(subtypes: &'static [&'static str]) -> Self {
+        let mut rules = Self::base(
+            CardTypeSet::single(CardType::Artifact),
+            PrintedManaCost::None,
+        );
+        rules.subtypes = subtypes;
+        rules
+    }
+
+    /// An enchantment with no mana cost, which is what a Room with both
+    /// doors locked is: it was never cast for anything, and until a door
+    /// opens there is nothing to pay for.
+    #[must_use]
+    pub const fn new_enchantment_without_mana_cost() -> Self {
+        Self::base(
+            CardTypeSet::single(CardType::Enchantment),
+            PrintedManaCost::None,
         )
     }
 
@@ -295,6 +491,15 @@ impl CardRules {
         );
         rules.subtypes = subtypes;
         rules
+    }
+
+    /// A back face's printed loyalty. It has no mana cost -- nothing casts
+    /// it -- but it still prints a number, and a permanent that arrives on
+    /// that face enters with it.
+    #[must_use]
+    pub const fn with_starting_loyalty(mut self, loyalty: u16) -> Self {
+        self.starting_loyalty = Some(loyalty);
+        self
     }
 
     #[must_use]
@@ -377,7 +582,11 @@ impl CardRules {
         if self.has_type(CardType::Creature) && self.creature_stats.is_none() {
             return Some("a creature must have power and toughness");
         }
-        if !self.has_type(CardType::Creature) && self.creature_stats.is_some() {
+        // CR 208.1 was written before Vehicles: they are the one printed
+        // exception, carrying power and toughness that mean nothing until
+        // something crews them into being a creature.
+        if !self.has_type(CardType::Creature) && self.creature_stats.is_some() && !self.is_vehicle()
+        {
             return Some("a noncreature cannot have creature power and toughness");
         }
         if !self.has_type(CardType::Planeswalker) && self.starting_loyalty.is_some() {
@@ -454,6 +663,7 @@ impl CardRules {
             minimum: modal.minimum,
             maximum: modal.maximum,
             may_repeat: modal.may_repeat,
+            conditional_maximum: modal.conditional_maximum,
             modes,
         })
     }
@@ -505,9 +715,9 @@ impl CardRules {
     pub fn implementation_status(&self) -> ImplementationStatus {
         // Playing a land and casting/using a modeled creature body are shared,
         // executable rules even when every card-specific clause is deferred.
-        let mut has_full = self.has_type(CardType::Land) || self.creature_stats.is_some();
+        let mut has_full = self.has_type(CardType::Land) || self.has_executable_creature_body();
         let mut has_partial = false;
-        let mut has_unimplemented = false;
+        let mut has_unimplemented = self.has_metadata_only_creature_body();
         for ability in self.ability_clauses() {
             match ability.implementation_status() {
                 ImplementationStatus::Complete => has_full = true,
@@ -584,6 +794,30 @@ impl CardRules {
     }
 
     #[must_use]
+    pub const fn cast_only_before_blockers_declared(mut self) -> Self {
+        self.play_restriction = PlayRestriction::BeforeBlockersDeclared;
+        self
+    }
+
+    #[must_use]
+    pub const fn cast_only_during_opponents_upkeep(mut self) -> Self {
+        self.play_restriction = PlayRestriction::OpponentsUpkeep;
+        self
+    }
+
+    #[must_use]
+    pub const fn cast_only_during_declare_attackers(mut self) -> Self {
+        self.play_restriction = PlayRestriction::DeclareAttackersStep;
+        self
+    }
+
+    #[must_use]
+    pub const fn cast_only_after_an_opponents_upkeep(mut self) -> Self {
+        self.play_restriction = PlayRestriction::OpponentsTurnAfterUpkeep;
+        self
+    }
+
+    #[must_use]
     pub const fn play_restriction(&self) -> PlayRestriction {
         self.play_restriction
     }
@@ -598,6 +832,31 @@ impl CardRules {
     #[must_use]
     pub const fn x_spend_restriction(&self) -> Option<ManaColor> {
         self.x_spend_restriction
+    }
+
+    /// "Enchant creature", for an Aura that attaches after it has resolved
+    /// rather than announcing a host as it is cast.
+    #[must_use]
+    pub const fn enchanting(mut self, object: ObjectPredicateDef) -> Self {
+        self.enchant = Some(object);
+        self
+    }
+
+    #[must_use]
+    pub const fn enchant(&self) -> Option<ObjectPredicateDef> {
+        self.enchant
+    }
+
+    /// "Converge --": this spell reads how many colours paid for it.
+    #[must_use]
+    pub const fn with_converge(mut self) -> Self {
+        self.counts_colors_of_mana_spent = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn counts_colors_of_mana_spent(&self) -> bool {
+        self.counts_colors_of_mana_spent
     }
 
     /// "This spell costs `amount` more to cast for each target beyond the

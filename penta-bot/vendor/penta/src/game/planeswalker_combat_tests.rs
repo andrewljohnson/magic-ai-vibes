@@ -134,7 +134,7 @@ fn trample_over_a_planeswalker_never_spills_to_its_controller() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     let walker = planeswalker(10_002, cards::VRASKA_THE_UNSEEN, PlayerId::Two, 10);
     let walker_id = walker.card.id;
@@ -178,7 +178,7 @@ fn trample_assigns_all_damage_to_the_last_blocker_when_its_planeswalker_leaves()
     attacker.temporary_keywords.push(KeywordAbility::Lifelink);
     let attacker_id = attacker.card.id;
     let mut blocker = creature(10_001, cards::ATOG, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     let walker = planeswalker(10_002, cards::VRASKA_THE_UNSEEN, PlayerId::Two, 5);
     let walker_id = walker.card.id;
@@ -206,10 +206,10 @@ fn trample_can_divide_freely_among_blockers_after_its_planeswalker_leaves() {
     attacker.attacking = true;
     let attacker_id = attacker.card.id;
     let mut first = creature(10_001, cards::ATOG, PlayerId::Two);
-    first.blocking = Some(attacker_id);
+    first.blocking = vec![attacker_id];
     let first_id = first.card.id;
     let mut second = creature(10_002, cards::ATOG, PlayerId::Two);
-    second.blocking = Some(attacker_id);
+    second.blocking = vec![attacker_id];
     let second_id = second.card.id;
     let walker = planeswalker(10_003, cards::VRASKA_THE_UNSEEN, PlayerId::Two, 5);
     let walker_id = walker.card.id;
@@ -253,6 +253,7 @@ fn player_damage_behaviors_do_not_trigger_when_a_planeswalker_is_hit() {
         owner: PlayerId::Two,
         backing: ObjectBacking::Cards(vec![PhysicalCardId(10_002)]),
         characteristics: CharacteristicSource::Card(cards::MOUNTAIN),
+        counters: crate::game::counters::Counters::new(),
     });
 
     game.deal_combat_damage();

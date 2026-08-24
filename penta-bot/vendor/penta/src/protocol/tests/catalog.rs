@@ -5,6 +5,7 @@ fn the_catalog_lists_every_card_with_names_and_costs() {
     let catalog = poc::catalog().expect("catalog builds");
     let value = catalog_json(&catalog);
     let cards = value["cards"].as_array().expect("cards array");
+    assert!(cards.len() > 100, "the pool is substantial");
     assert!(cards.iter().all(|card| card["name"].is_string()));
     assert!(
         cards
@@ -36,39 +37,22 @@ fn catalog_mana_cost_distinguishes_no_cost_from_printed_zero() {
 }
 
 #[test]
-fn a_token_is_cataloged_for_lookup_but_never_legal_and_carries_no_art() {
+fn catalog_does_not_publish_creator_owned_virtual_characteristics() {
     let catalog = poc::catalog().expect("catalog builds");
-    let value = catalog_json_for_format(&catalog, Format::IsdRtrStandard);
+    let value = catalog_json_for_format(&catalog, Format::IsdM14Standard);
     let cards = value["cards"].as_array().expect("cards array");
-    let beast = cards
+
+    let synthetic = cards
         .iter()
-        .find(|card| card["definition"] == crate::card::cards::BEAST_TOKEN_3_3_GREEN.0)
-        .expect("a client can resolve a token by definition");
-
-    assert_eq!(beast["name"], "Beast");
-    assert_eq!(beast["power"], 3);
-    assert_eq!(beast["toughness"], 3);
-    assert_eq!(beast["allowed"], false, "a token is in no card pool");
-    assert_eq!(beast["legal"], false);
-    assert!(
-        beast["manaCost"].is_null(),
-        "a token has no printed mana cost"
-    );
-
-    // The browser renders art only for a Scryfall UUID and otherwise falls
-    // back to the card-type glyph, so an empty identifier is what keeps a
-    // token from requesting an image that does not exist.
-    let art = beast["art"]["scryfallId"].as_str().unwrap_or_default();
-    assert!(
-        art.is_empty(),
-        "a token names no printing, so it has no Scryfall identifier"
-    );
+        .filter(|card| card["debutSet"] == "token")
+        .collect::<Vec<_>>();
+    assert!(synthetic.is_empty());
 }
 
 #[test]
 fn catalog_exposes_derived_implementation_coverage_not_the_play_gate() {
     let catalog = poc::catalog().expect("catalog builds");
-    let value = catalog_json_for_format(&catalog, Format::IsdRtrStandard);
+    let value = catalog_json_for_format(&catalog, Format::IsdM14Standard);
     let cards = value["cards"].as_array().expect("cards array");
     let find = |name: &str| {
         cards
@@ -124,7 +108,7 @@ fn catalog_exposes_derived_implementation_coverage_not_the_play_gate() {
 #[test]
 fn migrated_spells_publish_stable_target_predicates() {
     let catalog = poc::catalog().expect("catalog builds");
-    let value = catalog_json_for_format(&catalog, Format::IsdRtrStandard);
+    let value = catalog_json_for_format(&catalog, Format::IsdM14Standard);
 
     let cards = value["cards"].as_array().expect("cards array");
     let expected = [
@@ -172,10 +156,12 @@ fn deck_names_all_resolve() {
 }
 
 #[test]
-fn both_format_deck_registries_resolve_without_cross_format_leakage() {
+fn format_deck_registries_resolve_without_cross_format_leakage() {
     assert_eq!(deck_names(), deck_names_for_format(Format::OldSchool9394));
+    assert_eq!(deck_names_for_format(Format::OldSchool9394).len(), 15);
+    assert_eq!(deck_names_for_format(Format::IsdM14Standard).len(), 10);
 
-    for format in [Format::OldSchool9394, Format::IsdRtrStandard] {
+    for format in [Format::OldSchool9394, Format::IsdM14Standard] {
         for name in deck_names_for_format(format) {
             assert!(
                 deck_by_name_for_format(format, name).is_some(),
@@ -185,18 +171,31 @@ fn both_format_deck_registries_resolve_without_cross_format_leakage() {
     }
 
     assert!(deck_by_name_for_format(Format::OldSchool9394, "Briksza Naya Midrange").is_none());
-    assert!(deck_by_name_for_format(Format::IsdRtrStandard, "Sligh").is_none());
+    assert!(deck_by_name_for_format(Format::IsdM14Standard, "Sligh").is_none());
     assert!(
-        deck_by_name_for_format(Format::IsdRtrStandard, "naya_midrange_rudy_briksza").is_some()
+        deck_by_name_for_format(Format::IsdM14Standard, "naya_midrange_rudy_briksza").is_some()
+    );
+    assert!(
+        deck_by_name_for_format(Format::IsdM14Standard, "naya_midrange_jimmie_smith").is_some()
     );
     assert_eq!(
         parse_format_slug("old_school_93_94"),
         Ok(Format::OldSchool9394)
     );
+    assert!(parse_format_slug("isd-dgm-standard").is_err());
+    assert!(parse_format_slug("isd_dgm_standard").is_err());
+    assert!(parse_format_slug("isd-rtr-standard").is_err());
+    assert!(parse_format_slug("isd_rtr_standard").is_err());
     assert_eq!(
-        parse_format_slug("isd-rtr-standard"),
-        Ok(Format::IsdRtrStandard)
+        parse_format_slug("isd-m14-standard"),
+        Ok(Format::IsdM14Standard)
     );
+    assert_eq!(
+        parse_format_slug("som_m13_standard"),
+        Ok(Format::SomM13Standard)
+    );
+    assert_eq!(parse_format_slug("vintage-cube"), Ok(Format::VintageCube));
+    assert_eq!(parse_format_slug("pauper_cube"), Ok(Format::PauperCube));
     assert!(parse_format_slug("vintage").is_err());
 }
 
@@ -207,7 +206,7 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
     assert_eq!(old_school.format(), Format::OldSchool9394);
 
     let standard = BotGame::new_with_format(
-        Format::IsdRtrStandard,
+        Format::IsdM14Standard,
         "Briksza Naya Midrange",
         "Greer G/R Aggro",
         Opponent::External,
@@ -215,12 +214,12 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
         19,
     )
     .expect("Standard game starts");
-    assert_eq!(standard.format(), Format::IsdRtrStandard);
+    assert_eq!(standard.format(), Format::IsdM14Standard);
     let seat = standard.decision_seat().expect("opening-hand decision");
     let observation: Value =
         serde_json::from_str(&standard.observe_json(seat)).expect("valid observation JSON");
     assert_eq!(observation["protocolVersion"], PROTOCOL_VERSION);
-    assert_eq!(observation["format"], "isd-rtr-standard");
+    assert_eq!(observation["format"], "isd-m14-standard");
     assert!(
         observation["legalActions"]
             .as_array()
@@ -229,11 +228,19 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
             .all(|action| action["type"] != "Concede")
     );
 
-    let configured = BotGame::from_config_json(
-        r#"{"format":"isd-rtr-standard","p1Deck":"Lorren U/W Flash","p2Deck":"Arch U/W Flash","opponent":"external","seed":4}"#,
+    let m14 = BotGame::from_config_json(
+        r#"{"format":"isd-m14-standard","p1Deck":"Lorren U/W Flash","p2Deck":"Arch U/W Flash","opponent":"external","seed":5}"#,
     )
-    .expect("format slug selects Standard");
-    assert_eq!(configured.format(), Format::IsdRtrStandard);
+    .expect("M14 format accepts M14-dependent decks");
+    assert_eq!(m14.format(), Format::IsdM14Standard);
+    assert!(
+        BotGame::from_config_json(
+            r#"{"format":"isd-dgm-standard","p1Deck":"Smith Naya Midrange","p2Deck":"Braun-Duin Naya Midrange"}"#,
+        )
+        .err()
+        .expect("removed format is rejected")
+        .contains("unknown format: isd-dgm-standard")
+    );
     assert!(
         BotGame::from_config_json(r#"{"format":2,"p1Deck":"Sligh","p2Deck":"Goblins"}"#)
             .err()
@@ -256,7 +263,7 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
     );
     assert!(
         BotGame::new_with_format(
-            Format::IsdRtrStandard,
+            Format::IsdM14Standard,
             "Sligh",
             "Briksza Naya Midrange",
             Opponent::External,
@@ -265,7 +272,7 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
         )
         .err()
         .expect("cross-format deck is rejected")
-        .contains("unknown deck for isd-rtr-standard")
+        .contains("unknown deck for isd-m14-standard")
     );
 }
 
@@ -273,9 +280,9 @@ fn bot_game_stores_and_emits_its_format_and_rejects_wrong_decks() {
 fn catalog_json_is_structured_and_legality_is_format_specific() {
     let catalog = poc::catalog().expect("catalog builds");
     let old_school = catalog_json(&catalog);
-    let standard = catalog_json_for_format(&catalog, Format::IsdRtrStandard);
+    let standard = catalog_json_for_format(&catalog, Format::IsdM14Standard);
     assert_eq!(old_school["format"], "old-school-93-94");
-    assert_eq!(standard["format"], "isd-rtr-standard");
+    assert_eq!(standard["format"], "isd-m14-standard");
 
     let cards = standard["cards"].as_array().expect("cards array");
     assert!(cards.windows(2).all(|pair| {

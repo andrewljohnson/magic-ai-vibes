@@ -3,11 +3,19 @@ mod display;
 use std::fmt;
 
 use crate::card::{
-    CardEffectStatus, CardPrintingId, ManaCost, PlayActionKind, SpellForm, TargetSlotDef,
+    AbilityTargetPredicate, BattlefieldEntryChoiceDestinationDef, CardEffectStatus, CardPrintingId,
+    EffectRecipientDef, ManaCost, ObjectChoiceBindingDef, PlayActionKind, PlayerSetDef,
+    ReplacementEventDef, ScalarChoiceListDef, SpellForm, TargetSlotDef, TriggerEventDef,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EffectSubjectKind {
+    Object,
+    Player,
+}
 use crate::{
-    AbilityId, AdditionalCostId, AlternativeCostId, CardDefinitionId, CardPartId, ChoiceIndex,
-    GrantId, ModeId, PlayOptionId, TargetIndex, TargetSlotId,
+    AbilityId, AdditionalCostId, AlternativeCostId, CardDefinitionId, CardPartId, GrantId, ModeId,
+    ObjectBindingIndex, ObjectSetBindingIndex, PlayOptionId, TargetIndex, TargetSlotId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -20,6 +28,40 @@ pub enum GrantedAbilityValidationError {
     LegacyProcedureRequiresCustomExecution,
     HasNoSourceZone,
     ManaAbilityHasTargets,
+    /// Replacement abilities mutate prospective events and therefore require
+    /// the replacement-program vocabulary rather than an ordinary resolving
+    /// effect program.
+    ReplacementAbilityRequiresReplacementProgram,
+    /// Only replacement abilities have a prospective event whose state a
+    /// replacement program can mutate.
+    ReplacementProgramRequiresReplacementAbility,
+    /// The replacement program contains an operation that the prospective
+    /// event's shared procedure cannot execute.
+    UnsupportedReplacementProgram {
+        event: ReplacementEventDef,
+        operation: &'static str,
+    },
+    /// Installed triggers currently reuse their installer's target namespace
+    /// and the ordinary shared trigger runtime. Reject any nested ability the
+    /// runtime would otherwise silently decline to install.
+    UnsupportedInstalledTriggerAbility,
+    /// The shared trigger publisher cannot produce or match this event shape.
+    UnsupportedTriggerEvent {
+        event: TriggerEventDef,
+    },
+    /// A shared triggered mana ability must resolve immediately without
+    /// choices or stack-only effects. The runtime supports one or more fixed
+    /// `AddMana` leaves and nothing else.
+    UnsupportedTriggeredManaProgram,
+    /// A resolving Apply must contain at least one storable permanent effect;
+    /// stack-only rules and player recipients use different vocabulary.
+    UnsupportedResolvingAppliedEffect,
+    /// The selected ordinary-effect runtime does not interpret this operation
+    /// in the declared static or resolving program context.
+    UnsupportedEffectProgramContext {
+        context: &'static str,
+        operation: &'static str,
+    },
     TooManyTargets {
         count: usize,
     },
@@ -32,11 +74,49 @@ pub enum GrantedAbilityValidationError {
         target: TargetIndex,
         target_count: usize,
     },
-    ChoiceReferenceOutOfScope {
-        choice: ChoiceIndex,
+    TargetReferenceKindMismatch {
+        target: TargetIndex,
+        predicate: AbilityTargetPredicate,
+        expected: EffectSubjectKind,
     },
-    ChoiceBindingAlreadyInScope {
-        choice: ChoiceIndex,
+    TargetReferenceRequiresSingular {
+        target: TargetIndex,
+        maximum: u8,
+    },
+    EffectRecipientKindMismatch {
+        recipient: EffectRecipientDef,
+        expected: EffectSubjectKind,
+    },
+    InvalidScalarChoice {
+        list: ScalarChoiceListDef,
+        destination: BattlefieldEntryChoiceDestinationDef,
+    },
+    UnsupportedStaticPlayerRecipient {
+        recipient: EffectRecipientDef,
+    },
+    InvalidObjectChoiceBounds {
+        binding: ObjectChoiceBindingDef,
+        minimum: usize,
+        maximum: usize,
+    },
+    InvalidPileRole {
+        role: &'static str,
+        players: PlayerSetDef,
+    },
+    InvalidPaymentPayer {
+        players: PlayerSetDef,
+    },
+    ObjectBindingReferenceOutOfScope {
+        binding: ObjectBindingIndex,
+    },
+    ObjectBindingAlreadyInScope {
+        binding: ObjectBindingIndex,
+    },
+    ObjectSetBindingReferenceOutOfScope {
+        binding: ObjectSetBindingIndex,
+    },
+    ObjectSetBindingAlreadyInScope {
+        binding: ObjectSetBindingIndex,
     },
     /// Runtime static-effect discovery currently starts from attached printed
     /// or copied clauses. Reject an executable static ability granted by
@@ -46,6 +126,7 @@ pub enum GrantedAbilityValidationError {
 }
 
 impl fmt::Display for GrantedAbilityValidationError {
+    #[allow(clippy::too_many_lines)]
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooManyGrantSites { count } => write!(
@@ -61,6 +142,32 @@ impl fmt::Display for GrantedAbilityValidationError {
             ),
             Self::HasNoSourceZone => formatter.write_str("has no source zone"),
             Self::ManaAbilityHasTargets => formatter.write_str("is a mana ability that declares targets"),
+            Self::ReplacementAbilityRequiresReplacementProgram => formatter.write_str(
+                "is a replacement ability but does not define a replacement program",
+            ),
+            Self::ReplacementProgramRequiresReplacementAbility => formatter.write_str(
+                "defines a replacement program but is not a replacement ability",
+            ),
+            Self::UnsupportedReplacementProgram { event, operation } => write!(
+                formatter,
+                "uses unsupported replacement operation {operation} for event {event:?}",
+            ),
+            Self::UnsupportedInstalledTriggerAbility => formatter.write_str(
+                "installs an ability that is not a targetless shared declarative triggered ability",
+            ),
+            Self::UnsupportedTriggerEvent { event } => {
+                write!(formatter, "uses unsupported trigger event {event:?}")
+            }
+            Self::UnsupportedTriggeredManaProgram => formatter.write_str(
+                "uses a triggered mana program that cannot resolve immediately",
+            ),
+            Self::UnsupportedResolvingAppliedEffect => formatter.write_str(
+                "uses a resolving applied effect that cannot be stored on its recipient",
+            ),
+            Self::UnsupportedEffectProgramContext { context, operation } => write!(
+                formatter,
+                "uses {operation} in a {context} effect program, where that operation is not interpreted",
+            ),
             Self::TooManyTargets { count } => write!(
                 formatter,
                 "defines {count} targets, but positional target indices support at most 256"
@@ -80,18 +187,97 @@ impl fmt::Display for GrantedAbilityValidationError {
                 formatter,
                 "references target {target:?}, but the clause defines only {target_count} target slots"
             ),
-            Self::ChoiceReferenceOutOfScope { choice } => {
-                write!(formatter, "references choice {choice:?} outside its binding scope")
-            }
-            Self::ChoiceBindingAlreadyInScope { choice } => write!(
+            Self::TargetReferenceKindMismatch {
+                target,
+                predicate,
+                expected,
+            } => write!(
                 formatter,
-                "binds choice {choice:?}, but that choice is already bound in this scope"
+                "references target {target:?} as an {expected:?}, but its predicate is {predicate:?}"
+            ),
+            Self::TargetReferenceRequiresSingular { target, maximum } => write!(
+                formatter,
+                "reads one value from target {target:?}, but that slot allows up to {maximum} targets"
+            ),
+            Self::EffectRecipientKindMismatch {
+                recipient,
+                expected,
+            } => write!(
+                formatter,
+                "uses {recipient:?} where the effect requires an {expected:?} recipient"
+            ),
+            Self::InvalidScalarChoice { list, destination } => write!(
+                formatter,
+                "stores a {list:?} choice in the incompatible {destination:?} destination"
+            ),
+            Self::UnsupportedStaticPlayerRecipient { recipient } => write!(
+                formatter,
+                "uses {recipient:?} for a static player rule, but it cannot be resolved from the static source"
+            ),
+            Self::InvalidObjectChoiceBounds {
+                binding,
+                minimum,
+                maximum,
+            } => write!(
+                formatter,
+                "binds {binding:?} from a choice requiring at least {minimum} objects and allowing at most {maximum}"
+            ),
+            Self::InvalidPileRole { role, players } => write!(
+                formatter,
+                "uses {players:?} for pile {role}, but that role must select at most one player"
+            ),
+            Self::InvalidPaymentPayer { players } => write!(
+                formatter,
+                "uses {players:?} for an effect payment, but a payment must select at most one player"
+            ),
+            Self::ObjectBindingReferenceOutOfScope { binding } => {
+                write!(formatter, "references object binding {binding:?} outside its scope")
+            }
+            Self::ObjectBindingAlreadyInScope { binding } => write!(
+                formatter,
+                "binds object slot {binding:?}, but that slot is already bound in this scope"
+            ),
+            Self::ObjectSetBindingReferenceOutOfScope { binding } => write!(
+                formatter,
+                "references object-set binding {binding:?} outside its scope"
+            ),
+            Self::ObjectSetBindingAlreadyInScope { binding } => write!(
+                formatter,
+                "binds object-set slot {binding:?}, but that slot is already bound in this scope"
             ),
             Self::ExecutableStaticAbility => formatter.write_str(
                 "is an executable static ability, but granted static abilities are not evaluated yet",
             ),
         }
     }
+}
+
+/// The two sides of an alternative-cost mismatch, and where it was found.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MismatchedAlternativeCost {
+    pub definition: CardDefinitionId,
+    pub part: CardPartId,
+    pub ability: AbilityId,
+    pub option: PlayOptionId,
+    pub cost: AlternativeCostId,
+    pub expected_label: String,
+    pub actual_label: String,
+    pub expected_mana_cost: ManaCost,
+    pub actual_mana_cost: ManaCost,
+}
+
+/// The two sides of an optional additional-cost projection mismatch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MismatchedAdditionalCost {
+    pub definition: CardDefinitionId,
+    pub part: CardPartId,
+    pub ability: AbilityId,
+    pub option: PlayOptionId,
+    pub cost: AdditionalCostId,
+    pub expected_label: String,
+    pub actual_label: String,
+    pub expected_mana_cost: Option<ManaCost>,
+    pub actual_mana_cost: Option<ManaCost>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -210,6 +396,51 @@ pub enum CatalogError {
         part: CardPartId,
         ability: AbilityId,
     },
+    ReplacementAbilityRequiresReplacementProgram {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+    },
+    ReplacementProgramRequiresReplacementAbility {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+    },
+    UnsupportedReplacementProgram {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        event: ReplacementEventDef,
+        operation: &'static str,
+    },
+    UnsupportedInstalledTriggerAbility {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+    },
+    UnsupportedTriggerEvent {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        event: TriggerEventDef,
+    },
+    UnsupportedTriggeredManaProgram {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+    },
+    UnsupportedResolvingAppliedEffect {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+    },
+    UnsupportedAbilityEffectProgramContext {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        context: &'static str,
+        operation: &'static str,
+    },
     TooManyAbilityTargets {
         definition: CardDefinitionId,
         part: CardPartId,
@@ -231,17 +462,85 @@ pub enum CatalogError {
         target: TargetIndex,
         target_count: usize,
     },
-    AbilityChoiceReferenceOutOfScope {
+    AbilityTargetReferenceKindMismatch {
         definition: CardDefinitionId,
         part: CardPartId,
         ability: AbilityId,
-        choice: ChoiceIndex,
+        target: TargetIndex,
+        predicate: AbilityTargetPredicate,
+        expected: EffectSubjectKind,
     },
-    AbilityChoiceBindingAlreadyInScope {
+    AbilityTargetReferenceRequiresSingular {
         definition: CardDefinitionId,
         part: CardPartId,
         ability: AbilityId,
-        choice: ChoiceIndex,
+        target: TargetIndex,
+        maximum: u8,
+    },
+    AbilityEffectRecipientKindMismatch {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        recipient: EffectRecipientDef,
+        expected: EffectSubjectKind,
+    },
+    InvalidAbilityScalarChoice {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        list: ScalarChoiceListDef,
+        destination: BattlefieldEntryChoiceDestinationDef,
+    },
+    UnsupportedStaticAbilityPlayerRecipient {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        recipient: EffectRecipientDef,
+    },
+    InvalidAbilityObjectChoiceBounds {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        binding: ObjectChoiceBindingDef,
+        minimum: usize,
+        maximum: usize,
+    },
+    InvalidAbilityPileRole {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        role: &'static str,
+        players: PlayerSetDef,
+    },
+    InvalidAbilityPaymentPayer {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        players: PlayerSetDef,
+    },
+    AbilityObjectBindingReferenceOutOfScope {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        binding: ObjectBindingIndex,
+    },
+    AbilityObjectBindingAlreadyInScope {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        binding: ObjectBindingIndex,
+    },
+    AbilityObjectSetBindingReferenceOutOfScope {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        binding: ObjectSetBindingIndex,
+    },
+    AbilityObjectSetBindingAlreadyInScope {
+        definition: CardDefinitionId,
+        part: CardPartId,
+        ability: AbilityId,
+        binding: ObjectSetBindingIndex,
     },
     DuplicateStructurePart {
         definition: CardDefinitionId,
@@ -459,17 +758,17 @@ pub enum CatalogError {
         ability: AbilityId,
         cost: AlternativeCostId,
     },
-    MismatchedAlternativeCostForAbility {
+    /// Held behind a box because it is by some way the widest variant --
+    /// two whole mana costs and two labels -- and every fallible catalog
+    /// function returns this enum by value.
+    MismatchedAlternativeCostForAbility(Box<MismatchedAlternativeCost>),
+    MissingAdditionalCostForAbility {
         definition: CardDefinitionId,
         part: CardPartId,
         ability: AbilityId,
-        option: PlayOptionId,
-        cost: AlternativeCostId,
-        expected_label: String,
-        actual_label: String,
-        expected_mana_cost: ManaCost,
-        actual_mana_cost: ManaCost,
+        cost: AdditionalCostId,
     },
+    MismatchedAdditionalCostForAbility(Box<MismatchedAdditionalCost>),
     DuplicateAdditionalCostId {
         definition: CardDefinitionId,
         cost: AdditionalCostId,

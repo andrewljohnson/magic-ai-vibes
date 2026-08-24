@@ -1,14 +1,26 @@
-# Vendored penta engine crate, pinned at lacker/penta ac6cd4d (engine
-# 0.7.0 / protocol 22) -- the determinized era's training engine, kept
-# in-tree so spz-core builds against exactly the pinned rules. The ONLY
-# local modification is BotGame::into_core_game (see bot_game.rs, marked
-# SPZ VENDOR PATCH); proposed upstream as a native-search accessor.
+[workspace]
+members = [".", "wasm", "bindings/penta-ffi", "tools/source-file-sizes"]
+# penta-py links against a Python toolchain, so it builds on its own rather
+# than dragging that requirement into every `cargo test`.
+exclude = ["bindings/penta-py"]
+resolver = "3"
+
+# Tests run optimized: the engine's slow tier plays whole games, and an
+# unoptimized build makes that roughly twenty times slower for no added
+# coverage. Debug assertions and overflow checks stay on, so the invariant
+# checks scattered through the rules engine still fire.
+[profile.quick-test]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true
+
 [package]
 name = "penta"
 version = "0.7.0"
 edition = "2024"
+description = "A deterministic engine for two-player constructed Magic"
 license = "Apache-2.0"
-build = "build.rs"
+repository = "https://github.com/lacker/penta"
 
 [lib]
 path = "src/lib.rs"
@@ -16,7 +28,21 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.11"
 
 [build-dependencies]
-sha2 = "0.10"
-toml = "0.9"
+sha2 = "0.11"
+toml = "1.1"
+
+# Keep profiling representative of release behavior while retaining enough
+# symbol information for sampled stacks and source-level views.
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+pedantic = "warn"

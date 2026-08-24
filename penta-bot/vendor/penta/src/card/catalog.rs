@@ -10,10 +10,16 @@ use self::validation::validate_composition;
 use super::{CardDefinition, CardPrinting, CardPrintingId, CardSet};
 use crate::{CardDefinitionId, Format};
 
-pub use self::error::{CatalogError, GrantedAbilityValidationError};
+pub use self::error::{
+    CatalogError, EffectSubjectKind, GrantedAbilityValidationError, MismatchedAdditionalCost,
+    MismatchedAlternativeCost,
+};
 
 #[cfg(test)]
-use self::validation::{validate_ability_targets, validate_semantic_spell_presentation};
+use self::validation::{
+    validate_ability_targets, validate_replacement_ability_targets,
+    validate_semantic_spell_presentation,
+};
 
 /// A catalog is immutable once built, and callers pass it around by value —
 /// a game, a policy, and the protocol facade each hold one. Sharing the maps
@@ -27,17 +33,23 @@ pub struct CardCatalog {
 #[derive(Debug, Default)]
 struct CatalogEntries {
     definitions: Vec<CardDefinition>,
-    definition_indices: Vec<Option<usize>>,
+    dense_definition_indices: Vec<Option<usize>>,
+    sparse_definition_indices: HashMap<CardDefinitionId, usize>,
     ids_by_name: HashMap<String, CardDefinitionId>,
     definition_by_printing: HashMap<CardPrintingId, CardDefinitionId>,
 }
 
 impl CatalogEntries {
     fn definition_index(&self, definition: CardDefinitionId) -> Option<usize> {
-        self.definition_indices
-            .get(usize::from(definition.0))
-            .copied()
-            .flatten()
+        let raw = definition.get();
+        if let Ok(dense) = u16::try_from(raw) {
+            self.dense_definition_indices
+                .get(usize::from(dense))
+                .copied()
+                .flatten()
+        } else {
+            self.sparse_definition_indices.get(&definition).copied()
+        }
     }
 
     fn definition(&self, definition: CardDefinitionId) -> Option<&CardDefinition> {
@@ -45,13 +57,18 @@ impl CatalogEntries {
     }
 
     fn insert_definition(&mut self, definition: CardDefinition) {
-        let slot = usize::from(definition.id.0);
-        if self.definition_indices.len() <= slot {
-            self.definition_indices.resize(slot + 1, None);
-        }
+        let raw = definition.id.get();
         let index = self.definitions.len();
+        if let Ok(dense) = u16::try_from(raw) {
+            let slot = usize::from(dense);
+            if self.dense_definition_indices.len() <= slot {
+                self.dense_definition_indices.resize(slot + 1, None);
+            }
+            self.dense_definition_indices[slot] = Some(index);
+        } else {
+            self.sparse_definition_indices.insert(definition.id, index);
+        }
         self.definitions.push(definition);
-        self.definition_indices[slot] = Some(index);
     }
 
     fn attach_printing(&mut self, printing: CardPrinting) -> Result<(), CatalogError> {
@@ -103,12 +120,8 @@ impl CardCatalog {
             if entries.definition_index(definition.id).is_some() {
                 return Err(CatalogError::DuplicateId(definition.id));
             }
-            // Tokens are not deck-legal and are never looked up by name, and
-            // Magic prints several that share one. Only the cards a decklist
-            // can name have to be distinguishable by name.
-            let is_token = definition.debut_set == CardSet::Token;
             let normalized_name = normalize_name(&definition.name);
-            if !is_token && entries.ids_by_name.contains_key(&normalized_name) {
+            if entries.ids_by_name.contains_key(&normalized_name) {
                 return Err(CatalogError::DuplicateName(definition.name));
             }
             validate_composition(&definition)?;
@@ -118,9 +131,7 @@ impl CardCatalog {
                     .into_iter()
                     .map(|printing| (definition.id, printing)),
             );
-            if !is_token {
-                entries.ids_by_name.insert(normalized_name, definition.id);
-            }
+            entries.ids_by_name.insert(normalized_name, definition.id);
             entries.insert_definition(definition);
         }
 

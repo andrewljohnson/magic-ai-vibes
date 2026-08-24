@@ -5,7 +5,18 @@ pub mod card;
 pub mod casting;
 pub mod deck;
 pub mod decks;
-pub mod format;
+pub mod formats;
+/// Backwards-compatible module path for callers compiled against `penta::format`.
+#[deprecated(note = "use penta::formats")]
+pub mod format {
+    pub use crate::formats::*;
+
+    /// Backwards-compatible path for the former Vintage Cube pool module.
+    #[deprecated(note = "use penta::formats::cubes::vintage")]
+    pub mod vintage_cube {
+        pub use crate::formats::cubes::vintage::*;
+    }
+}
 pub mod game;
 pub mod ids;
 pub mod poc;
@@ -19,41 +30,60 @@ pub use action::{
 };
 pub use card::{
     AbilityCostDef, AbilityCostList, AbilityCoverageDef, AbilityDef, AbilityEffectDef,
-    AbilityPredicateDef, AbilityProcedureDef, AbilityTargetDef, AbilityTargetPredicate,
-    ActivatedAbilityDef, AddManaEffectDef, AdditionalCostDef, AlternateSpellKind,
-    AlternativeCastAbilityDef, AlternativeCastKindDef, AlternativeCastManaCostDef,
-    AlternativeCostDef, AppliedEffectDef, AttachedAbilityDef, BasicLandType,
-    BattlefieldEntryModificationDef, CREATURE_TYPES, CardAbilityList, CardArt, CardBehavior,
+    AbilityOperationDef, AbilityPredicateDef, AbilityProcedureDef, AbilityProgramDef,
+    AbilityTargetDef, AbilityTargetPredicate, ActivatedAbilityDef, AddManaEffectDef,
+    AdditionalCostDef, AlternateSpellKind, AlternativeCastAbilityDef, AlternativeCastKindDef,
+    AlternativeCastManaCostDef, AlternativeCostDef, AppliedEffectDef, AppliedRuleDef,
+    AttachedAbilityDef, AttackDeclarationRangeDef, AttackEventMatcherDef, BasicLandType,
+    BattlefieldEntryChoiceDestinationDef, BattlefieldEntryModificationDef,
+    BattlefieldEntryScalarChoiceDef, CREATURE_TYPES, CardAbilityList, CardArt, CardBehavior,
     CardCatalog, CardChoiceSourceDef, CardComposition, CardDefinition, CardEffectStatus, CardPart,
     CardPrinting, CardPrintingId, CardRules, CardSet, CardStructure, CardSupertype, CardType,
-    CardTypeSet, CatalogError, CharacteristicContext, CharacteristicError, ColorSet, ComparisonDef,
-    ConditionDef, ConditionalValueDef, CostDef, CountConditionDef, CounterKind, CreatureStats,
-    DeclarativeAbilityDef, DiscardSelectionDef, DividedTotal, DoubleFacedKind, EffectDef,
-    EffectDurationDef, EffectExecutionDef, EffectRecipientDef, GrantedAbilityValidationError,
-    HybridPair, ImplementationStatus, KeywordAbility, LikelihoodDef, ManaCost, ManaCostParseError,
-    ManaCostParseErrorKind, ManaRestrictionDef, ManaSelectionDef, ManaSpendEffectDef,
-    MeldComponentDef, MeldRecipeDef, MeldResultDef, ModalSpellDef, ModeDef, ModeSetDef,
-    ObjectPredicateDef, ObjectQueryDef, PaymentDef, PlayActionKind, PlayOptionDef, PlayRestriction,
-    PlayerRelation, PrintedManaCost, ReplacementAbilityDef, ReplacementConditionDef,
-    ReplacementEffectDef, ReplacementEventDef, SpecialActionDef, SpellAbilityDef, SpellForm,
-    StaticAbilityDef, TargetConditionDef, TargetPredicate, TargetSlotDef, TriggerConditionDef,
-    TriggerEventDef, TriggeredAbilityDef, TurnKindDef, TurnStepDef, ValueDef, ZoneKind,
-    ZoneMoveCauseDef, ZonePlacement, applicable_part_ids,
+    CardTypeSet, CatalogError, CharacteristicContext, CharacteristicError,
+    CharacteristicOperationDef, ColorSet, ComparisonDef, ConditionDef, ConditionalValueDef,
+    ControlDurationDef, CostDef, CountConditionDef, CounterFamily, CounterKind, CounterName,
+    CreatureStats, CreatureTypeSetDef, DamageCoverageDef, DamageEventMatcherDef, DamageKindDef,
+    DamagePreventionCapacityDef, DamagePreventionDef, DamagePreventionFollowUpDef,
+    DamageRecipientMatcherDef, DamageSourceMatcherDef, DeclarativeAbilityDef, DiscardSelectionDef,
+    DividedTotal, DoubleFacedKind, EffectDef, EffectExecutionDef, EffectPaymentCostDef,
+    EffectPaymentDef, EffectRecipientDef, EffectRecipientSetDef, EffectSubjectKind,
+    EmblemCharacteristics, FaceDownCharacteristics, FlexibleManaSymbol,
+    GrantedAbilityValidationError, HybridPair, ImplementationStatus, InstalledTriggerDef,
+    InstalledTriggerLifetimeDef, KeywordAbility, KeywordCounter, LikelihoodDef, ManaCost,
+    ManaCostParseError, ManaCostParseErrorKind, ManaRestrictionDef, ManaSelectionDef,
+    ManaSpendEffectDef, ManaSplit, MeldComponentDef, MeldRecipeDef, MeldResultDef, ModalSpellDef,
+    ModeDef, ModeSetDef, ObjectPredicateDef, ObjectQueryDef, ObjectRefDef, ObjectSetDef,
+    OptionalAdditionalCostAbilityDef, OptionalAdditionalCostKindDef, PlayActionKind,
+    PlayActionMatcherDef, PlayOptionDef, PlayRestriction, PlayRestrictionDef, PlayerRefDef,
+    PlayerRelation, PlayerSetDef, PowerToughnessCounter, PowerToughnessOperationDef,
+    PrintedManaCost, ReplacementAbilityDef, ReplacementChoiceDef, ReplacementConditionDef,
+    ReplacementEffectDef, ReplacementEventDef, ResolvedEffectDurationDef, ScalarChoiceListDef,
+    SetOperationDef, SpecialActionDef, SpellAbilityDef, SpellForm, SpellResolutionDestinationDef,
+    StaticAbilityDef, TapEventMatcherDef, TapPurposeDef, TargetConditionDef, TargetPredicate,
+    TargetSlotDef, TokenCharacteristics, TokenPart, TokenStructure, TriggerConditionDef,
+    TriggerEventDef, TriggeredAbilityDef, TurnKindDef, TurnPhaseDef, TurnStepDef, ValueDef,
+    ZoneChangeEventMatcherDef, ZoneKind, ZoneMoveCauseDef, ZonePlacement, applicable_part_ids,
+    face_down, tokens,
 };
 pub use casting::{
-    CastChoices, CastSignature, CostConfiguration, TargetReplacementError, TargetSelection,
+    CastChoices, CastSignature, CostConfiguration, FlexibleManaPayment, ManaPaymentChoice,
+    TargetReplacementError, TargetSelection,
 };
 pub use deck::{Deck, DeckError, ValidatedDeck};
-pub use format::{Format, FormatRules};
+pub use formats::{
+    CubeFormatDefinition, Format, FormatCategory, FormatDefinition, FormatRules,
+    SetFormatDefinition,
+};
 pub use game::{
-    BattlefieldExit, DecisionObservation, DecisionOption, DecisionPreference, DecisionVisibility,
-    DecisionZone, EmblemObservation, Game, GameError, GameEvent, GameResult, Mana, ManaPool,
-    ManaSource, PermanentObservation, PlayerObservation, StackObjectKind, Step, WinReason,
-    ZoneCard, ZoneChangeOutcome, ZoneError,
+    BattlefieldExit, CardCounterObservation, CounterObservation, DecisionObservation,
+    DecisionOption, DecisionPreference, DecisionVisibility, DecisionZone, EmblemObservation, Game,
+    GameError, GameEvent, GameResult, Mana, ManaPool, ManaSource, ObjectCharacteristics,
+    PermanentObservation, PhysicalFaceObservation, PhysicalFaceSide, PlayerObservation,
+    StackObjectKind, Step, WinReason, ZoneCard, ZoneChangeOutcome, ZoneError,
 };
 pub use ids::{
     AbilityId, AdditionalCostId, AlternativeCostId, CardDefinitionId, CardInstanceId, CardPartId,
-    ChoiceIndex, GameObjectId, GrantId, MeldRecipeId, ModeId, PhysicalCardId, PlayOptionId,
-    PlayerId, StackObjectId, TargetIndex, TargetSlotId,
+    GameObjectId, GrantId, MeldRecipeId, ModeId, ObjectBindingIndex, ObjectSetBindingIndex,
+    PhysicalCardId, PlayOptionId, PlayerId, StackObjectId, TargetIndex, TargetSlotId,
 };
 pub use policy::{HandcraftedPolicy, PlayError, Policy, RandomPolicy, play_game};

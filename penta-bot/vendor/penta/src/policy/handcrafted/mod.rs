@@ -11,17 +11,18 @@ use self::spell_profile::DeclarativeSpellProfile;
 use super::Policy;
 use crate::card::{
     AbilityCostDef, AbilityTargetDef, AbilityTargetPredicate, AlternativeCastKindDef,
-    BasicLandType, CardBehavior, CardCatalog, CardSupertype, CardType, CardTypeSet,
-    DeclarativeAbilityDef, EffectDef, EffectRecipientDef, ObjectPredicateDef, PlayerRelation,
-    SpellForm, ValueDef, ZoneKind,
+    AppliedEffectDef, BasicLandType, CardBehavior, CardCatalog, CardSupertype, CardType,
+    CardTypeSet, CharacteristicOperationDef, DeclarativeAbilityDef, EffectDef, EffectRecipientDef,
+    ObjectPredicateDef, PlayerRelation, PowerToughnessOperationDef, SetOperationDef, SpellForm,
+    ValueDef, ZoneKind,
 };
 use crate::game::{
     DecisionObservation, DecisionOption, DecisionPreference, DecisionZone, PlayerObservation,
     StackObjectKind, StackObservation, Step,
 };
 use crate::{
-    AbilityOrigin, Action, AttackDefender, CardDefinitionId, CastChoices, GameObjectId, PlayerId,
-    Target,
+    AbilityOrigin, Action, AttackDefender, CardDefinitionId, CastChoices, GameObjectId,
+    ObjectCharacteristics, PlayerId, Target,
 };
 
 /// A deterministic baseline that applies simple card- and combat-aware rules.
@@ -44,6 +45,9 @@ impl HandcraftedPolicy {
 impl Policy for HandcraftedPolicy {
     fn choose_action(&mut self, observation: &PlayerObservation) -> Option<Action> {
         if let Some(decision) = observation.decision.as_ref() {
+            if let Some(cast) = self.choose_offered_cast(observation) {
+                return Some(cast);
+            }
             return self.choose_decision(observation, decision);
         }
         let action = observation

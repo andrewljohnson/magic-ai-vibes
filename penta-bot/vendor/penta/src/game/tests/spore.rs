@@ -20,7 +20,9 @@ fn spores(game: &Game, id: GameObjectId) -> u16 {
     game.battlefield
         .iter()
         .find(|permanent| permanent.card.id == id)
-        .map_or(0, |permanent| permanent.counters(CounterKind::Spore))
+        .map_or(0, |permanent| {
+            permanent.counters(CounterKind::named("spore"))
+        })
 }
 
 fn take_upkeep(game: &mut Game) {
@@ -68,7 +70,7 @@ fn the_spore_ability_is_not_offered_until_three_counters_are_stored() {
         .iter_mut()
         .find(|permanent| permanent.card.id == thallid)
     {
-        permanent.set_counters(CounterKind::Spore, 2);
+        permanent.set_counters(CounterKind::named("spore"), 2);
     }
     assert!(
         spore_ability(&game, thallid).is_none(),
@@ -80,7 +82,7 @@ fn the_spore_ability_is_not_offered_until_three_counters_are_stored() {
         .iter_mut()
         .find(|permanent| permanent.card.id == thallid)
     {
-        permanent.set_counters(CounterKind::Spore, 3);
+        permanent.set_counters(CounterKind::named("spore"), 3);
     }
     assert!(spore_ability(&game, thallid).is_some(), "three pays for it");
 }
@@ -94,7 +96,7 @@ fn spending_three_counters_makes_a_saproling() {
         .iter_mut()
         .find(|permanent| permanent.card.id == thallid)
     {
-        permanent.set_counters(CounterKind::Spore, 3);
+        permanent.set_counters(CounterKind::named("spore"), 3);
     }
 
     let action = spore_ability(&game, thallid).expect("the ability is available");
@@ -103,9 +105,12 @@ fn spending_three_counters_makes_a_saproling() {
 
     assert_eq!(spores(&game, thallid), 0, "the counters were the cost");
     assert!(
-        game.battlefield
-            .iter()
-            .any(|permanent| { permanent.card.definition == cards::SAPROLING_TOKEN_1_1_GREEN }),
+        game.battlefield.iter().any(|permanent| {
+            is_token_with(
+                permanent,
+                tokens::creature(&["Saproling"], &[ManaColor::Green], 1, 1),
+            )
+        }),
         "a Saproling token arrived"
     );
 }
@@ -144,7 +149,11 @@ mod saproling_sacrifice {
         let farmer = creature(10_000, card, PlayerId::One);
         let farmer_id = farmer.card.id;
         game.battlefield.push(farmer);
-        let saproling = creature(10_001, cards::SAPROLING_TOKEN_1_1_GREEN, PlayerId::One);
+        let saproling = token_permanent(
+            10_001,
+            tokens::creature(&["Saproling"], &[ManaColor::Green], 1, 1),
+            PlayerId::One,
+        );
         let saproling_id = saproling.card.id;
         game.battlefield.push(saproling);
         (game, farmer_id, saproling_id)
@@ -156,8 +165,8 @@ mod saproling_sacrifice {
             .find(|action| {
                 matches!(
                     action,
-                    Action::ActivateAbility { source: actual, cost_object: Some(paid), .. }
-                        if *actual == source && *paid == fodder
+                    Action::ActivateAbility { source: actual, cost_objects, .. }
+                        if *actual == source && cost_objects.as_slice() == [fodder]
                 )
             })
             .expect("sacrificing the Saproling is offered")
@@ -214,8 +223,8 @@ mod saproling_sacrifice {
             !game.legal_actions(PlayerId::One).iter().any(|action| {
                 matches!(
                     action,
-                    Action::ActivateAbility { source, cost_object: Some(paid), .. }
-                        if *source == farmer_id && *paid == bear_id
+                    Action::ActivateAbility { source, cost_objects, .. }
+                        if *source == farmer_id && cost_objects.as_slice() == [bear_id]
                 )
             }),
             "only a Saproling pays this cost"

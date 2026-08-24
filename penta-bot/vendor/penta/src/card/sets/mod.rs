@@ -1,11 +1,7 @@
-//! Built-in card records, grouped by release year and set.
-//!
-//! Each canonical card is defined in one set module. Records default to a
-//! complete implementation and explicitly carry a reason when they are partial
-//! or metadata-only. Reprints and alternate-art variants point back to that
-//! canonical record from their own set module.
+//! Built-in card records grouped by release year and set.
+//! Canonical cards live in one set module; reprints and alternate art point back to it.
+//! Partial and metadata-only entries carry explicit coverage reasons.
 
-mod tokens;
 mod y1993;
 mod y1994;
 mod y1995;
@@ -16,15 +12,32 @@ mod y1999;
 mod y2000;
 mod y2001;
 mod y2002;
+mod y2003;
 mod y2004;
+mod y2005;
+mod y2006;
 mod y2007;
+mod y2008;
+mod y2009;
+mod y2010;
 mod y2011;
 mod y2012;
 mod y2013;
 mod y2014;
+mod y2015;
+mod y2016;
+mod y2017;
+mod y2018;
+mod y2019;
+mod y2020;
 mod y2021;
+mod y2022;
+mod y2023;
+mod y2024;
+mod y2025;
+mod y2026;
 
-use super::record::{CardAbilityBinding, CardRecord, PrintingRecord};
+use super::record::{CardAbilityBinding, CardRecord, PrintingAnchor, PrintingRecord};
 use crate::AbilityOrigin;
 use crate::card::{AbilityDef, CardBehavior, CardDefinition, CardPrinting, CardRules, CardSet};
 use crate::game::{PileChosen, PilesSeparated};
@@ -55,7 +68,6 @@ impl SetModule {
 /// introduced by that module; `additional_printings` contains reprints and
 /// further variants of definitions introduced elsewhere.
 const SET_MODULES: &[SetModule] = &[
-    SetModule::new(CardSet::Token, tokens::CARDS, tokens::ADDITIONAL_PRINTINGS),
     SetModule::new(
         CardSet::Alpha,
         y1993::alpha::CARDS,
@@ -117,9 +129,24 @@ const SET_MODULES: &[SetModule] = &[
         y1994::promo_1994::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::FourthEdition,
+        y1995::fourth_edition::CARDS,
+        y1995::fourth_edition::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::IceAge,
         y1995::ice_age::CARDS,
         y1995::ice_age::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Chronicles,
+        y1995::chronicles::CARDS,
+        y1995::chronicles::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Alliances,
+        y1996::alliances::CARDS,
+        y1996::alliances::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
         CardSet::Mirage,
@@ -130,6 +157,11 @@ const SET_MODULES: &[SetModule] = &[
         CardSet::Visions,
         y1997::visions::CARDS,
         y1997::visions::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Weatherlight,
+        y1997::weatherlight::CARDS,
+        y1997::weatherlight::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
         CardSet::Tempest,
@@ -152,6 +184,16 @@ const SET_MODULES: &[SetModule] = &[
         y1998::urzas_saga::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::UrzasLegacy,
+        y1999::urzas_legacy::CARDS,
+        y1999::urzas_legacy::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::UrzasDestiny,
+        y1999::urzas_destiny::CARDS,
+        y1999::urzas_destiny::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::MercadianMasques,
         y1999::mercadian_masques::CARDS,
         y1999::mercadian_masques::ADDITIONAL_PRINTINGS,
@@ -172,6 +214,11 @@ const SET_MODULES: &[SetModule] = &[
         y2001::planeshift::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::SeventhEdition,
+        y2001::seventh_edition::CARDS,
+        y2001::seventh_edition::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::Apocalypse,
         y2001::apocalypse::CARDS,
         y2001::apocalypse::ADDITIONAL_PRINTINGS,
@@ -180,6 +227,11 @@ const SET_MODULES: &[SetModule] = &[
         CardSet::Odyssey,
         y2001::odyssey::CARDS,
         y2001::odyssey::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Torment,
+        y2002::torment::CARDS,
+        y2002::torment::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
         CardSet::Judgment,
@@ -192,9 +244,39 @@ const SET_MODULES: &[SetModule] = &[
         y2002::onslaught::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::Legions,
+        y2003::legions::CARDS,
+        y2003::legions::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Scourge,
+        y2003::scourge::CARDS,
+        y2003::scourge::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Mirrodin,
+        y2003::mirrodin::CARDS,
+        y2003::mirrodin::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::Darksteel,
         y2004::darksteel::CARDS,
         y2004::darksteel::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FifthDawn,
+        y2004::fifth_dawn::CARDS,
+        y2004::fifth_dawn::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ChampionsOfKamigawa,
+        y2004::champions_of_kamigawa::CARDS,
+        y2004::champions_of_kamigawa::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::BetrayersOfKamigawa,
+        y2005::betrayers_of_kamigawa::CARDS,
+        y2005::betrayers_of_kamigawa::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
         CardSet::PlanarChaos,
@@ -205,6 +287,71 @@ const SET_MODULES: &[SetModule] = &[
         CardSet::FutureSight,
         y2007::future_sight::CARDS,
         y2007::future_sight::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Lorwyn,
+        y2007::lorwyn::CARDS,
+        y2007::lorwyn::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MirrodinBesieged,
+        y2011::mirrodin_besieged::CARDS,
+        y2011::mirrodin_besieged::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::NewPhyrexia,
+        y2011::new_phyrexia::CARDS,
+        y2011::new_phyrexia::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Conflux,
+        y2009::conflux::CARDS,
+        y2009::conflux::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Zendikar,
+        y2009::zendikar::CARDS,
+        y2009::zendikar::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Shadowmoor,
+        y2008::shadowmoor::CARDS,
+        y2008::shadowmoor::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Eventide,
+        y2008::eventide::CARDS,
+        y2008::eventide::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ShardsOfAlara,
+        y2008::shards_of_alara::CARDS,
+        y2008::shards_of_alara::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Worldwake,
+        y2010::worldwake::CARDS,
+        y2010::worldwake::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ScarsOfMirrodin,
+        y2010::scars_of_mirrodin::CARDS,
+        y2010::scars_of_mirrodin::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Magic2011,
+        y2010::magic_2011::CARDS,
+        y2010::magic_2011::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::RiseOfTheEldrazi,
+        y2010::rise_of_the_eldrazi::CARDS,
+        y2010::rise_of_the_eldrazi::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Magic2012,
+        y2011::magic_2012::CARDS,
+        y2011::magic_2012::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
         CardSet::Innistrad,
@@ -252,14 +399,504 @@ const SET_MODULES: &[SetModule] = &[
         y2013::theros::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::Planechase2012,
+        y2012::planechase_2012::CARDS,
+        y2012::planechase_2012::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2013,
+        y2013::commander_2013::CARDS,
+        y2013::commander_2013::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::JourneyIntoNyx,
+        y2014::journey_into_nyx::CARDS,
+        y2014::journey_into_nyx::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Conspiracy,
+        y2014::conspiracy::CARDS,
+        y2014::conspiracy::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Magic2015,
+        y2014::magic_2015::CARDS,
+        y2014::magic_2015::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2014,
+        y2014::commander_2014::CARDS,
+        y2014::commander_2014::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::KhansOfTarkir,
         y2014::khans_of_tarkir::CARDS,
         y2014::khans_of_tarkir::ADDITIONAL_PRINTINGS,
     ),
     SetModule::new(
+        CardSet::DragonsOfTarkir,
+        y2015::dragons_of_tarkir::CARDS,
+        y2015::dragons_of_tarkir::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2015,
+        y2015::commander_2015::CARDS,
+        y2015::commander_2015::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Ixalan,
+        y2017::ixalan::CARDS,
+        y2017::ixalan::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Battlebond,
+        y2018::battlebond::CARDS,
+        y2018::battlebond::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Magic2020,
+        y2019::magic_2020::CARDS,
+        y2019::magic_2020::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ModernHorizons1,
+        y2019::modern_horizons::CARDS,
+        y2019::modern_horizons::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::WarOfTheSpark,
+        y2019::war_of_the_spark::CARDS,
+        y2019::war_of_the_spark::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ThroneOfEldraine,
+        y2019::throne_of_eldraine::CARDS,
+        y2019::throne_of_eldraine::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TherosBeyondDeath,
+        y2020::theros_beyond_death::CARDS,
+        y2020::theros_beyond_death::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ZendikarRising,
+        y2020::zendikar_rising::CARDS,
+        y2020::zendikar_rising::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Ikoria,
+        y2020::ikoria::CARDS,
+        y2020::ikoria::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Kaldheim,
+        y2021::kaldheim::CARDS,
+        y2021::kaldheim::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2021,
+        y2021::commander_2021::CARDS,
+        y2021::commander_2021::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::StrixhavenSchoolOfMages,
+        y2021::strixhaven_school_of_mages::CARDS,
+        y2021::strixhaven_school_of_mages::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
         CardSet::ModernHorizons2,
         y2021::modern_horizons_2::CARDS,
         y2021::modern_horizons_2::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::AdventuresInTheForgottenRealms,
+        y2021::adventures_in_the_forgotten_realms::CARDS,
+        y2021::adventures_in_the_forgotten_realms::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::InnistradMidnightHunt,
+        y2021::innistrad_midnight_hunt::CARDS,
+        y2021::innistrad_midnight_hunt::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::InnistradCrimsonVow,
+        y2021::innistrad_crimson_vow::CARDS,
+        y2021::innistrad_crimson_vow::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::InnistradCrimsonVowCommander,
+        y2021::innistrad_crimson_vow_commander::CARDS,
+        y2021::innistrad_crimson_vow_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::KamigawaNeonDynasty,
+        y2022::kamigawa_neon_dynasty::CARDS,
+        y2022::kamigawa_neon_dynasty::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::KamigawaNeonDynastyCommander,
+        y2022::kamigawa_neon_dynasty_commander::CARDS,
+        y2022::kamigawa_neon_dynasty_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::StreetsOfNewCapenna,
+        y2022::streets_of_new_capenna::CARDS,
+        y2022::streets_of_new_capenna::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::StreetsOfNewCapennaCommander,
+        y2022::streets_of_new_capenna_commander::CARDS,
+        y2022::streets_of_new_capenna_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::CommanderLegendsBattleForBaldursGate,
+        y2022::commander_legends_baldurs_gate::CARDS,
+        y2022::commander_legends_baldurs_gate::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::DominariaUnited,
+        y2022::dominaria_united::CARDS,
+        y2022::dominaria_united::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TheBrothersWar,
+        y2022::the_brothers_war::CARDS,
+        y2022::the_brothers_war::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::EternalMasters,
+        y2016::eternal_masters::CARDS,
+        y2016::eternal_masters::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::EldritchMoon,
+        y2016::eldritch_moon::CARDS,
+        y2016::eldritch_moon::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ConspiracyTakeTheCrown,
+        y2016::conspiracy_take_the_crown::CARDS,
+        y2016::conspiracy_take_the_crown::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Kaladesh,
+        y2016::kaladesh::CARDS,
+        y2016::kaladesh::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::AetherRevolt,
+        y2017::aether_revolt::CARDS,
+        y2017::aether_revolt::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Amonkhet,
+        y2017::amonkhet::CARDS,
+        y2017::amonkhet::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::PhyrexiaAllWillBeOne,
+        y2023::phyrexia_all_will_be_one::CARDS,
+        y2023::phyrexia_all_will_be_one::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::PhyrexiaAllWillBeOneCommander,
+        y2023::phyrexia_all_will_be_one_commander::CARDS,
+        y2023::phyrexia_all_will_be_one_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MarchOfTheMachine,
+        y2023::march_of_the_machine::CARDS,
+        y2023::march_of_the_machine::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::LordOfTheRings,
+        y2023::lord_of_the_rings::CARDS,
+        y2023::lord_of_the_rings::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::LordOfTheRingsCommander,
+        y2023::lord_of_the_rings_commander::CARDS,
+        y2023::lord_of_the_rings_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::WildsOfEldraine,
+        y2023::wilds_of_eldraine::CARDS,
+        y2023::wilds_of_eldraine::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MurdersAtKarlovManor,
+        y2024::murders_at_karlov_manor::CARDS,
+        y2024::murders_at_karlov_manor::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::RavnicaClueEdition,
+        y2024::ravnica_clue_edition::CARDS,
+        y2024::ravnica_clue_edition::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Fallout,
+        y2024::fallout::CARDS,
+        y2024::fallout::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::LostCavernsOfIxalan,
+        y2023::lost_caverns_of_ixalan::CARDS,
+        y2023::lost_caverns_of_ixalan::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ModernHorizons3,
+        y2024::modern_horizons_3::CARDS,
+        y2024::modern_horizons_3::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::OutlawsOfThunderJunction,
+        y2024::outlaws_of_thunder_junction::CARDS,
+        y2024::outlaws_of_thunder_junction::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TheBigScore,
+        y2024::the_big_score::CARDS,
+        y2024::the_big_score::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ModernHorizons3Commander,
+        y2024::modern_horizons_3_commander::CARDS,
+        y2024::modern_horizons_3_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Bloomburrow,
+        y2024::bloomburrow::CARDS,
+        y2024::bloomburrow::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::BloomburrowCommander,
+        y2024::bloomburrow_commander::CARDS,
+        y2024::bloomburrow_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::DuskmournHouseOfHorror,
+        y2024::duskmourn_house_of_horror::CARDS,
+        y2024::duskmourn_house_of_horror::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::DuskmournHouseOfHorrorCommander,
+        y2024::duskmourn_house_of_horror_commander::CARDS,
+        y2024::duskmourn_house_of_horror_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FoundationsJumpstart,
+        y2024::foundations_jumpstart::CARDS,
+        y2024::foundations_jumpstart::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TarkirDragonstorm,
+        y2025::tarkir_dragonstorm::CARDS,
+        y2025::tarkir_dragonstorm::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Aetherdrift,
+        y2025::aetherdrift::CARDS,
+        y2025::aetherdrift::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FinalFantasy,
+        y2025::final_fantasy::CARDS,
+        y2025::final_fantasy::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FinalFantasyCommander,
+        y2025::final_fantasy_commander::CARDS,
+        y2025::final_fantasy_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ThroughTheOmenpaths,
+        y2025::through_the_omenpaths::CARDS,
+        y2025::through_the_omenpaths::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Homelands,
+        y1995::homelands::CARDS,
+        y1995::homelands::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FifthEdition,
+        y1997::fifth_edition::CARDS,
+        y1997::fifth_edition::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Exodus,
+        y1998::exodus::CARDS,
+        y1998::exodus::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ClassicSixthEdition,
+        y1999::classic_sixth_edition::CARDS,
+        y1999::classic_sixth_edition::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Prophecy,
+        y2000::prophecy::CARDS,
+        y2000::prophecy::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::SaviorsOfKamigawa,
+        y2005::saviors_of_kamigawa::CARDS,
+        y2005::saviors_of_kamigawa::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::RavnicaCityOfGuilds,
+        y2005::ravnica_city_of_guilds::CARDS,
+        y2005::ravnica_city_of_guilds::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Guildpact,
+        y2006::guildpact::CARDS,
+        y2006::guildpact::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Dissension,
+        y2006::dissension::CARDS,
+        y2006::dissension::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TimeSpiral,
+        y2006::time_spiral::CARDS,
+        y2006::time_spiral::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::AlaraReborn,
+        y2009::alara_reborn::CARDS,
+        y2009::alara_reborn::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::FateReforged,
+        y2015::fate_reforged::CARDS,
+        y2015::fate_reforged::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::BattleForZendikar,
+        y2015::battle_for_zendikar::CARDS,
+        y2015::battle_for_zendikar::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MagicOrigins,
+        y2015::magic_origins::CARDS,
+        y2015::magic_origins::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::ShadowsOverInnistrad,
+        y2016::shadows_over_innistrad::CARDS,
+        y2016::shadows_over_innistrad::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::HourOfDevastation,
+        y2017::hour_of_devastation::CARDS,
+        y2017::hour_of_devastation::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::CoreSet2019,
+        y2018::core_set_2019::CARDS,
+        y2018::core_set_2019::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2018,
+        y2018::commander_2018::CARDS,
+        y2018::commander_2018::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::RavnicaAllegiance,
+        y2019::ravnica_allegiance::CARDS,
+        y2019::ravnica_allegiance::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2020,
+        y2020::commander_2020::CARDS,
+        y2020::commander_2020::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MagicFoundations,
+        y2024::magic_foundations::CARDS,
+        y2024::magic_foundations::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::AvatarTheLastAirbender,
+        y2025::avatar_the_last_airbender::CARDS,
+        y2025::avatar_the_last_airbender::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::EdgeOfEternities,
+        y2025::edge_of_eternities::CARDS,
+        y2025::edge_of_eternities::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::EdgeOfEternitiesCommander,
+        y2025::edge_of_eternities_commander::CARDS,
+        y2025::edge_of_eternities_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::LorwynEclipsed,
+        y2026::lorwyn_eclipsed::CARDS,
+        y2026::lorwyn_eclipsed::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::SecretsOfStrixhaven,
+        y2026::secrets_of_strixhaven::CARDS,
+        y2026::secrets_of_strixhaven::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::TeenageMutantNinjaTurtles,
+        y2026::teenage_mutant_ninja_turtles::CARDS,
+        y2026::teenage_mutant_ninja_turtles::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::PortalThreeKingdoms,
+        y1999::portal_three_kingdoms::CARDS,
+        y1999::portal_three_kingdoms::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Coldsnap,
+        y2006::coldsnap::CARDS,
+        y2006::coldsnap::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::BornOfTheGods,
+        y2014::born_of_the_gods::CARDS,
+        y2014::born_of_the_gods::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Commander2017,
+        y2017::commander_2017::CARDS,
+        y2017::commander_2017::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::Dominaria,
+        y2018::dominaria::CARDS,
+        y2018::dominaria::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::CommanderLegends,
+        y2020::commander_legends::CARDS,
+        y2020::commander_legends::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::DominariaUnitedCommander,
+        y2022::dominaria_united_commander::CARDS,
+        y2022::dominaria_united_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::MarchOfTheMachineCommander,
+        y2023::march_of_the_machine_commander::CARDS,
+        y2023::march_of_the_machine_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::LostCavernsOfIxalanCommander,
+        y2023::lost_caverns_of_ixalan_commander::CARDS,
+        y2023::lost_caverns_of_ixalan_commander::ADDITIONAL_PRINTINGS,
+    ),
+    SetModule::new(
+        CardSet::GuildsOfRavnica,
+        y2018::guilds_of_ravnica::CARDS,
+        y2018::guilds_of_ravnica::ADDITIONAL_PRINTINGS,
     ),
 ];
 
@@ -287,7 +924,7 @@ pub(crate) fn ability_binding(
     SET_MODULES
         .iter()
         .flat_map(|module| module.cards.iter().copied())
-        .find(|record| record.id == definition)?
+        .find(|record| record.id() == definition)?
         .ability_bindings
         .iter()
         .find(|binding| {
@@ -316,28 +953,18 @@ pub(super) const fn rules(behavior: CardBehavior) -> &'static CardRules {
         CardBehavior::ChainLightning => &y1994::legends::CHAIN_LIGHTNING.rules,
         CardBehavior::Fireball => &y1993::alpha::FIREBALL.rules,
         CardBehavior::Fork => &y1993::alpha::FORK.rules,
-        CardBehavior::Smoke => &y1993::alpha::SMOKE.rules,
-        CardBehavior::WinterOrb => &y1993::alpha::WINTER_ORB.rules,
         CardBehavior::GoblinGrenade => &y1994::fallen_empires::GOBLIN_GRENADE.rules,
-        CardBehavior::IronclawOrcs => &y1993::alpha::IRONCLAW_ORCS.rules,
         CardBehavior::FellwarStone => &y1994::the_dark::FELLWAR_STONE.rules,
+        CardBehavior::ReflectingPool => &y1997::tempest::REFLECTING_POOL.rules,
         CardBehavior::Balance => &y1993::alpha::BALANCE.rules,
-        CardBehavior::Channel => &y1993::alpha::CHANNEL.rules,
-        CardBehavior::Duress => &y2012::magic_2013::DURESS.rules,
         CardBehavior::EssenceScatter => &y2012::magic_2013::ESSENCE_SCATTER.rules,
         CardBehavior::LibraryOfAlexandria => &y1993::arabian_nights::LIBRARY_OF_ALEXANDRIA.rules,
-        CardBehavior::LifebaneZombie => &y2013::magic_2014::LIFEBANE_ZOMBIE.rules,
         CardBehavior::Recall => &y1994::legends::RECALL.rules,
-        CardBehavior::SylvanLibrary => &y1994::legends::SYLVAN_LIBRARY.rules,
         CardBehavior::DustToDust => &y1994::the_dark::DUST_TO_DUST.rules,
         CardBehavior::GrislySalvage => &y2012::return_to_ravnica::GRISLY_SALVAGE.rules,
-        CardBehavior::KirdApe => &y1993::arabian_nights::KIRD_APE.rules,
-        CardBehavior::Moat => &y1994::legends::MOAT.rules,
         CardBehavior::Mulch => &y2011::innistrad::MULCH.rules,
         CardBehavior::Negate => &y2012::magic_2013::NEGATE.rules,
         CardBehavior::PillarOfFlame => &y2012::avacyn_restored::PILLAR_OF_FLAME.rules,
-        CardBehavior::SedgeTroll => &y1993::alpha::SEDGE_TROLL.rules,
-        CardBehavior::SinCollector => &y2013::dragons_maze::SIN_COLLECTOR.rules,
         CardBehavior::SphinxsRevelation => &y2012::return_to_ravnica::SPHINXS_REVELATION.rules,
         CardBehavior::TetravusDetach | CardBehavior::TetravusAssemble => {
             &y1994::antiquities::TETRAVUS.rules

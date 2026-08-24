@@ -83,7 +83,7 @@ fn energy_flux_taxes_every_artifact_and_takes_the_ones_nobody_pays_for() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn cast_validation_rejects_unrecognized_structured_choices() {
-    let definition_id = CardDefinitionId(10_200);
+    let definition_id = CardDefinitionId::new(10_200);
     let option_id = PlayOptionId(7);
     let implemented_mode = ModeId(0);
     let metadata_mode = ModeId(1);
@@ -135,6 +135,7 @@ fn cast_validation_rejects_unrecognized_structured_choices() {
                 effect_status: CardEffectStatus::Implemented,
             },
         ],
+        conditional_maximum: None,
     });
     option.alternative_costs = vec![AlternativeCostDef {
         id: alternative_id,
@@ -145,6 +146,7 @@ fn cast_validation_rejects_unrecognized_structured_choices() {
         id: additional_id,
         label: "Additional cost".into(),
         mana_cost: Some(ManaCost::new(2, 0)),
+        repeatable: false,
     }];
     definition.play_options = vec![option];
 
@@ -239,7 +241,7 @@ fn cast_validation_rejects_unrecognized_structured_choices() {
 #[test]
 fn cost_configuration_visitor_preserves_option_order() {
     let definition = CardDefinition::new(
-        CardDefinitionId(10_201),
+        CardDefinitionId::new(10_201),
         "Ordered Costs",
         CardSet::Alpha,
         false,
@@ -268,6 +270,7 @@ fn cost_configuration_visitor_preserves_option_order() {
             id,
             label: format!("Additional {}", id.0),
             mana_cost: Some(ManaCost::new(1, 0)),
+            repeatable: false,
         })
         .collect();
 
@@ -277,8 +280,12 @@ fn cost_configuration_visitor_preserves_option_order() {
         game.visit_cost_configurations(
             &definition,
             GameObjectId(10_201),
+            PlayerId::One,
             &option,
-            CastSourceZone::Hand,
+            CastCostContext {
+                source_zone: CastSourceZone::Hand,
+                offer: None,
+            },
             |configuration| {
                 actual.push(configuration);
                 ControlFlow::Continue(())
@@ -346,11 +353,16 @@ fn selected_modal_effects_resolve_distinct_and_deferred_flattened_targets() {
         recipient: EffectRecipientDef::Target(TargetIndex::PRIMARY),
         amount: ValueDef::Constant(2),
     };
-    const SECOND: EffectDef = EffectDef::AtNextStep {
-        step: TurnStepDef::End,
-        player: PlayerRelation::Any,
-        effect: &LOSE_TWO,
-    };
+    static SECOND_TRIGGER: AbilityDef = AbilityDef::triggered(
+        "At the beginning of the next end step, that player loses 2 life.",
+        TriggerEventDef::StepBegins {
+            step: TurnStepDef::End,
+            player: PlayerRelation::Any,
+        },
+        LOSE_TWO,
+    );
+    const SECOND: EffectDef =
+        EffectDef::InstallTrigger(crate::InstalledTriggerDef::once(&SECOND_TRIGGER));
     static MODES: [AbilityDef; 2] = [
         AbilityDef::spell_with_targets("First mode", &FIRST_TARGETS, FIRST),
         AbilityDef::spell_with_targets("Second mode", &SECOND_TARGETS, SECOND),
@@ -404,19 +416,23 @@ fn selected_modal_effects_resolve_distinct_and_deferred_flattened_targets() {
         StackObject {
             id: StackObjectId(id),
             kind: StackObjectKind::Spell,
-            card: card(id, cards::LIGHTNING_BOLT, PlayerId::One),
+            card: card(id, cards::LIGHTNING_BOLT, PlayerId::One).into(),
             source: None,
             ability: Some(StackAbilityPayload {
                 origin: primary_ability(cards::LIGHTNING_BOLT),
                 definition: Some(Box::new(MODAL)),
-                presentation_definition: cards::LIGHTNING_BOLT,
+                presentation: ObjectCharacteristics::card(
+                    cards::LIGHTNING_BOLT,
+                    CardPartId::PRIMARY,
+                ),
                 text: Some(MODAL.text),
                 target_defs: plan.target_defs,
                 targets,
-                context: TriggerContext::empty(),
+                context: TriggerContext::empty().into(),
                 resolver: StackAbilityResolver::Declarative(ScopedEffect::primary(EffectDef::None)),
                 condition: None,
                 mode_effects: plan.mode_effects,
+                resolution_destination: None,
                 x: 0,
             }),
             controller: PlayerId::One,
@@ -429,6 +445,11 @@ fn selected_modal_effects_resolve_distinct_and_deferred_flattened_targets() {
             text_changes: Vec::new(),
             colors: None,
             cast_via_flashback: false,
+            cast_at_instant_speed: false,
+            cast_from_zone: None,
+            face_down: None,
+            colors_of_mana_spent: ColorSet::empty(),
+            phyrexian_symbols_paid_with_life: 0,
             is_copy: false,
         }
     };
@@ -449,7 +470,12 @@ fn selected_modal_effects_resolve_distinct_and_deferred_flattened_targets() {
         game.players[1].life, 19,
         "the first mode used runtime slot 0"
     );
-    game.fire_delayed_triggers(TurnStepDef::End);
+    game.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::One,
+    });
+    game.finish_rules_procedure();
+    drain_pending(&mut game);
     assert_eq!(
         game.players[0].life, 18,
         "the second mode kept runtime slot 1"
@@ -466,8 +492,13 @@ fn selected_modal_effects_resolve_distinct_and_deferred_flattened_targets() {
         ],
     );
     assert!(game.resolve_stack_ability(&repeated));
-    assert_eq!(game.delayed_triggers.len(), 2);
-    game.fire_delayed_triggers(TurnStepDef::End);
+    assert_eq!(game.installed_triggers.len(), 2);
+    game.capture_battlefield_triggers(&CommittedTriggerEvent::StepBegins {
+        step: TurnStepDef::End,
+        player: PlayerId::One,
+    });
+    game.finish_rules_procedure();
+    drain_pending(&mut game);
     assert_eq!(
         game.players[0].life, 16,
         "the first repeated occurrence used slot 0"
@@ -502,6 +533,7 @@ fn manual_mode_target_slots_are_rebased_after_selected_modes_are_flattened() {
         maximum: 3,
         may_repeat: true,
         modes: vec![local(ModeId(0), "First"), local(ModeId(1), "Second")],
+        conditional_maximum: None,
     });
 
     let slots = Game::target_slots_for(&option, &[ModeId(0), ModeId(1), ModeId(1)]);
@@ -639,6 +671,7 @@ fn city_of_brass_produces_any_color_then_uses_the_stack_for_damage() {
         CardInstanceId(10_000),
         ability,
         ManaColor::Blue,
+        ManaActivationChoices::default(),
     );
 
     assert_eq!(game.players[0].mana_pool.blue, 1);

@@ -55,9 +55,9 @@ fn kind_slot(a: &Action) -> usize {
 /// observation's zones — no simulation.
 fn subject_def(a: &Action, obs: &PlayerObservation) -> Option<u16> {
     let in_hand = |id: u32| obs.hand.iter()
-        .find(|(oid, _)| oid.0 == id).map(|(_, d)| d.0);
+        .find(|(oid, _)| oid.0 == id).map(|(_, d)| d.get() as u16);
     let on_field = |id: u32| obs.battlefield.iter()
-        .find(|p| p.id.0 == id).map(|p| p.definition.0);
+        .find(|p| p.id.0 == id).and_then(crate::extract::perm_def);
     match a {
         Action::PlayLand { card, .. } => in_hand(card.0).or_else(|| on_field(card.0)),
         Action::CastSpell { card, .. } => in_hand(card.0),
@@ -127,11 +127,21 @@ pub fn width(t: &Tables) -> usize {
 /// Which ability of a source is being used. Two abilities on one permanent
 /// differ only here, so without it they are the same action to the net.
 fn ability_slot(o: &penta::AbilityOrigin) -> usize {
+    // Protocol 29 split the origin enum further -- token, emblem,
+    // face-down and counter-granted abilities each became their own
+    // variant. They all still answer the same question the net asked
+    // before: WHICH ability of this source is being used. Anything without
+    // a distinct slot falls in with the intrinsic bucket rather than
+    // silently colliding with ability 0.
     let raw = match o {
-        penta::AbilityOrigin::Printed { ability, .. } => ability.0 as usize,
-        penta::AbilityOrigin::Granted { source_ability, .. } =>
+        penta::AbilityOrigin::Printed { ability, .. }
+        | penta::AbilityOrigin::Token { ability, .. }
+        | penta::AbilityOrigin::Emblem { ability }
+        | penta::AbilityOrigin::FaceDown { ability } => ability.0 as usize,
+        penta::AbilityOrigin::Granted { source_ability, .. }
+        | penta::AbilityOrigin::TokenGranted { source_ability, .. } =>
             source_ability.0 as usize + 4,
-        penta::AbilityOrigin::IntrinsicBasicLand(_) => 7,
+        _ => 7,
     };
     raw % 8
 }
@@ -244,9 +254,13 @@ pub fn encode(a: &Action, obs: &PlayerObservation, t: &Tables,
 
     let ex = tb + N_TARGET;
     match a {
-        Action::ActivateAbility { ability, cost_object, .. } => {
+        Action::ActivateAbility { ability, cost_objects, .. } => {
             out[ex + ability_slot(ability)] = 1.0;
-            out[ex + 19] = if cost_object.is_some() { 1.0 } else { 0.0 };
+            // Was a single Option; protocol 29 made it a list, because a
+            // cost that spends several objects names them all up front.
+            // Keep the same one-bit meaning: does this activation pay a
+            // nonmana cost at all.
+            out[ex + 19] = if cost_objects.is_empty() { 0.0 } else { 1.0 };
         }
         Action::ActivateManaAbility { ability, color, .. } => {
             out[ex + ability_slot(ability)] = 1.0;

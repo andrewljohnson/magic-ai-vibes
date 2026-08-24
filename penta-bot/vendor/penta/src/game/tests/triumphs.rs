@@ -19,10 +19,19 @@ fn upkeep_with(mine: &[i16], theirs: &[i16]) -> Game {
     let mut next = 11_000;
     for (owner, powers) in [(PlayerId::One, mine), (PlayerId::Two, theirs)] {
         for power in powers {
-            let mut permanent = creature(next, cards::SEDGE_TROLL, owner);
+            let permanent = creature(next, cards::SEDGE_TROLL, owner);
+            let permanent_id = permanent.card.id;
             // Sedge Troll is a 2/2, so the bonus carries it to `power`.
-            permanent.power_bonus = power - 2;
             game.battlefield.push(permanent);
+            attach_constant_resolved_characteristics(
+                &mut game,
+                permanent_id,
+                &[AppliedEffectDef::modify_power_toughness(
+                    ValueDef::Constant(i32::from(*power) - 2),
+                    ValueDef::Constant(0),
+                )],
+                ContinuousEffectExpiration::Never,
+            );
             next += 1;
         }
     }

@@ -1,41 +1,127 @@
 use super::model::{
-    AppliedStackEffectSnapshot, CastSignatureSnapshot, DetachedStackSnapshot, ManaSourceSnapshot,
-    SeatSnapshot, SpellFormSnapshot, StackAbilitySnapshot, StackObjectKindSnapshot, StackSnapshot,
-    TargetSelectionSnapshot, TargetSnapshot, TriggerContextSnapshot,
+    AppliedStackEffectSnapshot, BasicLandTypeChangeSnapshot, CastSignatureSnapshot,
+    DecisionCardOriginSnapshot, DetachedStackSnapshot, EffectResolutionContextSnapshot,
+    ManaSourceSnapshot, SeatSnapshot, SpellFormSnapshot, StackAbilitySnapshot,
+    StackObjectKindSnapshot, StackSnapshot, TargetSelectionSnapshot, TargetSnapshot,
+    TriggerContextSnapshot,
 };
 use super::semantics::{
-    applied_effect_locator, catalog_applied_effect, catalog_scoped_effect, scoped_effect_snapshot,
+    ability_locator_for_origin, applied_effect_locator, catalog_applied_effect,
+    catalog_scoped_effect, scoped_effect_snapshot,
 };
 use super::{
     AbilityId, AbilityOrigin, AdditionalCostId, AlternativeCostId, AppliedStackEffect,
-    BasicLandType, BasicLandTypeChange, CardDefinitionId, CardPartId, CastChoices, CastSignature,
-    CharacteristicSource, CostConfiguration, DeclarativeAbilityDef, Game, GameObjectId, GameStack,
-    GrantId, ManaSource, ModeId, PlayOptionId, PlayerId, SpellForm, StackAbilityPayload,
-    StackObject, StackObjectKind, Target, TargetSelection, TriggerContext, Value, ability_locator,
-    ability_origin_from_snapshot, ability_origin_snapshot, array, card, catalog_ability, field,
-    optional_id, parse_basic_land_type, parse_cast_signature, parse_ids, seat_value, str_field,
-    u8_field, u32_field, usize_field,
+    BasicLandType, BasicLandTypeChange, CardPartId, CastChoices, CastSignature,
+    CharacteristicSource, CostConfiguration, DeclarativeAbilityDef, EffectResolutionContext, Game,
+    GameObjectId, GameStack, GrantId, ManaSource, ModeId, ObjectBacking, ObjectCharacteristics,
+    ObjectInstance, ObjectKind, PlayOptionId, PlayerId, RetiredObject, SpellForm,
+    StackAbilityPayload, StackObject, StackObjectKind, Target, TargetSelection, TriggerContext,
+    Value, ability_locator, ability_origin_from_snapshot, ability_origin_snapshot,
+    ability_target_defs, array, basic_land_type_snapshot, card, card_definition_id_field,
+    cast_source_zone_from_label, catalog_ability, face_down_characteristics_from_snapshot,
+    face_down_characteristics_snapshot, field, object_characteristics_from_snapshot,
+    object_characteristics_snapshot, object_kind_from_snapshot, object_kind_snapshot, optional_id,
+    parse_basic_land_type, parse_cast_signature, parse_ids, seat_value, str_field, u8_field,
+    u32_field, usize_field,
 };
 use crate::card::{ColorSet, ManaColor};
 
+mod ability_kind;
+use ability_kind::{StackAbilityCondition, stack_ability_condition, stack_payload_matches};
+mod current;
+mod hidden_references;
+pub(super) use current::current_stack_snapshot;
+pub(in crate::game::state_checkpoint) use hidden_references::*;
+
+/// The live stack records where a hidden source sits; everything detached
+/// from it does not, and leaves its payload out instead.
+///
+/// Only the objects on the stack proper are put back through
+/// [`super::wire_decision::rebind_stack_source_cards`], so only they can
+/// promise that the position they wrote down is honoured.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum HiddenSourcePolicy {
+    Locate,
+    Refuse,
+}
+
 pub(super) fn stack_ability_snapshot(
     game: &Game,
+    viewer: PlayerId,
     object: &StackObject,
 ) -> Option<StackAbilitySnapshot> {
+    stack_ability_snapshot_with(game, viewer, object, &[], HiddenSourcePolicy::Locate)
+}
+
+pub(super) fn stack_ability_snapshot_allowing(
+    game: &Game,
+    viewer: PlayerId,
+    object: &StackObject,
+    visible_rebindings: &[GameObjectId],
+) -> Option<StackAbilitySnapshot> {
+    stack_ability_snapshot_with(
+        game,
+        viewer,
+        object,
+        visible_rebindings,
+        HiddenSourcePolicy::Refuse,
+    )
+}
+
+fn stack_ability_snapshot_with(
+    game: &Game,
+    viewer: PlayerId,
+    object: &StackObject,
+    visible_rebindings: &[GameObjectId],
+    hidden_source: HiddenSourcePolicy,
+) -> Option<StackAbilitySnapshot> {
     let payload = object.ability.as_ref()?;
-    let locator = ability_locator(&game.catalog, |candidate| {
+    // A source the viewer cannot read is carried by where it sits rather
+    // than by its object id: the importer mints those zones fresh from the
+    // hypothesis it was handed, so the id it left here would name nothing.
+    let mut source_origin = None;
+    if let Some(source) = object.source
+        && stack_source_requires_hidden_rebinding(game, viewer, source)
+        && !visible_rebindings.contains(&source)
+    {
+        if hidden_source == HiddenSourcePolicy::Refuse {
+            return None;
+        }
+        let (seat, zone, index) = super::decision::hidden_card_origin(game, source)?;
+        source_origin = Some(DecisionCardOriginSnapshot {
+            object_id: source.0,
+            seat: seat.index(),
+            zone,
+            index,
+        });
+    }
+    if stack_payload_has_unrebindable_hidden_reference_except(
+        game,
+        viewer,
+        payload,
+        visible_rebindings,
+    ) {
+        return None;
+    }
+    let locator = ability_locator_for_origin(&game.catalog, payload.origin, |candidate| {
         stack_payload_matches(payload, candidate)
+    })?;
+    let target_definition_locator = ability_locator(&game.catalog, |candidate| {
+        ability_target_defs(candidate) == payload.target_defs
     })?;
     let ability = catalog_ability(&game.catalog, &locator)?;
     Some(StackAbilitySnapshot {
         ability_locator: Some(locator),
+        target_definition_locator: Some(target_definition_locator),
         origin: ability_origin_snapshot(payload.origin),
+        presentation: object_characteristics_snapshot(&game.catalog, payload.presentation)?,
         target_selections: payload
             .targets
             .iter()
             .map(target_selection_snapshot)
             .collect(),
-        context: trigger_context_snapshot(payload.context),
+        source_origin,
+        context: effect_resolution_context_snapshot(&payload.context),
         mode_effects: payload
             .mode_effects
             .iter()
@@ -46,12 +132,19 @@ pub(super) fn stack_ability_snapshot(
     })
 }
 
-pub(super) fn detached_stack_snapshot(
+pub(super) fn detached_stack_snapshot_allowing(
     game: &Game,
+    viewer: PlayerId,
     object: &StackObject,
+    visible_rebindings: &[GameObjectId],
 ) -> Option<DetachedStackSnapshot> {
     let ability_payload = if object.kind != StackObjectKind::Spell && object.ability.is_some() {
-        Some(stack_ability_snapshot(game, object)?)
+        Some(stack_ability_snapshot_allowing(
+            game,
+            viewer,
+            object,
+            visible_rebindings,
+        )?)
     } else {
         None
     };
@@ -62,10 +155,16 @@ pub(super) fn detached_stack_snapshot(
         return None;
     }
     let (applied_effects, has_runtime_overrides) = applied_stack_effect_snapshots(game, object);
+    let face_down = object
+        .face_down
+        .and_then(face_down_characteristics_snapshot);
+    if object.face_down.is_some() && face_down.is_none() {
+        return None;
+    }
     Some(DetachedStackSnapshot {
         object_id: object.id.0,
         kind: kind_snapshot(object.kind),
-        definition: object.card.definition.0,
+        object_kind: object_kind_snapshot(object.card.definition),
         owner: object.card.owner.index(),
         source: object.source.map(|id| id.0),
         ability_payload,
@@ -83,7 +182,12 @@ pub(super) fn detached_stack_snapshot(
             })
             .collect(),
         colors: object.colors.map(ColorSet::to_flags),
+        colors_of_mana_spent: object.colors_of_mana_spent.to_flags(),
+        phyrexian_symbols_paid_with_life: object.phyrexian_symbols_paid_with_life,
         cast_via_flashback: object.cast_via_flashback,
+        cast_at_instant_speed: object.cast_at_instant_speed,
+        cast_from_zone: object.cast_from_zone.map(|zone| zone.label().to_owned()),
+        face_down,
         is_copy: object.is_copy,
     })
 }
@@ -162,63 +266,6 @@ fn signature_snapshot(signature: &CastSignature) -> CastSignatureSnapshot {
     }
 }
 
-pub(super) fn stack_object_requires_retired(game: &Game, object: &StackObject) -> bool {
-    referenced_object_ids(object).any(|id| game.retired_objects.contains_key(&id))
-}
-
-pub(super) fn referenced_object_ids(object: &StackObject) -> impl Iterator<Item = GameObjectId> {
-    let mut ids = Vec::new();
-    ids.extend(object.source);
-    ids.extend(object.chosen_permanents.iter().copied());
-    ids.extend(
-        object
-            .applied_effects
-            .iter()
-            .filter_map(|effect| effect.source.map(|source| source.object)),
-    );
-    if let Some(payload) = &object.ability {
-        ids.extend(payload.context.object);
-        ids.extend(payload.context.chosen_objects.iter().flatten().copied());
-        ids.extend(payload.targets.iter().flat_map(|selection| {
-            selection
-                .targets()
-                .iter()
-                .filter_map(|target| match target {
-                    Target::Player(_) => None,
-                    Target::Card(id) | Target::Permanent(id) | Target::Spell(id) => Some(*id),
-                })
-        }));
-    }
-    if let Some(signature) = &object.signature {
-        ids.extend(signature.targets().iter().flat_map(|selection| {
-            selection
-                .targets()
-                .iter()
-                .filter_map(|target| match target {
-                    Target::Player(_) => None,
-                    Target::Card(id) | Target::Permanent(id) | Target::Spell(id) => Some(*id),
-                })
-        }));
-    }
-    ids.into_iter()
-}
-
-fn stack_payload_matches(
-    payload: &StackAbilityPayload,
-    candidate: &crate::card::AbilityDef,
-) -> bool {
-    if let Some(definition) = payload.definition.as_deref() {
-        return definition == candidate;
-    }
-    let DeclarativeAbilityDef::Triggered(triggered) = candidate.definition else {
-        return false;
-    };
-    payload.text == Some(candidate.text)
-        && payload.target_defs == triggered.targets
-        && payload.condition == triggered.condition
-        && payload.resolver == Game::ability_resolver(payload.origin, candidate)
-}
-
 pub(super) fn target_selection_snapshot(selection: &TargetSelection) -> TargetSelectionSnapshot {
     TargetSelectionSnapshot {
         slot_id: selection.slot().0,
@@ -253,7 +300,25 @@ pub(super) fn trigger_context_snapshot(context: TriggerContext) -> TriggerContex
         object_controller: context.object_controller.map(PlayerId::index),
         event_player: context.event_player.map(PlayerId::index),
         amount: context.amount,
-        chosen_objects: context.chosen_objects.map(|object| object.map(|id| id.0)),
+        damaged_object: context.damaged_object.map(|id| id.0),
+    }
+}
+
+pub(super) fn effect_resolution_context_snapshot(
+    context: &EffectResolutionContext,
+) -> EffectResolutionContextSnapshot {
+    EffectResolutionContextSnapshot {
+        trigger: trigger_context_snapshot(context.trigger),
+        single_objects: std::array::from_fn(|index| {
+            context.single_objects()[index].map(target_snapshot)
+        }),
+        object_groups: std::array::from_fn(|index| {
+            context.object_groups()[index]
+                .iter()
+                .copied()
+                .map(target_snapshot)
+                .collect()
+        }),
     }
 }
 
@@ -285,10 +350,8 @@ pub(super) fn parse_stack(
         if id.0 != state.object_id {
             return Err("checkpoint stack id does not match observation".into());
         }
-        let definition = CardDefinitionId(
-            u16::try_from(usize_field(shown, "definition")?).map_err(|_| "definition too large")?,
-        );
         let owner = seat_index_value(state.owner)?;
+        let object_kind = object_kind_from_snapshot(state.object_kind, &game.catalog)?;
         let controller = seat_value(field(shown, "controller")?)?;
         let kind = match str_field(shown, "kind")? {
             "Spell" => StackObjectKind::Spell,
@@ -296,10 +359,16 @@ pub(super) fn parse_stack(
             "TriggeredAbility" => StackObjectKind::TriggeredAbility,
             other => return Err(format!("unknown stack object kind {other}")),
         };
+        if state.kind != kind_snapshot(kind) {
+            return Err("checkpoint stack kind does not match observation".into());
+        }
         let (source, ability, signature, card) = match kind {
             StackObjectKind::Spell => {
+                let ObjectKind::Card(definition) = object_kind else {
+                    return Err("a spell checkpoint must be backed by a card".into());
+                };
                 let signature = parse_cast_signature(field(shown, "signature")?)?;
-                let card = card(id, definition, owner, &game.catalog)?;
+                let card = card(id, definition, owner, &game.catalog)?.into();
                 (
                     None,
                     game.frozen_spell_payload(definition, &signature),
@@ -308,6 +377,9 @@ pub(super) fn parse_stack(
                 )
             }
             StackObjectKind::ActivatedAbility | StackObjectKind::TriggeredAbility => {
+                if object_kind != ObjectKind::Ability {
+                    return Err("a stack ability checkpoint must have ability object kind".into());
+                }
                 let payload_state = state
                     .ability_payload
                     .as_ref()
@@ -317,6 +389,15 @@ pub(super) fn parse_stack(
                 if origin != observed_origin {
                     return Err("checkpoint stack ability origin does not match observation".into());
                 }
+                if !super::semantics::ability_locator_matches_origin(
+                    payload_state
+                        .ability_locator
+                        .as_ref()
+                        .ok_or("stack ability lacks a semantic locator")?,
+                    origin,
+                ) {
+                    return Err("checkpoint stack ability locator disagrees with its origin".into());
+                }
                 let source = optional_id(shown.get("sourceObjectId"));
                 let definition_snapshot = payload_state
                     .ability_locator
@@ -325,34 +406,38 @@ pub(super) fn parse_stack(
                     .ok_or_else(|| {
                         "stack ability locator is absent from this catalog".to_owned()
                     })?;
-                let (target_defs, condition) = match (kind, definition_snapshot.definition) {
-                    (
-                        StackObjectKind::ActivatedAbility,
-                        DeclarativeAbilityDef::Activated(activated),
-                    ) => (activated.targets, None),
-                    (
-                        StackObjectKind::TriggeredAbility,
-                        DeclarativeAbilityDef::Triggered(triggered),
-                    ) => (triggered.targets, triggered.condition),
-                    _ => {
-                        return Err(
-                            "stack ability locator does not match the observed ability kind".into(),
-                        );
-                    }
+                let StackAbilityCondition::Supported(condition) =
+                    stack_ability_condition(kind, &definition_snapshot)
+                else {
+                    return Err(
+                        "stack ability locator does not match the observed ability kind".into(),
+                    );
                 };
+                let target_definition = payload_state
+                    .target_definition_locator
+                    .as_ref()
+                    .and_then(|locator| catalog_ability(&game.catalog, locator))
+                    .ok_or_else(|| {
+                        "stack target-definition locator is absent from this catalog".to_owned()
+                    })?;
                 let targets = payload_state
                     .target_selections
                     .iter()
                     .map(parse_target_selection)
                     .collect::<Result<Vec<_>, _>>()?;
-                let context = parse_trigger_context(payload_state.context)?;
+                let context = parse_effect_resolution_context(payload_state.context.clone())?;
+                let presentation = object_characteristics_from_snapshot(
+                    &game.catalog,
+                    &payload_state.presentation,
+                )
+                .ok_or("stack ability presentation locator is absent from this catalog")?;
                 let ability = StackAbilityPayload {
                     origin,
                     definition: (kind == StackObjectKind::ActivatedAbility)
                         .then(|| Box::new(definition_snapshot)),
-                    presentation_definition: definition,
+                    presentation,
                     text: Some(definition_snapshot.text),
-                    target_defs: target_defs.to_vec(),
+                    target_defs: ability_target_defs(&target_definition).to_vec(),
                     targets,
                     context,
                     resolver: Game::ability_resolver(origin, &definition_snapshot),
@@ -374,13 +459,13 @@ pub(super) fn parse_stack(
                             })
                         })
                         .collect::<Result<Vec<_>, _>>()?,
+                    resolution_destination: None,
                     x: payload_state.x,
                 };
                 if usize_field(shown, "x")? != usize::from(payload_state.x) {
                     return Err("checkpoint stack ability X does not match observation".into());
                 }
-                let mut card = card(id, definition, owner, &game.catalog)?;
-                card.characteristics = CharacteristicSource::Ability(definition);
+                let card = ability_object(id, owner, presentation);
                 (source, Some(ability), None, card)
             }
         };
@@ -396,7 +481,15 @@ pub(super) fn parse_stack(
             applied_effects: parse_applied_stack_effects(&state.applied_effects, game)?,
             text_changes: parse_text_changes(&state.text_changes),
             colors: state.colors.map(color_set_from_flags),
+            colors_of_mana_spent: color_set_from_flags(state.colors_of_mana_spent),
+            phyrexian_symbols_paid_with_life: state.phyrexian_symbols_paid_with_life,
             cast_via_flashback: state.cast_via_flashback,
+            cast_at_instant_speed: state.cast_at_instant_speed,
+            cast_from_zone: state
+                .cast_from_zone
+                .as_deref()
+                .and_then(cast_source_zone_from_label),
+            face_down: state.face_down.map(face_down_characteristics_from_snapshot),
             is_copy: state.is_copy,
         });
     }
@@ -411,13 +504,16 @@ pub(super) fn parse_detached_stack(
         return Err("detached stack object has runtime overrides not yet represented".into());
     }
     let id = GameObjectId(state.object_id);
-    let definition = CardDefinitionId(state.definition);
+    let object_kind = object_kind_from_snapshot(state.object_kind, &game.catalog)?;
     let owner = seat_index_value(state.owner)?;
     let controller = seat_index_value(state.controller)?;
+    let replacement_effect = state.kind == StackObjectKindSnapshot::ReplacementEffect;
     let kind = match state.kind {
         StackObjectKindSnapshot::Spell => StackObjectKind::Spell,
         StackObjectKindSnapshot::ActivatedAbility => StackObjectKind::ActivatedAbility,
-        StackObjectKindSnapshot::TriggeredAbility => StackObjectKind::TriggeredAbility,
+        StackObjectKindSnapshot::TriggeredAbility | StackObjectKindSnapshot::ReplacementEffect => {
+            StackObjectKind::TriggeredAbility
+        }
     };
     let signature = state
         .signature
@@ -425,21 +521,45 @@ pub(super) fn parse_detached_stack(
         .map(parse_signature_snapshot)
         .transpose()?;
     let ability = match kind {
-        StackObjectKind::Spell => signature
-            .as_ref()
-            .and_then(|signature| game.frozen_spell_payload(definition, signature)),
+        StackObjectKind::Spell => {
+            let ObjectKind::Card(definition) = object_kind else {
+                return Err("a detached spell must be backed by a card".into());
+            };
+            signature
+                .as_ref()
+                .and_then(|signature| game.frozen_spell_payload(definition, signature))
+        }
         StackObjectKind::ActivatedAbility | StackObjectKind::TriggeredAbility => {
+            if replacement_effect {
+                if !matches!(object_kind, ObjectKind::Card(_)) {
+                    return Err("a detached replacement effect must be backed by a card".into());
+                }
+            } else if object_kind != ObjectKind::Ability {
+                return Err("a detached stack ability must have ability object kind".into());
+            }
             let payload = state
                 .ability_payload
                 .as_ref()
                 .ok_or("detached stack ability is missing its frozen payload")?;
-            Some(parse_ability_payload(kind, definition, payload, game)?)
+            Some(parse_ability_payload(
+                kind,
+                replacement_effect,
+                payload,
+                game,
+            )?)
         }
     };
-    let mut stack_card = card(id, definition, owner, &game.catalog)?;
-    if kind != StackObjectKind::Spell {
-        stack_card.characteristics = CharacteristicSource::Ability(definition);
-    }
+    let stack_card = match (object_kind, ability.as_ref()) {
+        (ObjectKind::Card(definition), _) => card(id, definition, owner, &game.catalog)?.into(),
+        (ObjectKind::Ability, Some(payload)) => ability_object(id, owner, payload.presentation),
+        (ObjectKind::Ability, None) => {
+            return Err("a detached ability object lacks its frozen payload".into());
+        }
+        (ObjectKind::Token, _) => return Err("a token cannot be a detached stack object".into()),
+        (ObjectKind::Emblem, _) => {
+            return Err("an emblem cannot be a detached stack object".into());
+        }
+    };
     Ok(StackObject {
         id,
         kind,
@@ -457,9 +577,38 @@ pub(super) fn parse_detached_stack(
         applied_effects: parse_applied_stack_effects(&state.applied_effects, game)?,
         text_changes: parse_text_changes(&state.text_changes),
         colors: state.colors.map(color_set_from_flags),
+        colors_of_mana_spent: color_set_from_flags(state.colors_of_mana_spent),
+        phyrexian_symbols_paid_with_life: state.phyrexian_symbols_paid_with_life,
         cast_via_flashback: state.cast_via_flashback,
+        cast_at_instant_speed: state.cast_at_instant_speed,
+        cast_from_zone: state
+            .cast_from_zone
+            .as_deref()
+            .and_then(cast_source_zone_from_label),
+        face_down: state.face_down.map(face_down_characteristics_from_snapshot),
         is_copy: state.is_copy,
     })
+}
+
+fn ability_object(
+    id: GameObjectId,
+    owner: PlayerId,
+    presentation: ObjectCharacteristics,
+) -> ObjectInstance {
+    let characteristics = match presentation {
+        ObjectCharacteristics::Card { definition, .. } => CharacteristicSource::Ability(definition),
+        ObjectCharacteristics::Token { token, .. } => CharacteristicSource::Token(token),
+        ObjectCharacteristics::Emblem { emblem } => CharacteristicSource::Emblem(emblem),
+        ObjectCharacteristics::FaceDown { face_down } => CharacteristicSource::FaceDown(face_down),
+    };
+    ObjectInstance {
+        id,
+        definition: ObjectKind::Ability,
+        owner,
+        backing: ObjectBacking::None,
+        characteristics,
+        counters: crate::game::counters::Counters::new(),
+    }
 }
 
 fn parse_text_changes(
@@ -474,7 +623,7 @@ fn parse_text_changes(
         .collect()
 }
 
-fn color_set_from_flags(flags: [bool; 5]) -> ColorSet {
+pub(super) fn color_set_from_flags(flags: [bool; 5]) -> ColorSet {
     let colors = [
         ManaColor::White,
         ManaColor::Blue,
@@ -491,7 +640,7 @@ fn color_set_from_flags(flags: [bool; 5]) -> ColorSet {
 
 fn parse_ability_payload(
     kind: StackObjectKind,
-    presentation_definition: CardDefinitionId,
+    replacement_effect: bool,
     state: &StackAbilitySnapshot,
     game: &Game,
 ) -> Result<StackAbilityPayload, String> {
@@ -501,28 +650,42 @@ fn parse_ability_payload(
         .ok_or("stack ability lacks a catalog locator")?;
     let definition = catalog_ability(&game.catalog, locator)
         .ok_or_else(|| "stack ability locator is absent from this catalog".to_owned())?;
-    let (target_defs, condition) = match (kind, definition.definition) {
-        (StackObjectKind::ActivatedAbility, DeclarativeAbilityDef::Activated(activated)) => {
-            (activated.targets, None)
+    let condition = if replacement_effect {
+        if !matches!(definition.definition, DeclarativeAbilityDef::Replacement(_)) {
+            return Err("replacement-effect locator does not name a replacement ability".into());
         }
-        (StackObjectKind::TriggeredAbility, DeclarativeAbilityDef::Triggered(triggered)) => {
-            (triggered.targets, triggered.condition)
-        }
-        _ => return Err("stack ability locator does not match its ability kind".into()),
+        None
+    } else {
+        let StackAbilityCondition::Supported(condition) =
+            stack_ability_condition(kind, &definition)
+        else {
+            return Err("stack ability locator does not match its ability kind".into());
+        };
+        condition
     };
+    let target_definition = state
+        .target_definition_locator
+        .as_ref()
+        .and_then(|locator| catalog_ability(&game.catalog, locator))
+        .ok_or("stack target-definition locator is absent from this catalog")?;
     let origin = ability_origin_from_snapshot(state.origin);
+    if !super::semantics::ability_locator_matches_origin(locator, origin) {
+        return Err("detached stack ability locator disagrees with its origin".into());
+    }
+    let presentation = object_characteristics_from_snapshot(&game.catalog, &state.presentation)
+        .ok_or("detached stack presentation locator is absent from this catalog")?;
     Ok(StackAbilityPayload {
         origin,
         definition: (kind == StackObjectKind::ActivatedAbility).then(|| Box::new(definition)),
-        presentation_definition,
+        presentation,
         text: Some(definition.text),
-        target_defs: target_defs.to_vec(),
+        target_defs: ability_target_defs(&target_definition).to_vec(),
         targets: state
             .target_selections
             .iter()
             .map(parse_target_selection)
             .collect::<Result<Vec<_>, _>>()?,
-        context: parse_trigger_context(state.context)?,
+        context: parse_effect_resolution_context(state.context.clone())?,
         resolver: Game::ability_resolver(origin, &definition),
         condition,
         mode_effects: state
@@ -533,6 +696,7 @@ fn parse_ability_payload(
                     .ok_or_else(|| "detached stack mode effect locator is absent".to_owned())
             })
             .collect::<Result<Vec<_>, _>>()?,
+        resolution_destination: None,
         x: state.x,
     })
 }
@@ -574,8 +738,20 @@ pub(super) fn parse_trigger_context(
         object_controller: value.object_controller.map(seat_index_value).transpose()?,
         event_player: value.event_player.map(seat_index_value).transpose()?,
         amount: value.amount,
-        chosen_objects: value.chosen_objects.map(|object| object.map(GameObjectId)),
+        damaged_object: value.damaged_object.map(GameObjectId),
     })
+}
+
+pub(super) fn parse_effect_resolution_context(
+    value: EffectResolutionContextSnapshot,
+) -> Result<EffectResolutionContext, String> {
+    Ok(EffectResolutionContext::from_bindings(
+        parse_trigger_context(value.trigger)?,
+        value.single_objects.map(|object| object.map(parse_target)),
+        value
+            .object_groups
+            .map(|objects| objects.into_iter().map(parse_target).collect()),
+    ))
 }
 
 pub(super) fn parse_target_selection(
@@ -621,11 +797,15 @@ fn seat_index_value(index: usize) -> Result<PlayerId, String> {
 pub(super) fn parse_ability_origin(value: &Value) -> Result<AbilityOrigin, String> {
     match str_field(value, "kind")? {
         "printed" => Ok(AbilityOrigin::Printed {
-            definition: CardDefinitionId(
-                u16::try_from(usize_field(value, "definition")?)
-                    .map_err(|_| "ability definition is too large")?,
-            ),
+            definition: card_definition_id_field(value, "definition")?,
             part: CardPartId(u8_field(value, "partId")?),
+            ability: AbilityId(u8_field(value, "abilityId")?),
+        }),
+        "token" => Ok(AbilityOrigin::Token {
+            part: CardPartId(u8_field(value, "partId")?),
+            ability: AbilityId(u8_field(value, "abilityId")?),
+        }),
+        "emblem" => Ok(AbilityOrigin::Emblem {
             ability: AbilityId(u8_field(value, "abilityId")?),
         }),
         "intrinsicBasicLand" => Ok(AbilityOrigin::IntrinsicBasicLand(
@@ -638,16 +818,86 @@ pub(super) fn parse_ability_origin(value: &Value) -> Result<AbilityOrigin, Strin
                 other => return Err(format!("unknown intrinsic basic land type {other}")),
             },
         )),
+        "intrinsicCounter" => {
+            let counter = str_field(value, "counter")?;
+            let kind = super::CounterKind::from_name(counter)
+                .ok_or_else(|| format!("unknown intrinsic counter kind {counter}"))?;
+            Ok(AbilityOrigin::IntrinsicCounter(kind))
+        }
         "granted" => Ok(AbilityOrigin::Granted {
             source: GameObjectId(u32_field(value, "source")?),
-            source_definition: CardDefinitionId(
-                u16::try_from(usize_field(value, "sourceDefinition")?)
-                    .map_err(|_| "grant source definition is too large")?,
-            ),
+            source_definition: card_definition_id_field(value, "sourceDefinition")?,
             source_part: CardPartId(u8_field(value, "sourcePartId")?),
             source_ability: AbilityId(u8_field(value, "sourceAbilityId")?),
             grant: GrantId(u8_field(value, "grantId")?),
         }),
+        "tokenGranted" => Ok(AbilityOrigin::TokenGranted {
+            source: GameObjectId(u32_field(value, "source")?),
+            source_part: CardPartId(u8_field(value, "sourcePartId")?),
+            source_ability: AbilityId(u8_field(value, "sourceAbilityId")?),
+            grant: GrantId(u8_field(value, "grantId")?),
+        }),
+        "emblemGranted" => Ok(AbilityOrigin::EmblemGranted {
+            source: GameObjectId(u32_field(value, "source")?),
+            source_ability: AbilityId(u8_field(value, "sourceAbilityId")?),
+            grant: GrantId(u8_field(value, "grantId")?),
+        }),
         other => Err(format!("unknown ability origin kind {other}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ObjectBindingIndex, ObjectSetBindingIndex};
+
+    #[test]
+    fn effect_resolution_context_round_trips_typed_objects_and_groups() {
+        let trigger = TriggerContext {
+            object: Some(GameObjectId(10)),
+            object_controller: Some(PlayerId::One),
+            event_player: Some(PlayerId::Two),
+            amount: Some(3),
+            damaged_object: None,
+        };
+        let mut context = EffectResolutionContext::new(trigger);
+        context.bind_single_object(
+            ObjectBindingIndex::PRIMARY,
+            Some(Target::Spell(GameObjectId(11))),
+        );
+        context.bind_object_group(
+            ObjectSetBindingIndex::PRIMARY,
+            vec![
+                Target::Permanent(GameObjectId(12)),
+                Target::Card(GameObjectId(13)),
+                Target::Player(PlayerId::Two),
+            ],
+        );
+
+        let snapshot = effect_resolution_context_snapshot(&context);
+        let rebuilt = parse_effect_resolution_context(snapshot).expect("context should parse");
+
+        assert_eq!(rebuilt, context);
+        assert_eq!(
+            rebuilt.single_object(ObjectBindingIndex::PRIMARY),
+            Some(Target::Spell(GameObjectId(11)))
+        );
+        assert_eq!(
+            rebuilt.object_group(ObjectSetBindingIndex::PRIMARY),
+            [
+                Target::Permanent(GameObjectId(12)),
+                Target::Card(GameObjectId(13)),
+                Target::Player(PlayerId::Two),
+            ]
+        );
+        assert_eq!(
+            resolution_context_referenced_object_ids(&rebuilt),
+            [
+                GameObjectId(10),
+                GameObjectId(11),
+                GameObjectId(12),
+                GameObjectId(13),
+            ]
+        );
     }
 }

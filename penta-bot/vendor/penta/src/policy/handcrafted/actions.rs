@@ -1,7 +1,6 @@
 use super::{
     Action, BasicLandType, CardDefinitionId, CardSupertype, DecisionObservation, DecisionOption,
-    DecisionZone, EffectDef, EffectRecipientDef, GameObjectId, HandcraftedPolicy,
-    PlayerObservation, Step,
+    DecisionZone, GameObjectId, HandcraftedPolicy, PlayerObservation, Step,
 };
 
 impl HandcraftedPolicy {
@@ -23,16 +22,11 @@ impl HandcraftedPolicy {
     pub(super) fn definition_animates_itself(&self, definition: CardDefinitionId) -> bool {
         self.catalog.get(definition).is_some_and(|card| {
             card.parts.iter().any(|part| {
-                part.rules.ability_clauses().iter().any(|ability| {
-                    matches!(
-                        ability.declarative_effect(),
-                        Some(EffectDef::Apply {
-                            recipient: EffectRecipientDef::Source,
-                            effect: crate::card::AppliedEffectDef::Animate(_),
-                            ..
-                        })
-                    )
-                })
+                part.rules
+                    .ability_clauses()
+                    .iter()
+                    .filter_map(|ability| ability.declarative_effect())
+                    .any(Self::effect_animates_source)
             })
         })
     }
@@ -52,7 +46,10 @@ impl HandcraftedPolicy {
                 permanent.controller == observation.viewer
                     && !permanent.tapped
                     && permanent.power.is_none()
-                    && self.definition_animates_itself(permanent.definition)
+                    && permanent
+                        .characteristics
+                        .card_definition()
+                        .is_some_and(|definition| self.definition_animates_itself(definition))
             });
         if saving_an_attacker
             && !Self::permanent_definition(observation, source)
@@ -74,7 +71,7 @@ impl HandcraftedPolicy {
             .is_some_and(|card| card.rules.has_supertype(CardSupertype::Legendary))
             && observation.battlefield.iter().any(|permanent| {
                 permanent.controller == observation.viewer
-                    && Some(permanent.definition) == definition
+                    && permanent.characteristics.card_definition() == definition
                     && !permanent.tapped
             })
         {
@@ -113,7 +110,7 @@ impl HandcraftedPolicy {
                         .find(|permanent| permanent.id == *id)
                 })
                 .map(|permanent| {
-                    let card = self.card_value(permanent.definition);
+                    let card = self.characteristics_value(permanent.characteristics);
                     let power = i32::from(permanent.power.unwrap_or(0).max(0));
                     card + power * 10
                 })
@@ -133,6 +130,18 @@ impl HandcraftedPolicy {
                         .map(|definition| self.card_value(definition))
                         .sum::<i32>()
             }
+            // Worth doing when it is affordable: a 2/2 becoming the card it
+            // really is only improves the board.
+            Action::TurnFaceUp { .. } => 600,
+            // Two mana now for a discount later is real, but never worth
+            // more than doing something this turn.
+            Action::Foretell { .. } => 120,
+            // The same bargain as foretell, paid the other way round: the
+            // card costs nothing later, so it is worth a little more.
+            Action::Plot { .. } => 140,
+            // The second half of a Room is a whole other card for its own
+            // cost, and it is there whenever nothing better presents itself.
+            Action::UnlockDoor { .. } => 500,
             Action::ChooseDecision { options, .. } => {
                 let selected_value = observation.decision.as_ref().map_or(0, |decision| {
                     decision
@@ -140,7 +149,7 @@ impl HandcraftedPolicy {
                         .iter()
                         .filter(|option| options.contains(&option.id))
                         .filter_map(|option| option.card)
-                        .map(|(_, definition)| self.card_value(definition))
+                        .map(|(_, characteristics)| self.characteristics_value(characteristics))
                         .sum::<i32>()
                 });
                 match observation
@@ -175,16 +184,26 @@ impl HandcraftedPolicy {
                 source,
                 ability,
                 targets,
-                cost_object,
+                cost_objects,
                 x,
-            } => self.score_ability(observation, *source, *ability, targets, *cost_object, *x),
+                modes: _,
+            } => self.score_ability(observation, *source, *ability, targets, cost_objects, *x),
             Action::DeclareAttacker { attacker, defender } => {
-                self.score_attack(observation, *attacker)
+                Self::score_attack(observation, *attacker)
                     + Self::defender_preference(observation, *attacker, *defender)
             }
             Action::DeclareBlocker { blocker, attacker } => {
                 Self::score_block(observation, *blocker, *attacker)
             }
+            // Deliberately below finishing the declaration, so the
+            // handcrafted policy declares its attackers and moves on. Banding
+            // trades the blockers' damage assignment for letting one blocker
+            // hold the whole band, and this policy has no way to tell which
+            // side of that trade a board is on.
+            Action::BandAttackers { .. } => 900,
+            // Worth an untap step whenever the attack is happening anyway:
+            // every printed exert clause does something for it.
+            Action::ExertAttacker { .. } => 700,
             Action::FinishDeclaringAttackers | Action::FinishDeclaringBlockers => 1_000,
             Action::AssignCombatDamage { assignments, .. } => {
                 6_000 + Self::score_assignment(observation, assignments)
@@ -200,10 +219,10 @@ impl HandcraftedPolicy {
         decision: &DecisionObservation,
         option: &DecisionOption,
     ) -> i32 {
-        let Some((object, definition)) = option.card else {
+        let Some((object, characteristics)) = option.card else {
             return -10_000;
         };
-        let value = self.card_value(definition).max(1);
+        let value = self.characteristics_value(characteristics).max(1);
         match option.zone {
             DecisionZone::Battlefield => observation
                 .battlefield
@@ -243,10 +262,10 @@ impl HandcraftedPolicy {
         decision: &DecisionObservation,
         option: &DecisionOption,
     ) -> i32 {
-        let Some((object, definition)) = option.card else {
+        let Some((object, characteristics)) = option.card else {
             return -10_000;
         };
-        let value = self.card_value(definition).max(1);
+        let value = self.characteristics_value(characteristics).max(1);
         observation
             .battlefield
             .iter()

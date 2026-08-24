@@ -8,7 +8,14 @@
 //! it went to the trouble of redacting.
 
 use super::super::*;
-use super::true_hidden_hypothesis;
+use super::{source_for_locator, true_hidden_hypothesis};
+use crate::card::{EffectDef, ObjectChoiceBindingDef, SpellForm};
+use crate::game::tests::card;
+use crate::game::{DecisionContinuation, DecisionKind, PendingDecision};
+use crate::{
+    CardPartId, CastChoices, DecisionObservation, DecisionOption, DecisionPreference,
+    DecisionVisibility, DecisionZone, ObjectBindingIndex,
+};
 use serde_json::json;
 
 struct Fixture {
@@ -167,16 +174,433 @@ fn checkpoint_mut(wire: &mut Value) -> &mut serde_json::Map<String, Value> {
         .expect("the checkpoint is an object")
 }
 
+fn contains_integer(value: &Value, needle: u64) -> bool {
+    match value {
+        Value::Number(number) => number.as_u64() == Some(needle),
+        Value::Array(values) => values.iter().any(|value| contains_integer(value, needle)),
+        Value::Object(values) => values.values().any(|value| contains_integer(value, needle)),
+        Value::Null | Value::Bool(_) | Value::String(_) => false,
+    }
+}
+
+#[test]
+fn a_private_effect_choice_is_not_serialized_for_the_other_seat() {
+    let mut game = crate::game::tests::ready_game();
+    let chooser = PlayerId::One;
+    let viewer = PlayerId::Two;
+    let secret = GameObjectId(424_242);
+    game.retired_objects.insert(
+        secret,
+        RetiredObject::Card(card(secret.0, crate::card::cards::LIGHTNING_BOLT, chooser)),
+    );
+
+    let resolving = StackObject {
+        id: GameObjectId(424_243),
+        kind: StackObjectKind::Spell,
+        card: card(424_243, crate::card::cards::DEMONIC_TUTOR, chooser).into(),
+        source: None,
+        ability: None,
+        controller: chooser,
+        signature: Some(CastSignature::from_validated_choices(
+            SpellForm::Part(CardPartId::PRIMARY),
+            CastChoices::default(),
+        )),
+        chosen_permanents: Vec::new(),
+        applied_effects: Vec::new(),
+        text_changes: Vec::new(),
+        colors: None,
+        cast_via_flashback: false,
+        cast_at_instant_speed: false,
+        cast_from_zone: None,
+        face_down: None,
+        colors_of_mana_spent: crate::card::ColorSet::empty(),
+        phyrexian_symbols_paid_with_life: 0,
+        is_copy: false,
+    };
+    let mut context = EffectResolutionContext::empty();
+    context.bind_single_object(ObjectBindingIndex::PRIMARY, Some(Target::Card(secret)));
+    game.pending_decisions.clear();
+    game.pending_decisions.push(PendingDecision {
+        observation: DecisionObservation {
+            id: 9_001,
+            player: chooser,
+            kind: DecisionKind::Choice,
+            order_semantics: None,
+            source: None,
+            prompt: "Choose a private card".into(),
+            visibility: DecisionVisibility::Private,
+            preference: DecisionPreference::Neutral,
+            minimum: 1,
+            maximum: 1,
+            cancellable: false,
+            options: vec![DecisionOption {
+                id: 0,
+                label: "Lightning Bolt".into(),
+                card: None,
+                members: Vec::new(),
+                ability_text: None,
+                zone: DecisionZone::Hand,
+            }],
+        },
+        continuation: DecisionContinuation::ChooseForEffect {
+            definition: ScopedEffect::primary(EffectDef::None),
+            binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+            object: Box::new(resolving),
+            context,
+            candidates: vec![Target::Card(secret)],
+            effect: ScopedEffect::primary(EffectDef::None),
+        },
+    });
+
+    assert!(game.observe(viewer).decision.is_none());
+    let checkpoint = game.checkpoint_json(viewer);
+    assert!(checkpoint["decisionState"].is_null());
+    assert_eq!(checkpoint["hasDeferredState"], Value::Bool(true));
+    assert!(
+        walk_object_ids(&checkpoint).all(|object| object != secret.0),
+        "the hidden candidate or bound object leaked through the checkpoint",
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn a_public_effect_choice_cannot_retain_an_unexposed_hidden_object_id() {
+    let mut game = crate::game::tests::ready_game();
+    let viewer = PlayerId::One;
+    let secret = GameObjectId(424_244);
+    game.players[viewer.opponent().index()].library[0].id = secret;
+    let locator = ability_locator(&game.catalog, |ability| {
+        ability.text
+            == "At the beginning of the next end step, destroy that creature if it attacked this turn."
+    })
+    .expect("Berserk's installed ability has a semantic locator");
+    let ability = catalog_ability(&game.catalog, &locator).expect("the locator resolves");
+    let DeclarativeAbilityDef::Triggered(triggered) = ability.definition else {
+        panic!("Berserk's nested ability is triggered");
+    };
+    let source = source_for_locator(GameObjectId(424_246), &locator);
+    let effect = ability
+        .declarative_effect()
+        .expect("the installed trigger is declarative");
+
+    let resolving = StackObject {
+        id: GameObjectId(424_245),
+        kind: StackObjectKind::TriggeredAbility,
+        card: card(424_245, crate::card::cards::BERSERK, viewer).into(),
+        source: Some(source.object),
+        ability: Some(StackAbilityPayload {
+            origin: source.ability,
+            definition: None,
+            presentation: ObjectCharacteristics::card(
+                crate::card::cards::BERSERK,
+                CardPartId::PRIMARY,
+            ),
+            text: Some(ability.text),
+            target_defs: Vec::new(),
+            targets: vec![TargetSelection::single(
+                TargetSlotId(0),
+                Target::Card(secret),
+            )],
+            context: EffectResolutionContext::empty(),
+            resolver: Game::ability_resolver(source.ability, &ability),
+            condition: triggered.condition,
+            mode_effects: Vec::new(),
+            resolution_destination: None,
+            x: 0,
+        }),
+        controller: viewer,
+        signature: None,
+        chosen_permanents: Vec::new(),
+        applied_effects: Vec::new(),
+        text_changes: Vec::new(),
+        colors: None,
+        cast_via_flashback: false,
+        cast_at_instant_speed: false,
+        cast_from_zone: None,
+        face_down: None,
+        colors_of_mana_spent: crate::card::ColorSet::empty(),
+        phyrexian_symbols_paid_with_life: 0,
+        is_copy: false,
+    };
+    let mut context = EffectResolutionContext::empty();
+    context.bind_single_object(ObjectBindingIndex::PRIMARY, Some(Target::Card(secret)));
+    game.pending_decisions.clear();
+    game.pending_decisions.push(PendingDecision {
+        observation: DecisionObservation {
+            id: 9_002,
+            player: viewer,
+            kind: DecisionKind::Choice,
+            order_semantics: None,
+            source: None,
+            prompt: "Choose a public continuation".into(),
+            visibility: DecisionVisibility::Public,
+            preference: DecisionPreference::Neutral,
+            minimum: 1,
+            maximum: 1,
+            cancellable: false,
+            options: vec![DecisionOption {
+                id: 0,
+                label: "Continue".into(),
+                card: None,
+                members: Vec::new(),
+                ability_text: None,
+                zone: DecisionZone::Battlefield,
+            }],
+        },
+        continuation: DecisionContinuation::ChooseForEffect {
+            definition: ScopedEffect::primary(effect),
+            binding: ObjectChoiceBindingDef::Object(ObjectBindingIndex::PRIMARY),
+            object: Box::new(resolving),
+            context,
+            candidates: vec![Target::Card(secret)],
+            effect: ScopedEffect::primary(effect),
+        },
+    });
+    game.next_decision_id = 9_003;
+
+    let checkpoint = game.checkpoint_json(viewer);
+    assert!(checkpoint["decisionState"].is_null());
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a public nested decision leaked an unexposed opposing-library object id",
+    );
+
+    let definition = game.players[viewer.opponent().index()].library[0].definition;
+    game.pending_decisions[0].observation.options[0].card = Some((
+        secret,
+        ObjectCharacteristics::card(definition, CardPartId::PRIMARY),
+    ));
+    game.pending_decisions[0].observation.options[0].zone = DecisionZone::Library;
+    let observation = game.observe(viewer);
+    let actions = crate::protocol::protocol_actions(&observation);
+    let wire = crate::protocol::observation_json_for_format(
+        &game.catalog,
+        game.format,
+        &observation,
+        game.in_pregame(),
+        &actions,
+    );
+    assert!(wire["checkpoint"]["decisionState"].is_null());
+    assert_eq!(wire["checkpoint"]["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&wire["checkpoint"], u64::from(secret.0)),
+        "exposing a card cannot authenticate a hand-built continuation whose outer effect is absent",
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn retained_trigger_state_never_serializes_unrebindable_hidden_object_ids() {
+    let mut game = crate::game::tests::ready_game();
+    let viewer = PlayerId::One;
+    let secret = GameObjectId(4_242_424);
+    game.players[viewer.opponent().index()].library[0].id = secret;
+    let locator = ability_locator(&game.catalog, |ability| {
+        ability.text
+            == "At the beginning of the next end step, destroy that creature if it attacked this turn."
+    })
+    .expect("Berserk's installed ability has a semantic locator");
+    let ability = catalog_ability(&game.catalog, &locator).expect("the locator resolves");
+    let DeclarativeAbilityDef::Triggered(triggered) = ability.definition else {
+        panic!("Berserk's nested ability is triggered");
+    };
+    let source = source_for_locator(GameObjectId(90_001), &locator);
+    let capture = TriggerCapture {
+        source,
+        presentation: ObjectCharacteristics::card(crate::card::cards::BERSERK, CardPartId::PRIMARY),
+        owner: viewer,
+        controller: viewer,
+        text: ability.text,
+        target_defs: Vec::new(),
+        targets: vec![TargetSelection::single(
+            TargetSlotId(0),
+            Target::Card(secret),
+        )],
+        effect: ability
+            .declarative_effect()
+            .expect("the installed trigger is declarative"),
+        resolver: Game::ability_resolver(source.ability, &ability),
+        context: EffectResolutionContext::empty(),
+        condition: triggered.condition,
+        modes: None,
+        x: 0,
+    };
+    game.installed_triggers.push(InstalledTrigger {
+        id: 0,
+        event: triggered.event,
+        capture: capture.clone(),
+        lifetime: InstalledTriggerLifetime::Once,
+    });
+    game.next_installed_trigger_id = 1;
+
+    let checkpoint = game.checkpoint_json(viewer);
+    assert_eq!(checkpoint["installedTriggers"], json!([]));
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "an installed trigger leaked a raw opposing-library object id",
+    );
+
+    game.installed_triggers.clear();
+    let mut hidden_context = EffectResolutionContext::empty();
+    hidden_context.bind_single_object(ObjectBindingIndex::PRIMARY, Some(Target::Card(secret)));
+    game.pending_triggers.push(crate::game::PendingTrigger {
+        id: 0,
+        source,
+        presentation: capture.presentation,
+        owner: viewer,
+        controller: viewer,
+        text: ability.text,
+        target_defs: Vec::new(),
+        targets: Vec::new(),
+        effect: capture.effect,
+        resolver: capture.resolver,
+        context: hidden_context,
+        condition: triggered.condition,
+        modes: None,
+        x: 0,
+    });
+    game.next_trigger_id = 1;
+
+    let checkpoint = game.checkpoint_json(viewer);
+    assert_eq!(checkpoint["pendingTriggers"], json!([]));
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a pending trigger leaked a raw opposing-library binding id",
+    );
+
+    game.pending_triggers.clear();
+    let stacked_id = GameObjectId(90_002);
+    game.stack.push(StackObject {
+        id: stacked_id,
+        kind: StackObjectKind::TriggeredAbility,
+        card: crate::game::tests::card(stacked_id.0, crate::card::cards::BERSERK, viewer).into(),
+        source: Some(source.object),
+        ability: Some(StackAbilityPayload {
+            origin: source.ability,
+            definition: None,
+            presentation: capture.presentation,
+            text: Some(ability.text),
+            target_defs: Vec::new(),
+            targets: capture.targets.clone(),
+            context: EffectResolutionContext::empty(),
+            resolver: capture.resolver,
+            condition: triggered.condition,
+            mode_effects: Vec::new(),
+            resolution_destination: None,
+            x: 0,
+        }),
+        controller: viewer,
+        signature: None,
+        chosen_permanents: Vec::new(),
+        applied_effects: Vec::new(),
+        text_changes: Vec::new(),
+        colors: None,
+        cast_via_flashback: false,
+        cast_at_instant_speed: false,
+        cast_from_zone: None,
+        face_down: None,
+        colors_of_mana_spent: crate::card::ColorSet::empty(),
+        phyrexian_symbols_paid_with_life: 0,
+        is_copy: false,
+    });
+
+    for observer in [PlayerId::One, PlayerId::Two] {
+        assert!(
+            game.observe(observer).stack[0].targets.is_empty(),
+            "lexical references are not public targets of the installed ability",
+        );
+    }
+
+    let checkpoint = game.checkpoint_json(viewer);
+    assert!(checkpoint["stack"][0]["abilityPayload"].is_null());
+    assert_eq!(checkpoint["stack"][0]["hasRuntimeOverrides"], true);
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a stacked installed trigger leaked a raw opposing-library target id",
+    );
+
+    game.stack.clear();
+    let hidden_prevention = ResolvedDamagePrevention {
+        source: ResolvedDamageSourceMatcher::Exact(secret),
+        recipient: ResolvedDamageRecipientMatcher::Any,
+        combat_only: false,
+        capacity: ResolvedDamagePreventionCapacity::Unlimited,
+        coverage: ResolvedDamagePreventionCoverage::All,
+        gain_life: None,
+        source_ability: source,
+        timestamp: ContinuousEffectTimestamp(90_003),
+        expiration: ContinuousEffectExpiration::EndOfTurn,
+    };
+    game.damage_preventions.push(hidden_prevention);
+    let checkpoint = game.checkpoint_json(viewer);
+    assert_eq!(checkpoint["damagePreventions"], json!([]));
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a resolved prevention leaked a raw opposing-library source id",
+    );
+    game.damage_preventions.clear();
+
+    let retired_secret = game.players[viewer.opponent().index()].library.remove(0);
+    assert_eq!(retired_secret.id, secret);
+    game.retired_objects
+        .insert(secret, RetiredObject::Card(retired_secret));
+    game.installed_triggers.push(InstalledTrigger {
+        id: 0,
+        event: triggered.event,
+        capture,
+        lifetime: InstalledTriggerLifetime::Once,
+    });
+
+    let checkpoint = game.checkpoint_json(viewer);
+    assert_eq!(checkpoint["installedTriggers"], json!([]));
+    assert_eq!(checkpoint["retiredObjects"], json!([]));
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a retired hidden card leaked through trigger LKI reachability",
+    );
+
+    game.installed_triggers.clear();
+    game.damage_preventions.push(hidden_prevention);
+    let checkpoint = game.checkpoint_json(viewer);
+    assert_eq!(checkpoint["damagePreventions"], json!([]));
+    assert_eq!(checkpoint["retiredObjects"], json!([]));
+    assert_eq!(checkpoint["hasDeferredState"], true);
+    assert!(
+        !contains_integer(&checkpoint, u64::from(secret.0)),
+        "a retired hidden card leaked through prevention LKI reachability",
+    );
+}
+
 #[test]
 fn a_checkpoint_missing_any_required_field_is_rejected_by_name() {
-    // Additive members carry `#[serde(default)]` deliberately, so that a
-    // checkpoint written before they existed still decodes. They are the one
-    // kind of field that is not load-bearing, and each is listed rather than
-    // inferred so a genuinely required field cannot quietly join them.
+    // Top-level additive members belong in this explicit list so a genuinely
+    // required field cannot quietly become optional; nested additive members
+    // are exercised through their parent field.
+    //
+    // The damage accumulators default to zero, which is what a checkpoint
+    // taken before they existed means: no damage recorded this turn.
     const ADDITIVE: &[&str] = &[
-        "allCombatDamagePrevented",
-        "preventionShields",
-        "relationalDamagePreventions",
+        "damageTakenThisTurn",
+        "damageTakenByGroupThisTurn",
+        "cardLeftGraveyardThisTurn",
+        // Defaults to nobody having lost life, which is what a checkpoint
+        // taken before it existed means about the turn it captured.
+        "lostLifeThisTurn",
+        // Defaults to nobody having cast a spell yet, which is where every
+        // game starts.
+        "spellsCastThisGame",
+        // Defaults to no predicate-filterable cast history, matching a
+        // checkpoint written before that event history existed.
+        "spellCastHistoryThisTurn",
+        // Defaults to nobody being barred from gaining life, which is where
+        // every game starts.
+        "cannotGainLife",
     ];
 
     let fixture = Fixture::played(120, 8_101);
@@ -269,6 +693,7 @@ fn a_locator_that_is_absent_from_this_catalog_is_rejected() {
             json!([{
                 "object": 1,
                 "ability": {
+                    "source": "card",
                     "definition": u16::MAX,
                     "partId": 0,
                     "abilityId": 0,
@@ -363,7 +788,7 @@ fn a_hypothesis_with_the_wrong_hidden_zone_sizes_is_rejected() {
         let hand = hidden["hands"][opponent]
             .as_array_mut()
             .expect("the hypothesis lists the opposing hand");
-        hand.push(json!(crate::card::cards::MOUNTAIN.0));
+        hand.push(json!(crate::card::cards::MOUNTAIN.get()));
     });
     assert!(
         error.contains("opponentHandSize"),
@@ -404,31 +829,6 @@ fn hypothesis_indices_outside_the_hidden_hand_are_rejected() {
     });
     assert!(
         error.contains("out of range"),
-        "unexpected message: {error}"
-    );
-
-    let error = fixture.rejects_hidden("a miracle index past the end of the hand", |hidden| {
-        hidden["miracleWindow"] = json!({"seat": opponent, "handIndex": 9_999});
-    });
-    assert!(
-        error.contains("out of range"),
-        "unexpected message: {error}"
-    );
-}
-
-/// The viewer's own miracle window is public to it and already carried by the
-/// checkpoint. A hypothesis claiming the viewer's seat is trying to write
-/// state it does not own.
-#[test]
-fn a_hypothesis_that_claims_the_viewers_own_hidden_state_is_rejected() {
-    let fixture = Fixture::played(200, 8_161);
-    fixture.assert_baseline_rebuilds();
-    let viewer = seat_label(fixture.viewer);
-    let error = fixture.rejects_hidden("a miracle window on the viewer's seat", |hidden| {
-        hidden["miracleWindow"] = json!({"seat": viewer, "handIndex": 0});
-    });
-    assert!(
-        error.contains("must belong to the opposing seat"),
         "unexpected message: {error}"
     );
 }

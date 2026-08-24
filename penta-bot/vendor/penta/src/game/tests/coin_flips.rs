@@ -44,10 +44,12 @@ fn bottle_of_suleiman_reaches_both_branches() {
             .expect("the ability activates");
         drain_pending(&mut game);
 
-        let djinn = game
-            .battlefield
-            .iter()
-            .any(|permanent| permanent.card.definition == cards::DJINN_TOKEN_5_5_COLORLESS);
+        let djinn = game.battlefield.iter().any(|permanent| {
+            is_token_with(
+                permanent,
+                token_with_flying(tokens::artifact_creature(&["Djinn"], &[], 5, 5)),
+            )
+        });
         let damaged = game.players[PlayerId::One.index()].life < i16::from(rules::STARTING_LIFE);
         // Exactly one branch happens, whichever it was.
         assert_ne!(djinn, damaged, "one branch, not both and not neither");
@@ -163,7 +165,7 @@ fn removing_a_blocker_from_combat_clears_the_blocking_relationship() {
     let attacker_id = attacker.card.id;
     game.battlefield.push(attacker);
     let mut blocker = creature(10_001, cards::SEDGE_TROLL, PlayerId::Two);
-    blocker.blocking = Some(attacker_id);
+    blocker.blocking = vec![attacker_id];
     let blocker_id = blocker.card.id;
     game.battlefield.push(blocker);
 
@@ -174,7 +176,7 @@ fn removing_a_blocker_from_combat_clears_the_blocking_relationship() {
         .iter()
         .find(|permanent| permanent.card.id == blocker_id)
         .expect("still there");
-    assert_eq!(blocker.blocking, None);
+    assert!(blocker.blocking.is_empty());
 
     game.deal_combat_damage();
     let blocker = game
@@ -185,6 +187,73 @@ fn removing_a_blocker_from_combat_clears_the_blocking_relationship() {
     assert_eq!(blocker.damage, 0);
 }
 
+/// Goblin Kites reaches both branches too, and the losing one takes the
+/// creature it just made fly. The delayed trigger has to remember which
+/// creature that was, which is the half a coin alone would not test.
+#[test]
+fn goblin_kites_sometimes_takes_the_creature_it_lifted() {
+    let (won, lost) = outcomes(|seed| {
+        let mut game = ready_game_with_seed(seed);
+        game.turns_started[PlayerId::One.index()] = 1;
+        game.battlefield
+            .push(creature(10_000, cards::GOBLIN_KITES, PlayerId::One));
+        let lifted = creature(10_001, cards::SAVANNAH_LIONS, PlayerId::One);
+        let lifted_id = lifted.card.id;
+        game.battlefield.push(lifted);
+        // A second creature the ability could have chosen instead, so the
+        // sacrifice has to name the one it actually lifted.
+        let bystander = creature(10_002, cards::MONSS_GOBLIN_RAIDERS, PlayerId::One);
+        let bystander_id = bystander.card.id;
+        game.battlefield.push(bystander);
+        game.players[PlayerId::One.index()].mana_pool.red = 1;
+
+        let action = game
+            .legal_actions(PlayerId::One)
+            .into_iter()
+            .find(|action| match action {
+                Action::ActivateAbility { targets, .. } => targets
+                    .iter()
+                    .flat_map(crate::casting::TargetSelection::targets)
+                    .any(|target| *target == Target::Permanent(lifted_id)),
+                _ => false,
+            })
+            .expect("the Kites can lift the Lions");
+        game.apply(PlayerId::One, action)
+            .expect("the ability activates");
+        drain_pending(&mut game);
+
+        let lifted_permanent = game
+            .battlefield
+            .iter()
+            .find(|permanent| permanent.card.id == lifted_id)
+            .expect("still there before the end step");
+        assert!(
+            game.permanent_has_executable_keyword(lifted_permanent, KeywordAbility::Flying),
+            "the pump lands whichever way the coin goes"
+        );
+
+        game.step = Step::PostcombatMain;
+        game.advance_step();
+        game.finish_rules_procedure();
+        drain_pending(&mut game);
+
+        let survived = game
+            .battlefield
+            .iter()
+            .any(|permanent| permanent.card.id == lifted_id);
+        assert!(
+            game.battlefield
+                .iter()
+                .any(|permanent| permanent.card.id == bystander_id),
+            "the creature it never lifted is never at risk"
+        );
+        survived
+    });
+
+    assert!(won > 0, "the coin can come up heads");
+    assert!(lost > 0, "and it can take the creature");
+}
+
 #[test]
 fn both_identities_report_complete_coverage() {
     let catalog = poc::catalog().expect("catalog builds");
@@ -192,6 +261,7 @@ fn both_identities_report_complete_coverage() {
         cards::ORCISH_CAPTAIN,
         cards::BOTTLE_OF_SULEIMAN,
         cards::MIJAE_DJINN,
+        cards::GOBLIN_KITES,
     ] {
         let card = catalog.get(definition).expect("the card is cataloged");
         assert_eq!(
@@ -201,4 +271,56 @@ fn both_identities_report_complete_coverage() {
             card.name,
         );
     }
+}
+
+/// Mana Crypt's flip is the price of the free mana. Both branches have to be
+/// reachable, because a Crypt that never bit would be a strictly better Sol
+/// Ring and would look fine in a short game.
+#[test]
+fn mana_crypt_charges_three_life_on_a_lost_flip_and_nothing_on_a_won_one() {
+    let (won, lost) = outcomes(|seed| {
+        let mut game = ready_game_with_seed(seed);
+        game.battlefield.clear();
+        game.battlefield
+            .push(creature(10_000, cards::MANA_CRYPT, PlayerId::One));
+        game.players[PlayerId::One.index()].life = 20;
+        game.active_player = PlayerId::One;
+        game.priority = PlayerId::One;
+        game.step = Step::Upkeep;
+        game.handle_upkeep_triggers();
+        drain_pending(&mut game);
+
+        let life = game.players[PlayerId::One.index()].life;
+        assert!(
+            life == 20 || life == 17,
+            "the upkeep either costs three or costs nothing, not {life}",
+        );
+        life == 20
+    });
+
+    assert!(won > 0, "the flip can be won");
+    assert!(lost > 0, "and it can be lost");
+}
+
+/// Whatever the coin says, the artifact makes two colourless.
+#[test]
+fn mana_crypt_taps_for_two_colorless() {
+    let mut game = ready_game();
+    game.battlefield.clear();
+    let crypt = game
+        .put_onto_battlefield(PlayerId::One, cards::MANA_CRYPT)
+        .expect("cataloged");
+    game.apply(
+        PlayerId::One,
+        Action::ActivateManaAbility {
+            source: crypt,
+            ability: mana_ability_for(&game, crypt, ManaColor::Colorless),
+            color: ManaColor::Colorless,
+            counters_removed: None,
+            cost_object: None,
+            combination: None,
+        },
+    )
+    .expect("it taps for mana");
+    assert_eq!(game.players[PlayerId::One.index()].mana_pool.colorless, 2);
 }
