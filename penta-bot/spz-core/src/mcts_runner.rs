@@ -69,7 +69,14 @@ pub fn play_ismcts_game(
     // 12-thread run sitting at load average 2.4 while a single straggler
     // ground on. A timed-out game is reported `capped`, exactly like one
     // that reached the decision cap.
-    let budget = std::env::var("AZ_GAME_SECS").ok()
+    // AZ_GATE_SECS, falling back to AZ_GAME_SECS. A gate game runs against
+    // the built-in bot and lasts longer than a self-play game, so one
+    // budget does not fit both: at 45s a gate truncated 28 of 120 games and
+    // read 10.8% as-loss against 22.5% as-draw -- a 12-point band opened by
+    // the guard itself. The budget exists to stop a straggler stalling a
+    // whole batch, not to decide games.
+    let budget = std::env::var("AZ_GATE_SECS").ok()
+        .or_else(|| std::env::var("AZ_GAME_SECS").ok())
         .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     let started = std::time::Instant::now();
     let mut game = match BotGame::new(d1, d2, Opponent::Handcrafted,
