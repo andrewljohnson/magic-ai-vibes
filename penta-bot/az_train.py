@@ -290,6 +290,27 @@ def main():
 
     gopps = [d for d in decks if d != args.learner_deck]
 
+    def run_gate(tag):
+        """Gate the CURRENT exported nets and return the win rate."""
+        gspecs, gopp = [], []
+        for g in range(args.gate_games):
+            opp = gopps[g % len(gopps)]
+            mine_p1 = g % 2 == 0
+            gspecs.append((args.learner_deck if mine_p1 else opp,
+                           opp if mine_p1 else args.learner_deck,
+                           mine_p1, 900_000 + g))
+            gopp.append(opp)
+        t1 = time.time()
+        w, d, f, cap, per = spz.az_gate(
+            catalog, val_path, pol_path, args.gate_iters or args.iters, 1.5,
+            "builtin-decklists.json", gspecs, args.threads, 600, True)
+        rate = (w + 0.5 * d) / max(f, 1)
+        se = (rate * (1 - rate) / max(f, 1)) ** 0.5
+        log(f"  GATE {tag}: {100*rate:.1f}% +/- {100*se:.1f} "
+            f"({w}W {d}D {f-w-d}L / {f}, {cap} capped) "
+            f"[{time.time()-t1:.0f}s]", args.log)
+        return rate, se, gopp, per, w, d, f, cap
+
     buf = []
     # BEST-NET RETENTION (AlphaGo Zero's "best player").
     #
@@ -342,6 +363,25 @@ def main():
         return decks[-1]
 
     rng = random.Random(12345)
+    # A WARM START NEEDS A FLOOR. `best` began as None, so the first gate
+    # promoted whatever it measured -- even when that was far below the net
+    # we started from. Measured the hard way: deploy_v1 gates 48.3% here,
+    # the first gate of a run warm-started from it read 26.7%, that was
+    # promoted as "best", and the ratchet then faithfully protected the
+    # degraded net for the rest of the run. Twenty points, twice.
+    if args.init_from:
+        rate0, se0, _, _, _, _, _, _ = run_gate("warm-start baseline")
+        best.update(rate=rate0, round=-1,
+                    policy={k: v.detach().clone()
+                            for k, v in policy.state_dict().items()},
+                    value={k: v.detach().clone()
+                           for k, v in value.state_dict().items()})
+        export_policy(policy, pol_path.replace(".azp", "_best.azp"),
+                      state_dim, action_dim)
+        export_value(value, val_path.replace(".spzw", "_best.spzw"))
+        log(f"    floor set at {100*rate0:.1f}%: training must beat the net "
+            f"it started from, not merely its own first gate", args.log)
+
     seed = 1
     for rnd in range(args.rounds):
         specs = []
