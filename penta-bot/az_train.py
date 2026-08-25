@@ -228,6 +228,11 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--target-add-k", type=float, default=1.0,
+                    help="Pseudo-count added to every visit count before "
+                         "normalising into the policy target. The target is "
+                         "a histogram of --iters visits, so at a low budget "
+                         "it is coarse and peaked and collapses the policy.")
     ap.add_argument("--value-smoothing", type=float, default=0.05,
                     help="Label smoothing for the value target. Hard 0/1 "
                          "drove |logit| to 27 (max 50), saturating the "
@@ -468,7 +473,21 @@ def main():
                     ct = torch.as_tensor(bm)
                     zt = torch.as_tensor(b["z"][idx])
                     segs = torch.repeat_interleave(torch.arange(k), ct)
-                    vt = torch.as_tensor(b["vis"][rows])
+                    # ADD-K on the visit counts before normalising.
+                    #
+                    # The target is an empirical histogram of N visits over
+                    # A actions, so its resolution is 1/N. AlphaZero runs
+                    # 800 visits; at 8 the histogram is coarse and peaked by
+                    # construction, and training on it sharpens the policy,
+                    # which sharpens the next histogram. Measured at 8 sims:
+                    # search-target entropy fell 0.52 -> 0.175 in nineteen
+                    # rounds and the gate went 33% -> 20%.
+                    #
+                    # Add-k is the ordinary correction for a small multinomial
+                    # sample: it says an action visited zero times out of
+                    # eight is not known to be worthless. At 32+ visits it is
+                    # nearly a no-op, so this costs nothing at higher budgets.
+                    vt = torch.as_tensor(b["vis"][rows]) + args.target_add_k
                     vsum = torch.zeros(k).scatter_add(0, segs, vt)
                     pi = vt / vsum[segs].clamp(min=1e-9)
 
