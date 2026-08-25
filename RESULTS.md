@@ -357,6 +357,32 @@ land sequencing.
 rules of the game. Judgement calls (declining an attack into a bigger
 board, holding a card for information) are not flagged at all.
 
+### Protocol 29: transfer fails, a cold start works
+
+Corrects an over-strong claim of mine. I reported that "search is not a
+teacher on protocol 29" and later that "more search makes it worse". The
+first is true only of a TRANSFERRED net, and the second was noise.
+
+Measured, same protocol, 60-game gate:
+
+| net | 1 sim | 16 sims |
+|---|---|---|
+| deploy_v1 (policy trained on p22) | 42.5% | 43.3% (+0.8) |
+| c29c (cold started on p29) | 16.7% | **23.3% (+6.6)** |
+
+So search works fine on protocol 29 for a net whose VALUE head learned
+there. deploy_v1's search is flat because its value head is a
+protocol-22 value head: a policy survives a protocol change and a value
+function does not, which is the same conclusion from the other side.
+
+The "more search is worse" reading came from comparing an 18.3% gate at 32
+sims against a 23.3% gate at 16 -- about one standard error apart on
+120 games. That was not evidence of anything and should not have been
+stated as a finding.
+
+→ The cold start's loop is functioning. It is slower than the protocol-22
+cold start was (23.3% at ~320 rounds against 37.5% at 119) but it ratchets.
+
 ### The gate is EXACTLY deterministic — and that killed my own fix
 
 Re-gating a frozen checkpoint reproduced its number to the game:
