@@ -266,6 +266,11 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--freeze-policy", type=int, default=0,
+                    help="Train ONLY the value head. Use while the value "
+                         "head is too weak for search to beat the raw "
+                         "policy -- distilling a search that is worse than "
+                         "the policy makes the policy worse.")
     ap.add_argument("--reinit-value", type=int, default=0,
                     help="Warm start the POLICY but train the value head "
                          "from scratch. A value function does not survive a "
@@ -611,7 +616,22 @@ def main():
                     vsum = torch.zeros(k).scatter_add(0, segs, vt)
                     pi = vt / vsum[segs].clamp(min=1e-9)
 
-                    logits = policy(st, at, ct)
+                    if args.freeze_policy:
+                        # POLICY FROZEN. A fresh value head makes search
+                        # WORSE than its own prior, so distilling that
+                        # search into the policy damages a policy that was
+                        # already good: measured 48.3% -> 33.3% with the
+                        # transferred value head and 38.3% -> 33.3% with a
+                        # fresh one. The teacher has to become better than
+                        # the student before the student should copy it.
+                        #
+                        # Self-play still runs on the good transferred
+                        # policy, so the value head learns from competent
+                        # games rather than from its own degradation.
+                        with torch.no_grad():
+                            logits = policy(st, at, ct)
+                    else:
+                        logits = policy(st, at, ct)
                     mx = torch.full((k,), -1e30).scatter_reduce(
                         0, segs, logits, reduce="amax",
                         include_self=True).detach()
@@ -619,9 +639,10 @@ def main():
                     ssum = torch.zeros(k).scatter_add(0, segs, e)
                     logp = (logits - mx[segs]) - torch.log(ssum[segs] + 1e-12)
                     ploss = -(pi * logp).sum() / k
-                    popt.zero_grad(); ploss.backward()
-                    nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
-                    popt.step()
+                    if not args.freeze_policy:
+                        popt.zero_grad(); ploss.backward()
+                        nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
+                        popt.step()
 
                     # LABEL SMOOTHING on the value target.
                     #
