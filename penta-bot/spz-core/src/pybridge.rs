@@ -569,7 +569,13 @@ fn az_gate(
         // is noise and PUCT just follows the prior. If a rollout leaf makes
         // search strong again, the value head is the bottleneck.
         leaf_playout: std::env::var("AZ_GATE_PLAYOUT").as_deref() == Ok("1"),
-        leaf_blend: false, redeterminize_m: 1,
+        leaf_blend: false,
+        // SPZ_GATE_M sweeps the determinization budget without a rebuild.
+        // The node-state cache only pays off above 1, and fewer
+        // determinizations is what ISMCTS averages over, so the trade must
+        // be measured.
+        redeterminize_m: std::env::var("SPZ_GATE_M").ok()
+            .and_then(|v| v.parse().ok()).unwrap_or(1),
         opponent: crate::mcts::OpponentModel::Handcrafted,
         max_decisions,
         max_depth: 400,
@@ -1110,7 +1116,13 @@ fn az_stream_episodes(
         // actions with no upside versus passing -- is what the policy head
         // should learn. Off.
         use_dominance: false,
-        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        leaf_playout: false, leaf_blend: false,
+        // SPZ_GATE_M lets the determinization budget be swept without a
+        // rebuild. The node-state cache only pays off above 1, and fewer
+        // determinizations is exactly what ISMCTS averages over, so the
+        // trade has to be measured rather than assumed.
+        redeterminize_m: std::env::var("SPZ_GATE_M").ok()
+            .and_then(|v| v.parse().ok()).unwrap_or(1),
         opponent: crate::mcts::OpponentModel::Greedy,
         max_decisions: crate::az::MAX_DECISIONS,
         max_depth: 400,
