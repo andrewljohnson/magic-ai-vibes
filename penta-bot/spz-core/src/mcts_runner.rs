@@ -64,6 +64,14 @@ pub fn play_ismcts_game(
     let my_deck = if our_p1 { d1 } else { d2 };
 
     let cap = cfg.max_decisions.max(1);
+    // Same wall-clock guard self-play uses. A gate waits for every thread,
+    // so one pathological game stalls the whole evaluation -- observed as a
+    // 12-thread run sitting at load average 2.4 while a single straggler
+    // ground on. A timed-out game is reported `capped`, exactly like one
+    // that reached the decision cap.
+    let budget = std::env::var("AZ_GAME_SECS").ok()
+        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let started = std::time::Instant::now();
     let mut game = match BotGame::new(d1, d2, Opponent::Handcrafted,
                                       opp_seat, seed) {
         Ok(g) => g,
@@ -75,6 +83,9 @@ pub fn play_ismcts_game(
     let mut rows: Vec<Vec<f32>> = Vec::new();
     let mut n = 0usize;
     while game.result().is_none() && n < cap {
+        if budget > 0 && started.elapsed().as_secs() >= budget {
+            break;
+        }
         // With a handcrafted opponent, only OUR seat is ever the decider.
         let Some(seat) = game.decision_seat() else { break };
         debug_assert_eq!(seat, our_seat);

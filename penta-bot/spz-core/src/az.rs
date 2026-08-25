@@ -79,6 +79,21 @@ pub struct Episode {
 pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
                     book: &DeckBook, d1: &str, d2: &str, seed: u64,
                     cfg: &MctsConfig, max_actions: usize) -> Episode {
+    // A WALL-CLOCK BUDGET, not just a decision cap.
+    //
+    // MAX_DECISIONS bounds how many decisions a game may take, but says
+    // nothing about how long each one costs, and a game full of wide
+    // decisions can run for minutes. Generation waits for every thread, so
+    // ONE such game stalls a whole round: measured round times swung from
+    // 33s to 1000s for the same 48 games, with the machine load average at
+    // 2.4 while a 12-thread run sat waiting on a single straggler.
+    //
+    // A timed-out episode is reported as truncated (result -1) and handled
+    // by whatever the truncation policy is, exactly like hitting the
+    // decision cap.
+    let budget = std::env::var("AZ_GAME_SECS").ok()
+        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let started = std::time::Instant::now();
     let mut game = match BotGame::new(d1, d2, Opponent::External,
                                       PlayerId::Two, seed) {
         Ok(g) => g,
@@ -91,6 +106,9 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
     let mut n = 0usize;
 
     while game.result().is_none() && n < MAX_DECISIONS {
+        if budget > 0 && started.elapsed().as_secs() >= budget {
+            break;
+        }
         let Some(seat) = game.decision_seat() else { break };
         let obs = game.core_game().observe(seat);
         let acts = protocol_actions(&obs);
