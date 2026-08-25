@@ -87,13 +87,47 @@ class PolicyHead(nn.Module):
 
 
 class ValueHead(nn.Module):
-    def __init__(self, state_dim, hidden=128):
+    """V(s), plus auxiliary heads that exist only to shape the trunk.
+
+    The value head's job in search is to rank SIBLING positions, and
+    measured here it is bad at exactly that -- blind on ~39% of decisions
+    even after the sigmoid fix, and worth nothing as a search teacher on
+    protocol 29 (1 sim 42.5%, 16 sims 42.5%). Trained on nothing but the
+    game outcome, it learns "am I winning" and never has to encode the
+    board finely enough to separate two positions one ply apart: every
+    state in a game carries the same label.
+
+    The auxiliary tasks force that detail into the shared trunk:
+
+      hand   which cards are in the OPPONENT'S hand. Labels are free --
+             the privileged row already carries their view, and their hand
+             occupies the first `defs` slots of it. This is the belief
+             modelling a hidden-information agent needs, and it cannot be
+             answered without reading the board and what they have played.
+      len    how much of the game is left. Forces a sense of tempo, which
+             "who eventually won" does not supply.
+
+    Only `f1` and `f2` are exported, so the Rust search sees exactly the
+    same two-layer net as before.
+    """
+
+    def __init__(self, state_dim, hidden=128, defs=0):
         super().__init__()
         self.f1 = nn.Linear(state_dim, hidden)
         self.f2 = nn.Linear(hidden, 1)
+        self.aux_hand = nn.Linear(hidden, defs) if defs else None
+        self.aux_len = nn.Linear(hidden, 1)
+
+    def trunk(self, x):
+        return torch.tanh(self.f1(x))
 
     def forward(self, x):
-        return self.f2(torch.tanh(self.f1(x))).squeeze(-1)
+        return self.f2(self.trunk(x)).squeeze(-1)
+
+    def with_aux(self, x):
+        h = self.trunk(x)
+        hand = self.aux_hand(h) if self.aux_hand is not None else None
+        return self.f2(h).squeeze(-1), hand, self.aux_len(h).squeeze(-1)
 
 
 def export_policy(net, path, state_dim, action_dim):
@@ -158,12 +192,16 @@ def import_value(net, path):
         nonlocal o
         v = w[o:o + n].reshape(shape).copy(); o += n
         return torch.as_tensor(v, dtype=torch.float32)
+    # strict=False: the exported file holds only the trunk and the value
+    # head. The auxiliary heads exist to shape the trunk during training and
+    # are deliberately not exported, so they are absent here and keep their
+    # fresh initialisation.
     net.load_state_dict({
         "f1.weight": take(hidden * inputs, (hidden, inputs)),
         "f1.bias": take(hidden, (hidden,)),
         "f2.weight": take(hidden, (1, hidden)),
         "f2.bias": take(1, (1,)),
-    })
+    }, strict=False)
 
 
 def log(msg, path):
@@ -228,6 +266,19 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--reinit-value", type=int, default=0,
+                    help="Warm start the POLICY but train the value head "
+                         "from scratch. A value function does not survive a "
+                         "protocol change; a policy largely does.")
+    ap.add_argument("--aux-hand", type=float, default=0.3,
+                    help="Weight on predicting the OPPONENT'S hand from our "
+                         "own view. Labels come free from the privileged "
+                         "row. Forces the value trunk to encode the board "
+                         "and what they have played, which is what ranking "
+                         "sibling positions needs and 'who won' does not.")
+    ap.add_argument("--aux-len", type=float, default=0.1,
+                    help="Weight on predicting the fraction of the episode "
+                         "remaining. Gives the trunk a sense of tempo.")
     ap.add_argument("--target-add-k", type=float, default=1.0,
                     help="Pseudo-count added to every visit count before "
                          "normalising into the policy target. The target is "
@@ -263,7 +314,11 @@ def main():
     action_dim = spz.az_action_dim(catalog, True)
 
     policy = PolicyHead(state_dim, action_dim, args.hidden).to(DEV)
-    value = ValueHead(state_dim, args.hidden).to(DEV)
+    # `defs` is the per-definition block width: the hand occupies the first
+    # `defs` feature slots of a seat's view (see extract.rs).
+    n_defs = len([c for c in pinned_catalog()["cards"]
+                  if c.get("legal", True)])
+    value = ValueHead(state_dim, args.hidden, defs=n_defs).to(DEV)
     popt = torch.optim.Adam(policy.parameters(), lr=args.lr)
     vopt = torch.optim.Adam(value.parameters(), lr=args.lr)
 
@@ -271,8 +326,19 @@ def main():
         src = args.init_from if os.path.isabs(args.init_from) else \
             os.path.join(HERE, args.init_from)
         import_policy(policy, f"{src}_policy.azp")
-        import_value(value, f"{src}_value.spzw")
-        print(f"warm start from {args.init_from}", flush=True)
+        if args.reinit_value:
+            # The POLICY transfers across a protocol change and the VALUE
+            # FUNCTION does not. Measured on protocol 29: the policy alone
+            # scores 42.5%, close to the 39.3% it had on protocol 22, while
+            # search built on the transferred value head is worth nothing
+            # (1 sim 42.5%, 16 sims 42.5%) where on protocol 22 it was worth
+            # +15 to +22. Seven epochs of rules changes moved what positions
+            # are worth; they did not much move which move to play.
+            print(f"warm start from {args.init_from}, VALUE HEAD REINITIALISED",
+                  flush=True)
+        else:
+            import_value(value, f"{src}_value.spzw")
+            print(f"warm start from {args.init_from}", flush=True)
 
     pol_path = os.path.join(HERE, f"{args.save_prefix}_policy.azp")
     val_path = os.path.join(HERE, f"{args.save_prefix}_value.spzw")
@@ -428,10 +494,17 @@ def main():
         # A real DRAW (result 2) is a genuine 0.5 and is kept.
         z = np.zeros(n, dtype=np.float32)
         keep = np.ones(n, dtype=bool)
+        # Fraction of this episode still to come, per record. "Who won" is
+        # the same label for every state in a game; this one is not, so it
+        # gives the trunk a reason to encode tempo.
+        frac_left = np.zeros(n, dtype=np.float32)
         i = 0
         for e, k in enumerate(ep_rec):
             r = int(ep_res[e])
-            for _ in range(int(k)):
+            k = int(k)
+            for j in range(k):
+                frac_left[i + j] = (k - j) / max(k, 1)
+            for _ in range(k):
                 if r < 0:
                     # Truncated. Score it the way the EVALUATOR does.
                     #
@@ -467,6 +540,7 @@ def main():
             state = state[keep]
             m = m[keep]
             z = z[keep]
+            frac_left = frac_left[keep]
             n = int(keep.sum())
         if n == 0:
             log(f"round {rnd}: every game truncated, nothing to learn from",
@@ -480,7 +554,13 @@ def main():
         # of one standard error apart) with entropy still healthy at 0.78,
         # so it was not the collapse failure. AlphaZero trains on a sliding
         # window of recent self-play, which is what this restores.
+        # The OPPONENT'S hand: first `n_defs` slots of THEIR view, which is
+        # the second half of the privileged row. Free labels for the belief
+        # task -- nothing extra has to be generated or stored.
+        opp_hand = (state[:, feat:feat + n_defs] > 0).astype(np.float32)
         buf.append({
+            "opp_hand": opp_hand.copy(),
+            "frac": frac_left.copy(),
             "st": state[:, :feat].copy(),   # own view only
             "at": np.ascontiguousarray(acts),
             "m": m, "vis": visits, "z": z, "n": n,
@@ -564,8 +644,21 @@ def main():
                     # winning ~40% of its games should not be predicting
                     # outcomes at |logit| 27.
                     e = args.value_smoothing
+                    v_logit, v_hand, v_len = value.with_aux(st)
                     vloss = nn.functional.binary_cross_entropy_with_logits(
-                        value(st), zt * (1 - 2 * e) + e)
+                        v_logit, zt * (1 - 2 * e) + e)
+                    # Auxiliary tasks shape the trunk; they are never
+                    # exported and never consulted at search time.
+                    if v_hand is not None and args.aux_hand > 0:
+                        vloss = vloss + args.aux_hand * \
+                            nn.functional.binary_cross_entropy_with_logits(
+                                v_hand,
+                                torch.as_tensor(b["opp_hand"][idx]))
+                    if args.aux_len > 0:
+                        vloss = vloss + args.aux_len * \
+                            nn.functional.mse_loss(
+                                torch.sigmoid(v_len),
+                                torch.as_tensor(b["frac"][idx]))
                     vopt.zero_grad(); vloss.backward()
                     nn.utils.clip_grad_norm_(value.parameters(), 1.0)
                     vopt.step()
