@@ -11,37 +11,26 @@ number was +15 to +22.
 
 ## Do this first
 
-**Train protocol 29 at 32+ sims.** Paired measurement shows search is worth
-+11.7 points at 32 sims on protocol 22 and only +3.3 (noise) at 16 — and
-every protocol-29 training run has used 16. The loop cannot ratchet on a
-teacher that is not better than its student, so it may simply have been
-starved. One training run answers it.
+**Training at 32 sims is running.** Paired measurement shows search is worth
++8.3 points at 32 sims on protocol 29 and −1.7 at 16, and every previous p29
+run used 16. The loop was starved of a teacher. `deploy_p29` already plays
+50.8% at 32 sims — essentially parity — so the question is whether the loop
+can now ratchet from there.
 
 ## Then
 
-1. **Find out why search is worth +11.7 on p22 and ~0 on p29.** Everything
-   else is downstream. The value head is not obviously the culprit —
-   after retraining, its sibling discrimination on p29 (0.029 prob spread,
-   26% blind) is BETTER than the p22 net's (0.022, 29% blind), and that net
-   gets +11.7 from search. **Determinization is ruled out**: it never fails
-   on p29 (0 errors in 105k samples) and handing search the TRUE hidden
-   state (`AZ_ORACLE_WORLD=1`) changes nothing. Counters also show no apply
-   failures and no opponent-model failures. What differs: p29 reaches an
-   opponent decision on 56% of iterations against p22's 72%, and costs ~10x
-   the wall clock per game.
-2. **Fix the representation.** Features are bag-of-cards counts per zone.
-   They cannot express a pairwise creature matchup, and the bot attacks
-   into strictly better blockers 0.86 times a game. Deep-sets pooling over
-   permanents (permutation-invariant, cheap, keeps per-instance state:
-   tapped, damage, counters) is the recommended first step; a small
-   transformer only if combat still stalls. This invalidates every
-   checkpoint, so it is a phase change, not a tweak.
-3. **Deploy something.** Blocked on one concrete bug: `engine-p29/penta.so`
-   is built from pristine upstream while `spz-core` embeds our patched
-   `vendor/penta`, so their `simulationFingerprint`s differ and
-   reconstruction refuses the observation. Build the engine from
-   `vendor/penta` and the hosted path should work. Real opponents give a
-   signal the built-in bot cannot.
+1. **Why does p29 need ~10x the wall clock per game, and reach an opponent
+   decision less often (63% vs 80% at 32 sims)?** Both unexplained, and the
+   second bounds how much search can be worth.
+2. **First-play urgency.** Unvisited actions get Q=0, the worst score on a
+   [0,1] scale, so with a confident prior an action never gets tried at a
+   small budget. That is very likely *why* the threshold sits between 16 and
+   32 sims, and fixing it (FPU = parent mean Q) should make cheaper search
+   work.
+3. **Representation.** Bag-of-cards features cannot express a pairwise
+   creature matchup, and the bot attacks into strictly better blockers 0.86
+   times a game. Deep-sets pooling over permanents. Invalidates every
+   checkpoint, so it is a phase change.
 
 ## Cheaper things worth doing
 
@@ -56,9 +45,9 @@ starved. One training run answers it.
 
 | idea | outcome |
 |---|---|
-| Cold start on p29 | 23.3% after ~500 rounds, 20 points behind the transferred policy |
-| Value-only retraining on p29 | plateaus at 43.3% after ~300 rounds |
+| Cold start on p29 | 23.3% after ~500 rounds, 20 points behind the transferred policy — but every round of it ran at 16 sims |
+| Value-only retraining on p29 | plateaus at 43.3% after ~300 rounds, also at 16 sims |
 | 8 sims for throughput | collapses the policy AND runs slower (degraded play grinds games out) |
-| 32 sims | no better than 16, and doubles game length |
+| Rollout leaf instead of the value net | −15.0 ± 7.1; the value head is much better than rollouts |
 | Raising `redeterminize_m` to 8 | 1.8x faster, −6.7 points |
 | Bigger nets before the loop works | pointless while search is not a teacher |

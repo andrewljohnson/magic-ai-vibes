@@ -12,43 +12,52 @@ exact; the ±SE only matters for generalising to other opponents.
 
 ---
 
-## How much is search worth? (paired, and smaller than we claimed)
+## How much is search worth? (paired — and the answer is a budget)
 
 AlphaZero improves only while **search beats its own prior**. Measure that
-PAIRED on identical games — the gate is deterministic, so the per-game score
-vector `az_gate` returns makes this exact.
+PAIRED on identical games: the gate is deterministic, so the per-game score
+vector `az_gate` returns makes the comparison exact.
 
-`deploy_v1`, protocol 22, 120 games, paired against its own 1-sim play:
+120 games, each net against its own 1-sim play:
 
-| sims | score | vs 1 sim | iterations reaching an opponent decision |
+| protocol / net | 1 sim | 16 sims | 32 sims |
 |---|---|---|---|
-| 1 | 43.3% | — | 0% |
-| 16 | 46.7% | +3.3 ± 4.3 (noise) | 72% |
-| **32** | **55.0%** | **+11.7 ± 3.8** | 80% |
+| 22, `deploy_v1` | 43.3% | 46.7% (**+3.3 ± 4.3**) | 55.0% (**+11.7 ± 3.8**) |
+| 29, `deploy_p29` | 42.5% | 45.0% (**−1.7 ± 6.1**) | 50.8% (**+8.3 ± 4.2**) |
 
-**Search only starts paying at 32 sims.** At 16 it is inside the noise.
+**Search works on both protocols, and only above 16 sims.** At 16 it is
+inside the noise on p22 and negative on p29; at 32 it is worth +11.7 and
++8.3. There is a threshold, and 16 sims is below it.
 
-**A correction to our own record.** RESULTS previously claimed "+15 to +22
-on protocol 22". That compared 1-sim play of ONE net (`az_best`, 39.3%)
-against 32-sim play of a DIFFERENT net (`deploy_v1`, 54.3%). It was never a
-paired comparison and the gap it described was mostly the difference between
-two nets. The real, paired figure is +11.7.
+**Two of our own conclusions were wrong because of this.**
 
-**And the operational consequence:** protocol-29 training has been running
-at **16 sims** — below the budget at which search is a teacher even on the
-protocol where it demonstrably works. That alone may explain the p29
-plateau, and it is cheaper to test than anything else on the list.
+* "Search is not a teacher on protocol 29" — an artifact of measuring at 16
+  sims. It is worth +8.3 at 32.
+* "+15 to +22 on protocol 22" — never a paired measurement. It compared
+  1-sim play of one net (`az_best`, 39.3%) with 32-sim play of a different
+  net (`deploy_v1`, 54.3%), so most of that gap was the difference between
+  two nets. The paired figure is +11.7.
 
-Protocol 29, `deploy_p29`, same protocol-matched method:
+**Every protocol-29 training run used 16 sims**, i.e. was starved of a
+teacher, which is the simplest available explanation for the p29 plateau at
+43%.
 
-| sims | score | vs 1 sim | reached opponent |
-|---|---|---|---|
-| 1 | 42.5% | — | 0% |
-| 16 | 45.0% | −1.7 ± 6.1 | 56% |
+## Ruled out, with evidence
 
-Note p29 reaches an opponent decision on 56% of iterations against p22's
-72% at the same budget, and p29 search costs roughly 10x the wall clock per
-game.
+Instrumented counters (`spz_core.search_stats()`) over 105k determinizations
+on p29, plus targeted experiments:
+
+| suspect | verdict |
+|---|---|
+| determinization failing | **no** — 0 errors in 105k samples |
+| determinization implausible | **no** — `AZ_ORACLE_WORLD=1` (true hidden state) changes nothing |
+| apply / opponent-model failures | **no** — 0 of each |
+| the value head | **no** — a rollout leaf is far *worse* (−15.0 ± 7.1) |
+| depth cap, terminal handling | **no** — 3 hits in 400k iterations |
+
+What does differ on p29: iterations reach an opponent decision 63% of the
+time at 32 sims against p22's 80%, and a game costs roughly 10x the wall
+clock. Neither is explained.
 
 ## What actually moved the needle
 
