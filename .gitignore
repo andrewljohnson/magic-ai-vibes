@@ -30,3 +30,20 @@ penta-bot/*.out
 # Claude Code: shared settings.json IS tracked; these are not
 .claude/worktrees/
 .claude/settings.local.json
+
+# --- training artefacts: code and the two deliverable nets only ---
+penta-bot/*.log
+penta-bot/*.out
+penta-bot/*.azp
+penta-bot/*.spzw
+!penta-bot/checkpoints/*.azp
+!penta-bot/checkpoints/*.spzw
+penta-bot/pinned-catalog-p29.json
+penta-bot/playouts/
+penta-bot/playout_report.json
+penta-bot/vendor/penta/target/
+penta-bot/old-1ply-best/
+# the protocol-22 engine: superseded, and the server refuses that epoch
+penta-bot/engine-0.7.0/penta.so
+penta-bot/penta.so
+penta-bot/penta.so.*

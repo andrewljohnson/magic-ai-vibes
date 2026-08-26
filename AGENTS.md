@@ -1,127 +1,59 @@
-# AGENTS.md
+# Working on this
 
-## Project goal
+No handcrafted play knowledge in training. The bot learns from self-play
+only. Rule-level *evaluation* helpers (e.g. flagging a misplay) are fine;
+teaching the policy from a scripted bot is not.
 
-Train the strongest bot for lacker's penta engine and run it on
-lacker's server. Nothing else. There is no engine of ours to maintain, no
-arena, no site.
+## Traps we fell into — all of these cost hours
 
-The deployed actor sees only a redacted observation — its own hand, the
-public zones, the opponent's hand *size*. It never sees the opponent's
-hand contents or either library's order, and the server does not disclose
-which archetype the opponent is playing.
+**A guard that binds becomes part of the result.** A per-game wall-clock
+budget silently decided four separate measurements: it truncated 28 of 120
+gate games and opened a 12-point band between "capped as loss" and "capped
+as draw"; it taught both seats they had lost when it was our clock that ran
+out; it made a rollout diagnostic read 0.0%. Set guards far above the
+workload, and re-check them whenever the search budget changes.
 
-Read `RESULTS.md` before proposing an experiment; several obvious ideas
-have already been tried and measured, including two that failed.
+**A fallback you cannot distinguish from a decision hides total failure.**
+`search_obs` returned `Option` and callers collapsed `None` to "play action
+0". The hosted bot played the first legal action at every decision and
+scored 2.1% where the same net gated 42.5%. It looked like bad play. Prefer
+an error.
 
-## Layout
+**Measure on the code path that ships.** A value-head diagnostic that
+featurised without deck context reported 92.6% of decisions "blind"; on the
+real native path it was 56.5%. The conclusion survived, the number was five
+times too big.
 
-```
-penta-bot/
-  aac_torch_par.py     the trainer (--native is the fast path)
-  aac_torch.py         MLP, GAE, PPO reference
-  aac_native.py        adapter to the native runner
-  aac_lockstep.py      proves native rows == Python rows
-  monitor.py           local dashboard, http://localhost:8899
-  extractor.py         the 1081-feature schema (Python side)
-  hosted_bot.py        plays on lacker's server
-  spz-core/            Rust: native self-play, features, ISMCTS
-  vendor/penta/        lacker's engine, pinned
-```
+**A conclusion measured through a broken component describes the breakage.**
+"More search doesn't help" was measured with a saturated value head, where
+extra simulations could only re-confirm the prior. With the sigmoid fixed,
+each 4x of search bought ~5 points.
 
-## Build and verification
+**Run the same input twice before believing a story about noise.** We
+assumed three times that a promoted "best" net was a lucky reading and
+built recalibration logic on it. The gate is deterministic: re-gating
+reproduced 54.3% game for game. The real phenomenon was simpler — training
+from a good net reliably degrades it.
 
-```sh
-# engine binding (per platform) -> engine-0.7.0/penta.so
-cd penta-bot/vendor/penta/bindings/penta-py && cargo build --release
+**Two numbers a standard error apart are not a finding.** A whole diagnosis
+("more search is worse on p29") rested on 18.3% versus 23.3% on 120 games.
 
-# native runner
-cd penta-bot/spz-core && cargo build --release
-cp target/release/libspz_core.so ../spz_core.so
+**A detector that fires on correct play is worse than none.** We flagged
+"land played after combat" at 1.80/game as the systematic defect. Holding a
+land until postcombat is better or neutral — it reveals less and costs
+nothing. Removed rather than kept with a caveat.
 
-# must print 1081, or saved actors will not transfer
-PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python -c \
-  "from extractor import Extractor; print(Extractor(version=2, belief=True).size)"
+**Check the baseline is a real measurement.** A "31.6% built-in bot"
+baseline sat in five files for months. It was the lower bound of a
+confidence interval from an abandoned C++ project. Parity is 50%. Every
+chart drawn against it flattered its run by ~18 points.
 
-# the gate that matters: native rows bit-identical to the Python path
-PENTA_ENGINE_DIR=engine-0.7.0 .venv-torch/bin/python aac_lockstep.py \
-    --episodes 3 --hidden 256 --belief --actor <actor>.npz
-```
+## Invariants
 
-## The pure-build rule (decided 2026-08-22)
-
-**Do not train against the built-in handcrafted bot.** New training runs
-use self-play only (`--selfplay-frac 1.0`). Scoring against the built-in
-bot continues — it is our only external yardstick — but it is no longer
-part of the training signal.
-
-The reasoning: training half our games against the opponent we are scored
-on both risks specialising to it and masks whether the method actually
-works. We want to know we can build a strong player, not a
-handcrafted-bot counter.
-
-**Know what this costs.** Pure self-play does not currently work: it
-plateaued at ~6% for 24k games, and the reason is structural, not a bug.
-Self-play optimises RELATIVE performance, so two mutually terrible
-policies are a stable equilibrium; nothing pushes toward absolute quality.
-AlphaZero's pure self-play works because MCTS is a policy IMPROVEMENT
-OPERATOR — the search produces a better policy than the raw net, and the
-net chases it. We have no such ratchet.
-
-So this rule makes ROADMAP #1 (value function) and #2 (search) blocking
-prerequisites rather than nice-to-haves. Expect no progress from pure
-self-play until they exist.
-
-The existing 50/50 lineage stays as the deployable incumbent (~51%) while
-the pure line is built. It is legacy, not the direction.
-
-## Rules that keep results credible
-
-- **A single gate is not a result.** Gates are 400 games: ±2.5 points.
-  Compare means over many gates. With several runs going, the best gate
-  across them is a max-of-noise statistic.
-- **Never let the actor read hidden information.** The critic is
-  privileged by design and is train-time only — it may only be used at
-  play time inside a determinized world, where the hypothesis supplies
-  both hands by construction.
-- **Any change to the native runner must keep `aac_lockstep.py` passing.**
-  Features, privileged rows and rewards are held to bit-equality; logits
-  to a tolerance (numpy uses BLAS's reordered summation).
-- **Report negative results.** Two are already recorded in `RESULTS.md`
-  and both cost real time to establish.
-
-## Machine
-
-One trainer process saturates around 3 cores regardless of thread count.
-Fill a big box with **several concurrent runs**, not one wide one.
-
-## Measure on the path the code actually runs
-
-Several conclusions on this project were wrong because they were measured
-somewhere the real code never goes. Each cost hours:
-
-* A "31.6% baseline" was carried in five files for months. It was the lower
-  bound of a confidence interval from an abandoned C++ project. Parity with
-  the built-in bot is **50%** -- the gate scores OUR win rate head to head.
-* "The value head is blind on 92.6% of decisions" came from featurising
-  without deck context, leaving the belief block empty. On the real native
-  path it was 56.5%. The conclusion held; the number was five times too big.
-* "More search does not help" was measured through a SATURATED value head,
-  where extra simulations could only re-confirm the prior. With the sigmoid
-  fixed, each 4x of search buys ~5 points.
-* A "best net" was assumed to be a lucky reading three separate times.
-  Re-gating frozen weights reproduced the result to the game -- the gate is
-  EXACTLY deterministic, so that could never have happened.
-
-Before trusting a number: run the same input twice, and check the code path
-you measured is the one that ships.
-
-## A detector that fires on correct play is worse than none
-
-`playout_log.py` briefly reported "land played after combat" at 1.80/game
-as the bot's systematic defect. Holding a land until postcombat is better
-or neutral by default -- it tells the opponent less and costs nothing. The
-flag was removed rather than kept with a caveat, because the next person
-would have tuned land sequencing for no reason.
-
-Flag what is wrong by the RULES. Leave judgement calls out.
+* `aac_lockstep.py` holds native rows bit-identical to the Python path.
+  Any change to the native runner must keep it passing.
+* Feature slots come from the sorted set of LEGAL card definitions.
+  Changing legality changes the layout and invalidates every checkpoint.
+* Vendor patches in `vendor/penta` are marked `SPZ VENDOR PATCH`. They
+  change penta's `simulationFingerprint`, so an engine built elsewhere will
+  refuse observations from this one.
