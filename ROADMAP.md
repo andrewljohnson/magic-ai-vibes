@@ -4,13 +4,14 @@
 
 We have a 61% bot on protocol 22 that cannot be deployed, and a 43% bot on
 protocol 29 that can. Training on p29 has not improved past 43.3% because
-**search there is worth ~1 point over its own prior**, and an AlphaZero
+**search there has no measurable value over its own prior**
+(+0.8 points, inside a ±4.5 gate), and an AlphaZero
 loop climbs only at the rate its search beats its policy. On p22 that
 number was +15 to +22.
 
 ## Where we think the answer is
 
-1. **Find out why search is worth +15 on p22 and +1 on p29.** Everything
+1. **Find out why search is worth +15 on p22 and nothing on p29.** Everything
    else is downstream. The value head is not obviously the culprit —
    after retraining, its sibling discrimination on p29 (0.029 prob spread,
    26% blind) is BETTER than the p22 net's (0.022, 29% blind), and that net

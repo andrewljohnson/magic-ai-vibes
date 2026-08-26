@@ -21,14 +21,20 @@ The protocol-22 rows are historical: `spz-core` embeds the protocol-29
 engine now, and reproducing them needs
 `git checkout 62948bf~1 -- penta-bot/vendor/penta` and a rebuild.
 
+All rows are 120–300 game gates, so **±4.5 points at 120 and ±2.8 at 300**.
+Treat any gap under ~5 points as unresolved.
+
 | net | protocol | 1 sim | 32 sims | 128 sims |
 |---|---|---|---|---|
 | deploy_v1 | 22 | 39.3% | **54.3%** | **61.0%** |
 | deploy_v1 | 29 | 42.5% | 42.0% | — |
 | deploy_p29 | 29 | 42.5% | 43.3% (16) | — |
 
-On protocol 22 search is worth +15 to +22 points. On 29 it is worth ~+1.
-The loop cannot ratchet on p29 because there is no teacher.
+On protocol 22 search is worth +15 to +22 points — far outside the noise.
+On 29 it is +0.8, which is *inside* it: the honest statement is that search
+has no measurable value there, not that it has exactly one point of value.
+Either way the loop cannot ratchet, because it climbs only at the rate
+search beats its policy.
 
 ## What actually moved the needle
 
