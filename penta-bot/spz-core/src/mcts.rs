@@ -490,7 +490,8 @@ impl<'a> Ismcts<'a> {
     /// clears it when it resamples.
     fn iterate(&self, tree: &mut Tree, world: &mut Game,
                opp: &mut HandcraftedPolicy,
-               states: &mut HashMap<Vec<ActionKey>, Game>) {
+               states: &mut HashMap<Vec<ActionKey>, Game>,
+               prng: &mut SplitMix64) {
         let mut path: Vec<ActionKey> = Vec::new();
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
@@ -576,12 +577,36 @@ impl<'a> Ismcts<'a> {
                             let enc = crate::action_feat::encode_all(
                                 &actions, &obs, &self.policy.tables);
                             let sc = fh.scores(&pre, &enc, actions.len());
-                            let mut best = 0usize;
-                            for (j, v) in sc.iter().enumerate() {
-                                if *v > sc[best] { best = j; }
-                                let _ = v;
+                            // SAMPLE from the policy, do not take its
+                            // argmax. A greedy argmax is the most
+                            // exploitable model of an opponent there is:
+                            // search finds the single line that beats one
+                            // deterministic reply, which is not a best
+                            // response to the policy we actually face in
+                            // self-play. AZ_OPP_GREEDY=1 restores the old
+                            // behaviour for comparison.
+                            if std::env::var("AZ_OPP_GREEDY").as_deref()
+                                == Ok("1")
+                            {
+                                let mut best = 0usize;
+                                for (j, v) in sc.iter().enumerate() {
+                                    if *v > sc[best] { best = j; }
+                                }
+                                best
+                            } else {
+                                let mx = sc.iter().copied()
+                                    .fold(f64::NEG_INFINITY, f64::max);
+                                let exps: Vec<f64> =
+                                    sc.iter().map(|v| (v - mx).exp()).collect();
+                                let tot: f64 = exps.iter().sum::<f64>().max(1e-12);
+                                let mut r = prng.next_f64() * tot;
+                                let mut pick = exps.len() - 1;
+                                for (j, e) in exps.iter().enumerate() {
+                                    if r < *e { pick = j; break; }
+                                    r -= *e;
+                                }
+                                pick
                             }
-                            best
                         } else {
                             self.policy.greedy_index_with(
                                 world, seat, &actions, self.deck_slots)
@@ -743,6 +768,31 @@ impl<'a> Ismcts<'a> {
         let total_n: u32 = avail.iter()
             .map(|&i| node.stats.get(&actions[i]).map(|s| s.n).unwrap_or(0))
             .sum();
+        // FIRST-PLAY URGENCY. An unvisited action took Q = 0, which on a
+        // [0,1] value scale is the WORST score in the tree, so a low-prior
+        // sibling had to out-run a visited action's real Q on the
+        // exploration term alone. At 16 sims it never does, which makes
+        // small-budget search the prior's argmax -- and is the likeliest
+        // reason search is worth nothing at 16 sims and +8 to +12 at 32.
+        //
+        // Standard FPU: start an unvisited action at the parent's mean Q,
+        // reduced by how much prior mass has already been tried.
+        let parent_q = {
+            let (mut w, mut n) = (0.0f64, 0u32);
+            for &i in avail {
+                if let Some(s) = node.stats.get(&actions[i]) { w += s.w; n += s.n; }
+            }
+            if n > 0 { w / n as f64 } else { 0.5 }
+        };
+        let visited_p: f64 = avail.iter().enumerate()
+            .filter(|(_, &i)| node.stats.get(&actions[i])
+                .map(|s| s.n > 0).unwrap_or(false))
+            .map(|(pos, _)| exps[pos] / sum)
+            .sum();
+        let fpu_c: f64 = std::env::var("AZ_FPU").ok()
+            .and_then(|v| v.parse().ok()).unwrap_or(0.2);
+        let q_unvisited = (parent_q - fpu_c * visited_p.max(0.0).sqrt())
+            .clamp(0.0, 1.0);
 
         let mut best_i = avail[0];
         let mut best_key = actions[avail[0]].clone();
@@ -759,7 +809,7 @@ impl<'a> Ismcts<'a> {
             }
             let (n, w, a) = node.stats.get(&actions[i])
                 .map(|s| (s.n, s.w, s.a)).unwrap_or((0, 0.0, 0));
-            let q = if n > 0 { w / n as f64 } else { 0.0 };
+            let q = if n > 0 { w / n as f64 } else { q_unvisited };
             // Canonical AlphaZero PUCT. The previous form here was
             //     c * P * sqrt(ln A(a) / (1 + N(a)))
             // which is far too weak to escape the Q=0 default that
@@ -934,7 +984,7 @@ impl<'a> Ismcts<'a> {
                     .or_else(|| timed!(0, self.determinize(raw, root_obs, prng)))
                 {
                     states.clear();
-                    self.iterate(&mut tree, &mut world, &mut opp, &mut states);
+                    self.iterate(&mut tree, &mut world, &mut opp, &mut states, prng);
                 }
             }
         } else {
@@ -953,7 +1003,7 @@ impl<'a> Ismcts<'a> {
                 }
                 if let Some(t) = &template {
                     let mut world = t.clone();
-                    self.iterate(&mut tree, &mut world, &mut opp, &mut states);
+                    self.iterate(&mut tree, &mut world, &mut opp, &mut states, prng);
                 }
             }
         }
