@@ -101,6 +101,9 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
         Err(_) => return Episode { records: Vec::new(), result: -1,
                                    decisions: 0 },
     };
+    // Decisions played by sampling before switching to the argmax.
+    let temp_decisions: usize = std::env::var("AZ_TEMP_DECISIONS").ok()
+        .and_then(|v| v.parse().ok()).unwrap_or(30);
     let mut prng = SplitMix64::new(seed ^ 0xA17E);
     let mut records = Vec::new();
     let mut scratch = std::collections::HashMap::new();
@@ -153,10 +156,19 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
         // while a uniformly random policy finished 10 of 12. Every episode
         // scoring `z = 0.5` gives the value head nothing to learn from,
         // which silently disables half the loop.
+        // TEMPERATURE SCHEDULE. AlphaZero samples proportional to visits
+        // for the OPENING only, then plays the argmax. We sampled for the
+        // whole game, which keeps injecting noise into decided positions --
+        // and every state in a game carries that game's outcome as its
+        // value label, so a sampled blunder in the endgame mislabels the
+        // whole trajectory. Sampling early is exploration; sampling late is
+        // just noise in the targets.
         let played = if wide || visits.is_empty() {
             best
-        } else {
+        } else if n < temp_decisions {
             sample_visits(&visits, &mut prng)
+        } else {
+            best
         };
 
         if !wide && !visits.is_empty() {

@@ -266,6 +266,13 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--mirror-games", type=int, default=0,
+                    help="If >0, also play the current net against the best "
+                         "net head to head and promote on THAT. The "
+                         "handcrafted gate measures exploitation of one "
+                         "fixed opponent; a net can improve at the game and "
+                         "regress against that bot, and the ratchet would "
+                         "throw it away.")
     ap.add_argument("--freeze-policy", type=int, default=0,
                     help="Train ONLY the value head. Use while the value "
                          "head is too weak for search to beat the raw "
@@ -360,6 +367,41 @@ def main():
         f"state_dim={state_dim} action_dim={action_dim}", args.log)
 
     gopps = [d for d in decks if d != args.learner_deck]
+
+    def mirror_vs_best(tag):
+        """Play the CURRENT net against the BEST net, both searching.
+
+        The handcrafted gate measures how well we exploit one fixed,
+        deterministic opponent. A net can get better at the game and worse
+        at that -- and the ratchet would discard it every time. This asks
+        the question the loop is actually optimising: is the new net better
+        than the one it came from?
+        """
+        if best.get("policy") is None:
+            return None
+        bp = pol_path.replace(".azp", "_best.azp")
+        bv = val_path.replace(".spzw", "_best.spzw")
+        if not (os.path.exists(bp) and os.path.exists(bv)):
+            return None
+        specs = [(decks[g % len(decks)], decks[g % len(decks)], 400_000 + g)
+                 for g in range(args.mirror_games)]
+        half = len(specs) // 2
+        it = args.gate_iters or args.iters
+        t1 = time.time()
+        # Seats swapped between halves so seat bias cancels.
+        a = spz.az_h2h(catalog, val_path, pol_path, it, it, 1.5,
+                       "builtin-decklists.json", args.max_actions,
+                       args.threads, "greedy", specs[:half])
+        b = spz.az_h2h(catalog, bv, bp, it, it, 1.5,
+                       "builtin-decklists.json", args.max_actions,
+                       args.threads, "greedy", specs[half:])
+        scores = [v for v in a[3] if v >= 0] + [1.0 - v for v in b[3] if v >= 0]
+        if not scores:
+            return None
+        rate = sum(scores) / len(scores)
+        log(f"  MIRROR {tag}: current vs best {100*rate:.1f}% "
+            f"over {len(scores)} games [{time.time()-t1:.0f}s]", args.log)
+        return rate
 
     def run_gate(tag):
         """Gate the CURRENT exported nets and return the win rate."""
@@ -785,8 +827,21 @@ def main():
             # Promote, revert, or carry on. The band is 2 SE wide so an
             # ordinary noisy gate does not throw away a good net -- only a
             # drop too large to be sampling noise triggers a revert.
+            mirror = mirror_vs_best(f"round {rnd}") if args.mirror_games else None
             prev = best["rate"]
-            if prev is None or rate > prev:
+            # With a mirror gate, promote when the net beats the one it came
+            # from, and let the handcrafted gate be a report rather than a
+            # judge.
+            # A mirror below 0.5 means the current net LOST to the one it
+            # came from, so it must revert -- otherwise "kept" quietly
+            # carries a worse net forward, which is the no-floor bug again
+            # on a different axis. The band is one standard error of the
+            # mirror itself so an ordinary noisy result does neither.
+            mirror_se = (0.25 / max(args.mirror_games, 1)) ** 0.5
+            promote = (mirror > 0.5 + mirror_se) if mirror is not None \
+                else (prev is None or rate > prev)
+            mirror_lost = mirror is not None and mirror < 0.5 - mirror_se
+            if prev is None or promote:
                 best.update(rate=rate, round=rnd,
                             policy={k: v.detach().clone()
                                     for k, v in policy.state_dict().items()},
@@ -799,8 +854,8 @@ def main():
                 log(f"    PROMOTED: new best {100*rate:.1f}%"
                     + (f" (was {100*prev:.1f}%)" if prev is not None else
                        " (first gate)"), args.log)
-            elif args.revert_on_regress and \
-                    rate < best["rate"] - args.revert_sd * se:
+            elif args.revert_on_regress and (mirror_lost or (mirror is None and
+                    rate < best["rate"] - args.revert_sd * se)):
                 reverts.append(rate)
                 policy.load_state_dict(best["policy"])
                 value.load_state_dict(best["value"])
@@ -812,10 +867,12 @@ def main():
                 buf.clear()          # buffered games came from the bad net
                 export_policy(policy, pol_path, state_dim, action_dim)
                 export_value(value, val_path)
+                why = (f"lost the mirror to best ({100*mirror:.1f}%)"
+                       if mirror_lost else
+                       f"this gate {100*rate:.1f}% is more than "
+                       f"{args.revert_sd:g} SE below best")
                 log(f"    REVERTED to round {best['round']} "
-                    f"({100*best['rate']:.1f}%): this gate {100*rate:.1f}% "
-                    f"is more than {args.revert_sd:g} SE below best",
-                    args.log)
+                    f"({100*best['rate']:.1f}%): {why}", args.log)
                 # NO RECALIBRATION. An earlier version lowered the
                 # recorded best after two consecutive reverts, on the
                 # theory that best was a lucky high reading. THE GATE IS
