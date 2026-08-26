@@ -12,35 +12,49 @@ exact; the ±SE only matters for generalising to other opponents.
 
 ---
 
-## How much is search worth? (paired — and the answer is a budget)
+## Search is worth +8.3 — but not the search that trains us
 
-AlphaZero improves only while **search beats its own prior**. Measure that
-PAIRED on identical games: the gate is deterministic, so the per-game score
-vector `az_gate` returns makes the comparison exact.
-
-120 games, each net against its own 1-sim play:
+AlphaZero improves only while **search beats its own prior**. Measured
+PAIRED on identical games (the gate is deterministic, so the per-game score
+vector `az_gate` returns makes the comparison exact), 120 games, each net
+against its own 1-sim play:
 
 | protocol / net | 1 sim | 16 sims | 32 sims |
 |---|---|---|---|
-| 22, `deploy_v1` | 43.3% | 46.7% (**+3.3 ± 4.3**) | 55.0% (**+11.7 ± 3.8**) |
-| 29, `deploy_p29` | 42.5% | 45.0% (**−1.7 ± 6.1**) | 50.8% (**+8.3 ± 4.2**) |
+| 22, `deploy_v1` | 43.3% | 46.7% (+3.3 ± 4.3) | 55.0% (**+11.7 ± 3.8**) |
+| 29, `deploy_p29` | 42.5% | 45.0% (−1.7 ± 6.1) | 50.8% (**+8.3 ± 4.2**) |
 
-**Search works on both protocols, and only above 16 sims.** At 16 it is
-inside the noise on p22 and negative on p29; at 32 it is worth +11.7 and
-+8.3. There is a threshold, and 16 sims is below it.
+Two things follow, and the second is the important one.
 
-**Two of our own conclusions were wrong because of this.**
+**Search needs more than 16 sims.** At 16 it is inside the noise on p22 and
+negative on p29; at 32 it is worth +11.7 and +8.3. There is a threshold.
 
-* "Search is not a teacher on protocol 29" — an artifact of measuring at 16
-  sims. It is worth +8.3 at 32.
-* "+15 to +22 on protocol 22" — never a paired measurement. It compared
-  1-sim play of one net (`az_best`, 39.3%) with 32-sim play of a different
-  net (`deploy_v1`, 54.3%), so most of that gap was the difference between
-  two nets. The paired figure is +11.7.
+**The in-tree opponent model decides whether search teaches at all.** All of
+the above uses the HANDCRAFTED in-tree opponent, which is what `az_gate`
+runs. Self-play (`az_stream_episodes`) uses GREEDY. Same net, same 120
+games, same 32 sims:
 
-**Every protocol-29 training run used 16 sims**, i.e. was starved of a
-teacher, which is the simplest available explanation for the p29 plateau at
-43%.
+| in-tree opponent | score | paired vs 1 sim |
+|---|---|---|
+| handcrafted | 50.8% | **+8.3 ± 4.2** |
+| **greedy — what self-play uses** | 40.0% | **−2.5 ± 3.8** |
+
+A 10.8-point swing. **The search that generates our training targets is
+worse than no search**, so every round distils a teacher weaker than the
+student. That is the direct explanation for the plateau: training at 32
+sims from the 50.8% net still walked 49.2 → 43.3 → 40.0 → 30.8 over 120
+rounds, reverting every gate.
+
+Caveat on the comparison: the benchmark opponent IS the handcrafted bot, so
+part of that 10.8 is simply "model the opponent you actually face". In
+self-play the real opponent is our own policy. But the training implication
+stands on its own — the configuration that produces our targets is the one
+where search does not beat its prior.
+
+**Corrections to our own earlier record.** "+15 to +22 on protocol 22" was
+never paired: it compared 1-sim play of one net (`az_best`, 39.3%) with
+32-sim play of another (`deploy_v1`, 54.3%). And "search is not a teacher on
+protocol 29" was an artifact of measuring at 16 sims.
 
 ## Ruled out, with evidence
 

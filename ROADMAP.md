@@ -9,28 +9,39 @@ protocol 29 that can. Training on p29 has not improved past 43.3% because
 loop climbs only at the rate its search beats its policy. On p22 that
 number was +15 to +22.
 
-## Do this first
+## The open problem
 
-**Training at 32 sims is running.** Paired measurement shows search is worth
-+8.3 points at 32 sims on protocol 29 and −1.7 at 16, and every previous p29
-run used 16. The loop was starved of a teacher. `deploy_p29` already plays
-50.8% at 32 sims — essentially parity — so the question is whether the loop
-can now ratchet from there.
+Self-play generates its training targets with the GREEDY in-tree opponent
+model, and with that model search is **worse than no search** (−2.5 ± 3.8
+at 32 sims). With the handcrafted model the same search is **+8.3 ± 4.2**.
+So the loop distils a teacher weaker than its student, every round, which is
+why training degrades the net on every configuration tried.
+
+The gate uses handcrafted. Self-play cannot: the handcrafted bot is scripted
+play knowledge, and the pure-build rule forbids training against it.
+
+So the question is how to get a self-play in-tree opponent that is actually
+good, without importing handcrafted knowledge. Candidates, none tested:
+
+* Sample the opponent's move from the policy instead of taking its greedy
+  argmax — cheap, and greedy-argmax self-play is known to be brittle.
+* Give the opponent a small search of its own (expensive; the descent
+  already dominates cost).
+* Use the previous best checkpoint as the opponent model rather than the
+  live policy.
 
 ## Then
 
-1. **Why does p29 need ~10x the wall clock per game, and reach an opponent
-   decision less often (63% vs 80% at 32 sims)?** Both unexplained, and the
-   second bounds how much search can be worth.
-2. **First-play urgency.** Unvisited actions get Q=0, the worst score on a
-   [0,1] scale, so with a confident prior an action never gets tried at a
-   small budget. That is very likely *why* the threshold sits between 16 and
-   32 sims, and fixing it (FPU = parent mean Q) should make cheaper search
-   work.
+1. **First-play urgency.** Unvisited actions take Q=0, the worst score on a
+   [0,1] scale, so a confident prior never explores at a small budget. This
+   is the likeliest reason the threshold sits between 16 and 32 sims.
+   FPU = parent mean Q.
+2. **Why p29 costs ~10x p22 per game**, and reaches an opponent decision on
+   63% of iterations against 80%. Unexplained.
 3. **Representation.** Bag-of-cards features cannot express a pairwise
-   creature matchup, and the bot attacks into strictly better blockers 0.86
+   creature matchup; the bot attacks into strictly better blockers 0.86
    times a game. Deep-sets pooling over permanents. Invalidates every
-   checkpoint, so it is a phase change.
+   checkpoint.
 
 ## Cheaper things worth doing
 
