@@ -17,6 +17,10 @@ exact; the ±SE only matters for generalising to other opponents.
 AlphaZero improves only while **search beats its own prior**. That single
 quantity explains almost everything below.
 
+The protocol-22 rows are historical: `spz-core` embeds the protocol-29
+engine now, and reproducing them needs
+`git checkout 62948bf~1 -- penta-bot/vendor/penta` and a rebuild.
+
 | net | protocol | 1 sim | 32 sims | 128 sims |
 |---|---|---|---|---|
 | deploy_v1 | 22 | 39.3% | **54.3%** | **61.0%** |

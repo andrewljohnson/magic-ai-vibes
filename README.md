@@ -22,6 +22,48 @@ The strong net plays protocol 22. **The public server requires protocol 29
 and refuses to register anything else**, so the deployable net is the weaker
 one. Closing that gap is the open problem.
 
+**The protocol-22 numbers are historical.** `spz-core` now embeds the
+protocol-29 engine, so they cannot be re-measured as the tree stands. To
+reproduce them, restore the old engine and rebuild:
+
+```sh
+git checkout 62948bf~1 -- penta-bot/vendor/penta   # the protocol-22 vendor
+cd penta-bot/spz-core && cargo build --release
+```
+
+## Architecture
+
+**Features (1081 floats, hand-built).** Per-definition counts for each zone
+(hand, our battlefield, theirs, both graveyards) over the 128 legal card
+definitions, then 35 aggregate scalars (life, board power/toughness,
+untapped counts, attackers), cost buckets, and a belief block of unseen-pool
+counts for both seats. The opponent's deck is *classified* from revealed
+cards (76.6% accurate overall, 0% on turn one) — the server discloses no
+decklist.
+
+This is bag-of-cards counting. It has no per-instance state and cannot
+express a pairwise creature matchup, which is the known cause of the combat
+misplays in RESULTS.
+
+**Policy head — factorised, 184-dim action encoding.**
+`score(s,a) = w2·tanh(Ws·s + Wa·a + b1) + b2`. `Ws·s` is computed once per
+search node and only the small per-action term repeats. This is what made
+search tractable: scoring an afterstate instead costs a game clone plus a
+full feature extraction per action, measured at 13ms each.
+
+**Value head.** `s -> P(win)`, one hidden layer of 128, trained on game
+outcomes with label smoothing, plus two auxiliary heads used only to shape
+the trunk (predict the opponent's hand, predict fraction of game remaining).
+Neither auxiliary head is exported.
+
+**Search.** Single-observer ISMCTS. Each iteration samples a determinized
+world from the belief, descends by PUCT with the policy head as prior and
+the value head at the leaf, and the visit counts become the policy target.
+The opponent is a fixed in-tree model, never branched.
+
+**Scale.** Protocol 22 reached 61% after roughly 100k self-play games.
+Protocol 29 has had roughly 25k and sits at 43%.
+
 ## What it is
 
 * **Engine** — `vendor/penta`, built into `spz-core`. Carries four local
@@ -49,6 +91,13 @@ python3 az_train.py --iters 16 --games 48 --threads 14 \
 # watch what it actually does
 PENTA_ENGINE_DIR=engine-p29 python3 playout_log.py --net checkpoints/deploy_p29
 ```
+
+To measure a checkpoint, call `spz_core.az_gate(catalog, value, policy,
+iters, c_puct, decklists, specs, threads, max_decisions, classify)`. It
+returns `(wins, draws, finished, capped, per_game_scores)`. **Sweeping
+`iters` on a fixed net is the single most informative measurement here** --
+it is how much search is worth over its own prior, and the loop climbs only
+at that rate.
 
 `RESULTS.md` is the findings record. `ROADMAP.md` is what to do next.
 `AGENTS.md` is how to work on this without repeating our mistakes.
