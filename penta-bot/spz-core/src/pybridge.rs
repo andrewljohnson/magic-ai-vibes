@@ -414,7 +414,13 @@ fn ismcts_choose(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     raw_obs.hash(&mut hasher);
     let mut prng = crate::prng::SplitMix64::new(hasher.finish() ^ 0xD1B5);
-    Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
+    // Raise rather than silently choosing action 0: a fallback that looks
+    // like a decision hid a complete deployment failure.
+    match search.search_obs_reason(&raw_obs, &mut prng) {
+        Ok((best, _)) => Ok(best),
+        Err(why) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+            format!("az_choose could not search: {why}"))),
+    }
 }
 
 /// Choose ONE move by AlphaZero search, for the hosted bot.
@@ -475,7 +481,13 @@ fn az_choose(
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     raw_obs.hash(&mut hasher);
     let mut prng = crate::prng::SplitMix64::new(hasher.finish() ^ 0xD1B5);
-    Ok(search.search_obs(&raw_obs, &mut prng).map_or(0, |(best, _)| best))
+    // Raise rather than silently choosing action 0: a fallback that looks
+    // like a decision hid a complete deployment failure.
+    match search.search_obs_reason(&raw_obs, &mut prng) {
+        Ok((best, _)) => Ok(best),
+        Err(why) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+            format!("az_choose could not search: {why}"))),
+    }
 }
 
 /// Native SO-ISMCTS gate: play `n_games` full games vs the engine's

@@ -734,16 +734,33 @@ impl<'a> Ismcts<'a> {
     /// contract. `our_seat` must equal the observation's seat.
     pub fn search_obs(&self, raw: &str, prng: &mut SplitMix64)
                       -> Option<(usize, Vec<u32>)> {
-        let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+        self.search_obs_reason(raw, prng).ok()
+    }
+
+    /// Same, but says WHY it failed.
+    ///
+    /// `search_obs` returned Option and every caller collapsed None to
+    /// "play action 0". That is indistinguishable from a considered choice
+    /// of the first action, and it hid a total deployment failure: the
+    /// hosted bot picked position 0 at 9 of 9 branching decisions and
+    /// scored 2.1% where the same net gates 42.5%. A fallback that cannot
+    /// be told apart from a decision is worse than an error.
+    pub fn search_obs_reason(&self, raw: &str, prng: &mut SplitMix64)
+                             -> Result<(usize, Vec<u32>), String> {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .map_err(|e| format!("observation is not JSON: {e}"))?;
         let seed0 = prng.next_u64();
         let hidden0 = crate::det_runner::bootstrap_hidden_json(
             &value, prng, self.decks, self.my_deck, self.opp_deck,
-            self.cfg.inert, &self.policy.tables)?;
+            self.cfg.inert, &self.policy.tables)
+            .ok_or_else(|| format!(
+                "could not sample a hidden state (my_deck={}, opp_deck={})",
+                self.my_deck, self.opp_deck))?;
         let core = BotGame::from_observation_json(raw, &hidden0, seed0)
-            .ok()?
+            .map_err(|e| format!("reconstruction rejected the world: {e}"))?
             .into_core_game();
         let root_obs = core.observe_no_checkpoint(self.our_seat);
-        Some(self.run(raw, &root_obs, &core, prng))
+        Ok(self.run(raw, &root_obs, &core, prng))
     }
 
     /// Shared search body: `raw` is the root observation JSON re-determinized
