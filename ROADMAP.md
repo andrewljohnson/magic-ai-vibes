@@ -9,15 +9,26 @@ protocol 29 that can. Training on p29 has not improved past 43.3% because
 loop climbs only at the rate its search beats its policy. On p22 that
 number was +15 to +22.
 
-## Where we think the answer is
+## Do this first
 
-1. **Find out why search is worth +15 on p22 and nothing on p29.** Everything
+**Train protocol 29 at 32+ sims.** Paired measurement shows search is worth
++11.7 points at 32 sims on protocol 22 and only +3.3 (noise) at 16 — and
+every protocol-29 training run has used 16. The loop cannot ratchet on a
+teacher that is not better than its student, so it may simply have been
+starved. One training run answers it.
+
+## Then
+
+1. **Find out why search is worth +11.7 on p22 and ~0 on p29.** Everything
    else is downstream. The value head is not obviously the culprit —
    after retraining, its sibling discrimination on p29 (0.029 prob spread,
    26% blind) is BETTER than the p22 net's (0.022, 29% blind), and that net
-   gets +15 from search. Unexplained. Candidate: determinization quality —
-   ISMCTS samples hidden state, and nobody has checked whether the sampled
-   worlds are plausible on p29.
+   gets +11.7 from search. **Determinization is ruled out**: it never fails
+   on p29 (0 errors in 105k samples) and handing search the TRUE hidden
+   state (`AZ_ORACLE_WORLD=1`) changes nothing. Counters also show no apply
+   failures and no opponent-model failures. What differs: p29 reaches an
+   opponent decision on 56% of iterations against p22's 72%, and costs ~10x
+   the wall clock per game.
 2. **Fix the representation.** Features are bag-of-cards counts per zone.
    They cannot express a pairwise creature matchup, and the bot attacks
    into strictly better blockers 0.86 times a game. Deep-sets pooling over

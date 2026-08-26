@@ -12,29 +12,43 @@ exact; the ±SE only matters for generalising to other opponents.
 
 ---
 
-## The loop works, when its parts do
+## How much is search worth? (paired, and smaller than we claimed)
 
-AlphaZero improves only while **search beats its own prior**. That single
-quantity explains almost everything below.
+AlphaZero improves only while **search beats its own prior**. Measure that
+PAIRED on identical games — the gate is deterministic, so the per-game score
+vector `az_gate` returns makes this exact.
 
-The protocol-22 rows are historical: `spz-core` embeds the protocol-29
-engine now, and reproducing them needs
-`git checkout 62948bf~1 -- penta-bot/vendor/penta` and a rebuild.
+`deploy_v1`, protocol 22, 120 games, paired against its own 1-sim play:
 
-All rows are 120–300 game gates, so **±4.5 points at 120 and ±2.8 at 300**.
-Treat any gap under ~5 points as unresolved.
+| sims | score | vs 1 sim | iterations reaching an opponent decision |
+|---|---|---|---|
+| 1 | 43.3% | — | 0% |
+| 16 | 46.7% | +3.3 ± 4.3 (noise) | 72% |
+| **32** | **55.0%** | **+11.7 ± 3.8** | 80% |
 
-| net | protocol | 1 sim | 32 sims | 128 sims |
-|---|---|---|---|---|
-| deploy_v1 | 22 | 39.3% | **54.3%** | **61.0%** |
-| deploy_v1 | 29 | 42.5% | 42.0% | — |
-| deploy_p29 | 29 | 42.5% | 43.3% (16) | — |
+**Search only starts paying at 32 sims.** At 16 it is inside the noise.
 
-On protocol 22 search is worth +15 to +22 points — far outside the noise.
-On 29 it is +0.8, which is *inside* it: the honest statement is that search
-has no measurable value there, not that it has exactly one point of value.
-Either way the loop cannot ratchet, because it climbs only at the rate
-search beats its policy.
+**A correction to our own record.** RESULTS previously claimed "+15 to +22
+on protocol 22". That compared 1-sim play of ONE net (`az_best`, 39.3%)
+against 32-sim play of a DIFFERENT net (`deploy_v1`, 54.3%). It was never a
+paired comparison and the gap it described was mostly the difference between
+two nets. The real, paired figure is +11.7.
+
+**And the operational consequence:** protocol-29 training has been running
+at **16 sims** — below the budget at which search is a teacher even on the
+protocol where it demonstrably works. That alone may explain the p29
+plateau, and it is cheaper to test than anything else on the list.
+
+Protocol 29, `deploy_p29`, same protocol-matched method:
+
+| sims | score | vs 1 sim | reached opponent |
+|---|---|---|---|
+| 1 | 42.5% | — | 0% |
+| 16 | 45.0% | −1.7 ± 6.1 | 56% |
+
+Note p29 reaches an opponent decision on 56% of iterations against p22's
+72% at the same budget, and p29 search costs roughly 10x the wall clock per
+game.
 
 ## What actually moved the needle
 
