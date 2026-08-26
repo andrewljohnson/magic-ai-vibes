@@ -321,6 +321,80 @@ fn dirichlet(n: usize, alpha: f64, prng: &mut SplitMix64) -> Vec<f64> {
     g
 }
 
+
+/// SEARCH HEALTH COUNTERS, always compiled.
+///
+/// Every failure mode in the descent is currently silent: a determinization
+/// that fails skips its iteration, an `apply` that fails leaves the world
+/// unadvanced and scores the unchanged state as the afterstate, and an
+/// opponent model that returns nothing ends the descent before the
+/// opponent's turn is ever simulated. Any of those, firing on one protocol
+/// and not another, produces exactly "search equals prior" -- which is what
+/// we measure on protocol 29 and not on 22.
+///
+/// Global atomics rather than the thread-locals `prof` uses, because a gate
+/// runs its games across threads and the totals have to survive that.
+pub mod stats {
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    use std::sync::Mutex;
+
+    pub const N: usize = 10;
+    pub const NAMES: [&str; N] = [
+        "det_ok", "det_err", "iters_started", "iters_reached_opponent",
+        "opp_action_none", "opp_apply_fail", "our_apply_fail",
+        "max_depth_hits", "terminal_leaves", "our_nodes",
+    ];
+    pub const DET_OK: usize = 0;
+    pub const DET_ERR: usize = 1;
+    pub const ITERS: usize = 2;
+    pub const REACHED_OPP: usize = 3;
+    pub const OPP_NONE: usize = 4;
+    pub const OPP_APPLY_FAIL: usize = 5;
+    pub const OUR_APPLY_FAIL: usize = 6;
+    pub const DEPTH_HITS: usize = 7;
+    pub const TERMINAL: usize = 8;
+    pub const OUR_NODES: usize = 9;
+
+    static C: [AtomicU64; N] = [
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0),
+    ];
+    static ERRS: Mutex<Option<std::collections::HashMap<String, u64>>> =
+        Mutex::new(None);
+
+    #[inline]
+    pub fn bump(i: usize) { C[i].fetch_add(1, Relaxed); }
+
+    /// Record WHY a reconstruction was rejected. The message names the field
+    /// that failed to round-trip, which is the fastest route to what the
+    /// hidden-state sampler is not satisfying.
+    pub fn note_err(msg: &str) {
+        bump(DET_ERR);
+        let key = msg.chars().take(120).collect::<String>();
+        if let Ok(mut g) = ERRS.lock() {
+            *g.get_or_insert_with(Default::default).entry(key).or_insert(0) += 1;
+        }
+    }
+
+    pub fn reset() {
+        for c in &C { c.store(0, Relaxed); }
+        if let Ok(mut g) = ERRS.lock() { *g = None; }
+    }
+
+    pub fn snapshot() -> Vec<u64> {
+        C.iter().map(|c| c.load(Relaxed)).collect()
+    }
+
+    pub fn errors() -> Vec<(String, u64)> {
+        ERRS.lock().ok().and_then(|g| g.clone())
+            .map(|m| { let mut v: Vec<_> = m.into_iter().collect();
+                       v.sort_by_key(|(_, n)| std::cmp::Reverse(*n)); v })
+            .unwrap_or_default()
+    }
+}
+
 impl<'a> Ismcts<'a> {
     fn leaf_eval(&self, world: &Game) -> f64 {
         if let Some(t) = terminal_value(world, self.our_seat) {
@@ -421,6 +495,8 @@ impl<'a> Ismcts<'a> {
         // (node index, chosen ActionKey) at each OUR decision we descended.
         let mut visited: Vec<(usize, ActionKey)> = Vec::new();
         let mut depth = 0usize;
+        let mut saw_opponent = false;
+        stats::bump(stats::ITERS);
         #[cfg(feature = "prof")] prof::iter_();
         let leaf: f64;
         loop {
@@ -436,10 +512,12 @@ impl<'a> Ismcts<'a> {
             depth += 1;
             #[cfg(feature = "prof")] prof::ply();
             if depth > self.cfg.max_depth {
+                stats::bump(stats::DEPTH_HITS);
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
             }
             if let Some(t) = terminal_value(world, self.our_seat) {
+                stats::bump(stats::TERMINAL);
                 leaf = t;
                 break;
             }
@@ -460,13 +538,19 @@ impl<'a> Ismcts<'a> {
             let (raw, quick) = timed!(6, world.legal_and_protocol_actions(seat));
             if quick.len() == 1 {
                 #[cfg(feature = "prof")] prof::forced();
-                let _ = timed!(7, world.apply_enumerated(
-                    seat, &raw, quick[0].clone()));
+                if timed!(7, world.apply_enumerated(
+                        seat, &raw, quick[0].clone())).is_err() {
+                    stats::bump(stats::OUR_APPLY_FAIL);
+                }
                 continue;
             }
             let raw_for_apply = raw.clone();
             let obs = timed!(5, world.observe_with_legal(seat, raw));
             if seat != self.our_seat {
+                if !saw_opponent {
+                    saw_opponent = true;
+                    stats::bump(stats::REACHED_OPP);
+                }
                 // Opponent as a fixed environment (never branched).
                 let opp_action = timed!(3, match self.cfg.opponent {
                     OpponentModel::Handcrafted => {
@@ -505,9 +589,15 @@ impl<'a> Ismcts<'a> {
                         actions.into_iter().nth(i)
                     }
                 });
-                let ok = opp_action
-                    .map(|a| timed!(7, world.apply_enumerated(seat, &raw_for_apply, a)).is_ok())
-                    .unwrap_or(false);
+                let ok = match opp_action {
+                    None => { stats::bump(stats::OPP_NONE); false }
+                    Some(a) => {
+                        let r = timed!(7, world.apply_enumerated(
+                            seat, &raw_for_apply, a));
+                        if r.is_err() { stats::bump(stats::OPP_APPLY_FAIL); }
+                        r.is_ok()
+                    }
+                };
                 if !ok {
                     leaf = timed!(4, self.leaf_eval(world));
                     break;
@@ -522,6 +612,7 @@ impl<'a> Ismcts<'a> {
                 continue;
             }
 
+            stats::bump(stats::OUR_NODES);
             let node_idx = tree.get_or_create(&path);
             // We are standing at a tree node: remember the state so later
             // iterations can jump here instead of replaying to it.
@@ -573,8 +664,10 @@ impl<'a> Ismcts<'a> {
                 let (sel_i, sel_key, first_visit) =
                     self.select(&tree.arena[node_idx], &actions, &avail);
                 visited.push((node_idx, sel_key.clone()));
-                let _ = timed!(7, world.apply_enumerated(
-                seat, &raw_for_apply, actions[sel_i].clone()));
+                if timed!(7, world.apply_enumerated(
+                        seat, &raw_for_apply, actions[sel_i].clone())).is_err() {
+                    stats::bump(stats::OUR_APPLY_FAIL);
+                }
                 path.push(sel_key);
                 if first_visit {
                     leaf = timed!(4, self.leaf_eval(world));
@@ -610,8 +703,10 @@ impl<'a> Ismcts<'a> {
             let (sel_i, sel_key, first_visit) =
                 self.select(&tree.arena[node_idx], &actions, &avail);
             visited.push((node_idx, sel_key.clone()));
-            let _ = timed!(7, world.apply_enumerated(
-                seat, &raw_for_apply, actions[sel_i].clone()));
+            if timed!(7, world.apply_enumerated(
+                    seat, &raw_for_apply, actions[sel_i].clone())).is_err() {
+                stats::bump(stats::OUR_APPLY_FAIL);
+            }
             path.push(sel_key);
             if first_visit {
                 // Expansion: leaf-eval the afterstate and stop descending.
@@ -697,6 +792,23 @@ impl<'a> Ismcts<'a> {
     /// Build one determinized world from the root observation, or None when
     /// the deck hypothesis cannot cover the observation / reconstruction
     /// fails (the iteration is then skipped, matching the det path).
+    /// One sampled world consistent with the root observation.
+    ///
+    /// `AZ_ORACLE_WORLD=1` returns the TRUE state instead, via the oracle
+    /// handed to `run`. That is not a legal bot -- it sees the opponent's
+    /// hand -- but it is the upper bound on what determinization could ever
+    /// supply, and it separates "the sampler is wrong" from "the tree is
+    /// wrong".
+    fn determinize_oracle(&self, oracle: Option<&Game>) -> Option<Game> {
+        if std::env::var("AZ_ORACLE_WORLD").as_deref() == Ok("1") {
+            if let Some(g) = oracle {
+                stats::bump(stats::DET_OK);
+                return Some(g.clone());
+            }
+        }
+        None
+    }
+
     fn determinize(&self, raw: &str, root_obs: &PlayerObservation,
                    prng: &mut SplitMix64) -> Option<Game> {
         let hidden = if self.cfg.inert {
@@ -707,9 +819,11 @@ impl<'a> Ismcts<'a> {
                           self.opp_deck)?
         };
         let seed = prng.next_u64();
-        BotGame::from_observation_json(raw, &hidden, seed)
-            .ok()
-            .map(BotGame::into_core_game)
+        match BotGame::from_observation_json(raw, &hidden, seed) {
+            Ok(g) => { stats::bump(stats::DET_OK);
+                       Some(g.into_core_game()) }
+            Err(e) => { stats::note_err(&e); None }
+        }
     }
 
     /// Run the search from a live game replayed to OUR root decision.
@@ -815,8 +929,10 @@ impl<'a> Ismcts<'a> {
             // reused; pass an empty one and let it stay empty.
             let mut states = HashMap::new();
             for _ in 0..self.cfg.iters {
-                if let Some(mut world) =
-                    timed!(0, self.determinize(raw, root_obs, prng)) {
+                if let Some(mut world) = self
+                    .determinize_oracle(Some(root_core))
+                    .or_else(|| timed!(0, self.determinize(raw, root_obs, prng)))
+                {
                     states.clear();
                     self.iterate(&mut tree, &mut world, &mut opp, &mut states);
                 }
@@ -830,7 +946,9 @@ impl<'a> Ismcts<'a> {
             let mut states: HashMap<Vec<ActionKey>, Game> = HashMap::new();
             for it in 0..self.cfg.iters {
                 if it % m == 0 {
-                    template = timed!(0, self.determinize(raw, root_obs, prng));
+                    template = self.determinize_oracle(Some(root_core))
+                        .or_else(|| timed!(0,
+                            self.determinize(raw, root_obs, prng)));
                     states.clear();
                 }
                 if let Some(t) = &template {

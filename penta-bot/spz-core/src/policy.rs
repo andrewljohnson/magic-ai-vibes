@@ -147,14 +147,41 @@ impl Policy {
                 return t;
             }
             let Some(seat) = g.decision_player() else { break };
-            let obs = g.observe(seat);
-            let actions = protocol_actions(&obs);
+            // Enumerate once, and skip the observation entirely on a forced
+            // ply -- the same shape the descent uses.
+            let (raw, actions) = g.legal_and_protocol_actions(seat);
+            if actions.is_empty() { break; }
             if actions.len() == 1 {
-                if g.apply(seat, actions[0].clone()).is_err() { break; }
+                if g.apply_enumerated(seat, &raw, actions[0].clone()).is_err() {
+                    break;
+                }
                 continue;
             }
-            let i = self.greedy_index(&g, seat, decks);
-            if g.apply(seat, actions[i].clone()).is_err() { break; }
+            let obs = g.observe_with_legal(seat, raw.clone());
+            // Score with the factorised head when we have one. The old path
+            // called greedy_index, which clones the game and re-featurises
+            // PER ACTION -- ~13ms each -- so a rollout leaf could not finish
+            // a gate at any budget, which is why this diagnostic has never
+            // produced a number.
+            let i = match self.fast_head.as_ref() {
+                Some(fh) => {
+                    let state = features(&obs, g.in_pregame(), &self.tables,
+                                         decks);
+                    let pre = fh.state_pre(&state);
+                    let enc = crate::action_feat::encode_all(&actions, &obs,
+                                                             &self.tables);
+                    let sc = fh.scores(&pre, &enc, actions.len());
+                    let mut best = 0usize;
+                    for (j, v) in sc.iter().enumerate() {
+                        if *v > sc[best] { best = j; }
+                    }
+                    best
+                }
+                None => self.greedy_index(&g, seat, decks),
+            };
+            if g.apply_enumerated(seat, &raw, actions[i].clone()).is_err() {
+                break;
+            }
         }
         match terminal_value(&g, our_seat) {
             Some(t) => t,

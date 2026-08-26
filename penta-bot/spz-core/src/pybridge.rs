@@ -588,7 +588,15 @@ fn az_gate(
         // be measured.
         redeterminize_m: std::env::var("SPZ_GATE_M").ok()
             .and_then(|v| v.parse().ok()).unwrap_or(1),
-        opponent: crate::mcts::OpponentModel::Handcrafted,
+        // AZ_GATE_OPP: self-play uses the Greedy in-tree opponent and the
+        // gate uses Handcrafted, so the teacher the loop distils is not the
+        // search the gate measures. Being able to sweep it makes that
+        // difference measurable instead of assumed.
+        opponent: if std::env::var("AZ_GATE_OPP").as_deref() == Ok("greedy") {
+            crate::mcts::OpponentModel::Greedy
+        } else {
+            crate::mcts::OpponentModel::Handcrafted
+        },
         max_decisions,
         max_depth: 400,
         root_noise_frac: 0.0,
@@ -596,7 +604,16 @@ fn az_gate(
         // Same cap self-play uses. See MctsConfig::max_actions.
         max_actions: 64,
     };
+    crate::mcts::stats::reset();
     run_gate(py, policy, decks, book, cfg, specs, workers, classify)
+}
+
+/// Search-health counters from the last gate: (names, values, error strings).
+#[pyfunction]
+fn search_stats() -> (Vec<String>, Vec<u64>, Vec<(String, u64)>) {
+    (crate::mcts::stats::NAMES.iter().map(|s| (*s).to_string()).collect(),
+     crate::mcts::stats::snapshot(),
+     crate::mcts::stats::errors())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1221,6 +1238,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ismcts_gate, m)?)?;
     m.add_function(wrap_pyfunction!(az_gate, m)?)?;
     m.add_function(wrap_pyfunction!(az_choose, m)?)?;
+    m.add_function(wrap_pyfunction!(search_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_stream_rows, m)?)?;
     m.add_function(wrap_pyfunction!(playout_at, m)?)?;
     m.add_function(wrap_pyfunction!(stream_rows, m)?)?;
