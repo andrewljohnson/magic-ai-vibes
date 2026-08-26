@@ -60,11 +60,29 @@ impl BotGame {
                 super::PROTOCOL_VERSION
             ));
         }
+        // SPZ VENDOR PATCH (LOCAL ONLY -- never propose upstream): accept a
+        // foreign simulation fingerprint when the operator names it.
+        //
+        // The fingerprint hashes every simulation source file, so ANY patch of
+        // ours changes it -- our additive accessors included. It also pins the
+        // exact upstream revision, and the public server runs a revision that
+        // is neither our pin nor upstream HEAD. Without this, reconstruction
+        // rejects every server observation, search never runs, and the hosted
+        // bot silently degrades to a raw 1-ply pick.
+        //
+        // This is a REAL RISK, not a formality: if the server's rules actually
+        // differ from ours, reconstruction yields a subtly wrong world and
+        // search reasons about the wrong game. It is opt-in per process and
+        // must name the exact fingerprint being trusted.
         if observation["simulationFingerprint"].as_str() != Some(super::SIMULATION_FINGERPRINT) {
-            return Err(format!(
-                "observation simulation fingerprint does not match {}",
-                super::SIMULATION_FINGERPRINT
-            ));
+            let accepted = std::env::var("SPZ_ACCEPT_FINGERPRINT").unwrap_or_default();
+            let seen = observation["simulationFingerprint"].as_str().unwrap_or("");
+            if accepted.is_empty() || accepted != seen {
+                return Err(format!(
+                    "observation simulation fingerprint does not match {}",
+                    super::SIMULATION_FINGERPRINT
+                ));
+            }
         }
         let format = parse_format_slug(
             observation["format"]
@@ -107,8 +125,44 @@ impl BotGame {
             if matches!(field.as_str(), "engineVersion" | "protocolCapabilities") {
                 continue;
             }
-            if !observation
-                .get(field)
+            // SPZ VENDOR PATCH (LOCAL ONLY -- never propose upstream): third
+            // and last arm of the foreign-fingerprint acceptance. The rebuilt
+            // observation stamps OUR fingerprint while the supplied one
+            // carries the server's, so this field-by-field comparison would
+            // reject even after the two explicit gates pass. Skipped only
+            // when the operator opted in to that exact fingerprint.
+            if field.as_str() == "simulationFingerprint" {
+                let accepted = std::env::var("SPZ_ACCEPT_FINGERPRINT").unwrap_or_default();
+                if !accepted.is_empty()
+                    && observation["simulationFingerprint"].as_str() == Some(accepted.as_str())
+                {
+                    continue;
+                }
+            }
+            // SPZ VENDOR PATCH (LOCAL ONLY): the nested checkpoint embeds the
+            // fingerprint too, so under the opt-in we normalise THAT STRING
+            // ONLY and still compare every other byte of real game state.
+            let supplied_owned = observation.get(field).map(|supplied| {
+                let accepted = std::env::var("SPZ_ACCEPT_FINGERPRINT").unwrap_or_default();
+                if field.as_str() == "checkpoint" && !accepted.is_empty() {
+                    let mut copy = supplied.clone();
+                    if let Some(object) = copy.as_object_mut() {
+                        if object.get("simulationFingerprint").and_then(Value::as_str)
+                            == Some(accepted.as_str())
+                        {
+                            object.insert(
+                                "simulationFingerprint".to_owned(),
+                                Value::String(super::SIMULATION_FINGERPRINT.to_owned()),
+                            );
+                        }
+                    }
+                    copy
+                } else {
+                    supplied.clone()
+                }
+            });
+            if !supplied_owned
+                .as_ref()
                 .is_some_and(|supplied| contains_rebuilt_value(supplied, rebuilt_value))
             {
                 return Err(format!(

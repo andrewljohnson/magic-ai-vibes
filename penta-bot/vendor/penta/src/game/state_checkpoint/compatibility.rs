@@ -11,11 +11,19 @@ fn parse_compatible_game_snapshot(checkpoint_value: &Value) -> Result<GameSnapsh
     }
     let fingerprint = str_field(checkpoint_value, "simulationFingerprint")
         .map_err(|error| format!("invalid game snapshot: {error}"))?;
+    // SPZ VENDOR PATCH (LOCAL ONLY -- never propose upstream): the checkpoint
+    // arm of the same foreign-fingerprint acceptance applied in
+    // protocol/bot_game.rs. A server observation carries the server's
+    // fingerprint in BOTH places, so relaxing only the outer gate still
+    // rejects. Same opt-in, same risk: see the note in bot_game.rs.
     if fingerprint != crate::protocol::SIMULATION_FINGERPRINT {
-        return Err(format!(
-            "checkpoint simulation fingerprint {fingerprint:?} does not match {}",
-            crate::protocol::SIMULATION_FINGERPRINT
-        ));
+        let accepted = std::env::var("SPZ_ACCEPT_FINGERPRINT").unwrap_or_default();
+        if accepted.is_empty() || accepted != fingerprint {
+            return Err(format!(
+                "checkpoint simulation fingerprint {fingerprint:?} does not match {}",
+                crate::protocol::SIMULATION_FINGERPRINT
+            ));
+        }
     }
     let checkpoint: GameSnapshot = serde_json::from_value(checkpoint_value.clone())
         .map_err(|error| format!("invalid game snapshot: {error}"))?;

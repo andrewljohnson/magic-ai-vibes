@@ -865,10 +865,21 @@ class AzSearchPolicy:
                 self.iters, self.c_puct, self.decklists_path, raw,
                 self.our_deck, opp, self.max_actions)
             self.searched += 1
-        except Exception:
+        except Exception as error:
             # Never forfeit a game over a search failure: fall back to the
             # first legal action in the engine's own ordering.
+            #
+            # But SAY SO. A silent fallback here hid a dead search for four
+            # days of hosted play: every move was a raw 1-ply pick and the
+            # only symptom was weak play. The first few failures print, then
+            # it goes quiet so a persistent fault cannot flood the log.
             self.failed += 1
+            if self.failed <= 3:
+                print(f"SEARCH FAILED (playing fallback, move {self.failed}): "
+                      f"{error}", flush=True)
+            elif self.failed == 4:
+                print("SEARCH FAILED repeatedly; silencing further notices "
+                      "(count is reported per finished game)", flush=True)
             return actions[0]["index"]
         i = max(0, min(int(i), len(actions) - 1))
         return actions[i]["index"]
