@@ -199,6 +199,81 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
     Episode { records, result, decisions: n }
 }
 
+
+/// MIRROR MATCH: our net on both seats, a different search budget per seat.
+///
+/// This is the only measurement that asks whether search is a policy
+/// improvement operator IN THE DOMAIN THE LOOP TRAINS ON. Every earlier
+/// "search is worth +X" number was taken against the built-in bot, where the
+/// greedy in-tree model is simply the WRONG model of the opponent -- a best
+/// response to the wrong opponent losing to no search is expected and says
+/// nothing about self-play, where the real opponent is our own policy.
+///
+/// Both seats play argmax-of-visits (no sampling, no root noise) so the
+/// result is a clean paired comparison of budgets, not of exploration.
+///
+/// Returns 1.0 if seat one won, 0.0 if seat two won, 0.5 for a draw, and
+/// -1.0 for a game that never finished.
+#[allow(clippy::too_many_arguments)]
+pub fn play_h2h(policy: &Policy, tables: &Tables, decks: &Decks,
+                book: &DeckBook, d1: &str, d2: &str, seed: u64,
+                cfg: &MctsConfig, max_actions: usize,
+                iters_p1: usize, iters_p2: usize) -> f64 {
+    let budget = std::env::var("AZ_GAME_SECS").ok()
+        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    let started = std::time::Instant::now();
+    let mut game = match BotGame::new(d1, d2, Opponent::External,
+                                      PlayerId::Two, seed) {
+        Ok(g) => g,
+        Err(_) => return -1.0,
+    };
+    let mut prng = SplitMix64::new(seed ^ 0xB2C3);
+    let mut scratch = std::collections::HashMap::new();
+    let mut n = 0usize;
+
+    while game.result().is_none() && n < MAX_DECISIONS {
+        if budget > 0 && started.elapsed().as_secs() >= budget {
+            return -1.0;
+        }
+        let Some(seat) = game.decision_seat() else { break };
+        let obs = game.core_game().observe(seat);
+        let acts = protocol_actions(&obs);
+        if acts.len() == 1 {
+            if game.act(0).is_err() { break; }
+            n += 1;
+            continue;
+        }
+        let wide = max_actions > 0 && acts.len() > max_actions;
+        let my_deck = if seat == PlayerId::One { d1 } else { d2 };
+        let opp_seen = crate::det_runner::seen_defs(&obs, flip(seat), false);
+        let opp_deck = crate::aac::classify_deck(book, &opp_seen, &mut scratch)
+            .unwrap_or(my_deck);
+        let mi = seat_idx(seat);
+        let mut deck_slots: [Vec<i32>; 2] = [Vec::new(), Vec::new()];
+        deck_slots[mi] = tables.deck_slots(book.counts(my_deck));
+        deck_slots[1 - mi] = tables.deck_slots(book.counts(opp_deck));
+
+        let mut seat_cfg = cfg.clone();
+        seat_cfg.iters = if seat == PlayerId::One { iters_p1 } else { iters_p2 };
+        seat_cfg.root_noise_frac = 0.0;
+
+        let search = Ismcts {
+            policy, decks, deck_slots: &deck_slots,
+            my_deck, opp_deck, our_seat: seat, cfg: seat_cfg,
+        };
+        let best = if wide { 0usize } else { search.search(&game, &mut prng).0 };
+        if game.act(best).is_err() { break; }
+        n += 1;
+    }
+
+    match game.result() {
+        None => -1.0,
+        Some(penta::GameResult::Draw) => 0.5,
+        Some(penta::GameResult::Winner { winner, .. }) =>
+            if winner == PlayerId::One { 1.0 } else { 0.0 },
+    }
+}
+
 #[cfg(all(test, feature = "prof"))]
 mod prof_tests {
     use super::*;

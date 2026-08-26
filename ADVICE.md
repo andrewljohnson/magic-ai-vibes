@@ -1,4 +1,169 @@
-# Why search is worth nothing on protocol 29 — recommendation
+# 2026-08-26 — answers to FOR_FABLE.md, and what to do today
+
+Read FOR_FABLE.md, the corrected RESULTS/ROADMAP, and the diff since
+yesterday (`4846310..30f6dfc`). The instrumentation and the paired
+measurements are exactly right. The conclusion drawn from them is one step
+too far, and that step matters because it decides what you build today.
+
+## The gap between "the greedy-model gate is −2.5" and "self-play distils a weaker teacher"
+
+The −2.5 was measured **against the handcrafted bot**. In that game the
+greedy model is simply the *wrong* model of the opponent: search plans
+against an opponent that plays like our policy, and then a different
+opponent replies. A best-response to the wrong opponent losing to no search
+is expected and says nothing about self-play, where the real opponent *is*
+our policy. The caveat you flagged is not a caveat — it is the whole
+measurement. So the claim "self-play's targets come from a search that is
+worse than no search" is **not yet established**. It needs the paired
+comparison in self-play's own domain:
+
+> **Experiment 1 (today, first):** mirror match, alternating seats, same
+> seeds, both seats our own net, opponent model = greedy. Seat A searches at
+> 32 sims, seat B plays the raw policy at 1 sim (argmax, no noise). Paired
+> score of A vs 50%. 200+ games. Then the same with A at 16 sims.
+
+There is no tool for this: `head_to_head.py` plays the old AAC `.npz`
+actors, and `az_stream_episodes` runs the same config on both seats. Add
+one PyO3 entry (`az_h2h(iters_p1, iters_p2, opponent_model, specs)`) that
+is `az::play_episode` with a per-seat `MctsConfig` and no noise — ~40 lines.
+
+- If 32-sim-greedy **beats** the 1-sim policy in the mirror: the operator
+  works in-domain, and the degradation has a different cause (see "other
+  suspects"). Don't rebuild the opponent model yet.
+- If it **loses or ties**: the operator is broken in its own domain and
+  question 1 is the job. Go to Experiment 2.
+
+Either way this is the number FOR_FABLE.md should have had, and it is one
+gate's worth of compute.
+
+## Question 2 — is this architecture only exploiting a known opponent?
+
+Partly yes, and the part that is "yes" is structural, not a tuning problem.
+
+The search is single-observer with a **non-branching** opponent: every
+opponent decision is answered by a fixed model, never explored. That makes
+the search a *best response to the model*. When the model is the exact
+bot you are gated against (handcrafted, deterministic, and it sees the
+same determinized hand), you get the answer key for its replies — the
++8.3/+11.7 and the p22 61% include that. Against a server opponent nobody
+has modelled, the honest expectation is closer to the 40–42% raw-policy
+band than to 50.8%. Report both numbers going forward: "handcrafted-model
+gate" (exploit) and "own-model gate" (portable).
+
+But "cannot self-improve at all" is too strong. Best-response-to-current-
+policy is the fictitious-play operator: it can improve, but it is
+**unstable** — it chases the current policy's weaknesses, the policy
+moves, and the loop cycles or drifts instead of ratcheting. Monotonic
+decline on every configuration is what that looks like from the outside.
+The fix is the one AlphaZero itself uses: **branch the opponent**.
+
+> **Experiment 2 / the real fix:** make opponent decision nodes tree nodes.
+> Same policy head as prior, PUCT selecting to *minimise* our value
+> (`(1−Q) + explore`), backprop unchanged (single value from our
+> perspective). Key opponent actions by a determinization-independent
+> descriptor — action type + **card definition** (not the hidden object id,
+> which is fresh per world) + target descriptor — with the availability
+> counts you already carry. This is ordinary SO-ISMCTS (Cowling 2012); the
+> current design branches only our nodes.
+
+Cost: roughly what the Greedy model already pays per opponent ply (one
+state encode + `encode_all` + scores), so it is not the expensive option.
+It also removes handcrafted knowledge from the *gate's* search, so the
+teacher and the measured search can finally be the same search.
+
+Order of the three candidates you listed:
+1. **Sample from the policy instead of argmax** — one line in the Greedy
+   arm (`mcts.rs`, the `best` loop). Do it today as a cheap point on the
+   curve: argmax is the most exploitable possible model (deterministic, and
+   wrong wherever the policy is unsure), and sampling gives the expectation
+   over the opponent's policy instead of a best response to one line. Measure
+   in Experiment 1's harness AND with `AZ_GATE_OPP`.
+2. **Branch the opponent** — the principled fix, half a day.
+3. **Previous best checkpoint as the model** — skip. It does not change the
+   operator, only which fixed policy it best-responds to.
+Giving the opponent its own nested search is branching done expensively;
+don't.
+
+## Question 3 — FPU
+
+Yes, that is very likely why the threshold sits between 16 and 32. On a
+[0,1] scale Q=0 for an unvisited child is the worst score in the tree, so
+with a confident prior the exploration term `1.5·P·√N/(1+n)` for a P=0.03
+sibling never beats a visited child's Q≈0.45 at N≤16; the search is the
+prior's argmax with a few forced re-visits. Two changes, both cheap:
+
+- **FPU = parent mean Q minus a small reduction**, Leela-style:
+  `q_init = Q_parent − 0.2·√(Σ P of visited children)`. At the root before any
+  visit use the value-net estimate of the root state.
+- **`c_puct`** was tuned for [−1,1] values; on [0,1] the same constant is
+  half as exploratory. Try 2.5–3.0.
+
+Measure paired at 16 sims. If 16 becomes +5, training is 2x cheaper and the
+threshold moves.
+
+## Question 4 — 63% vs 80% reaching the opponent, and the 10x
+
+Both probably have the same cause: **more of OUR decision points per turn
+on p29**. `our_nodes/iter = 4.0`. An iteration stops at the first unvisited
+action, so reaching the opponent requires every one of our decisions in the
+turn to have been visited already; if p29 offers more branching plies per
+turn (priority passes, the protocol-28 announced payment choices, more
+non-forced decisions), fewer iterations get through, and every game has more
+searched decisions — which is the wall clock. Check in an hour: with the
+p22 vendor restored, read `our_nodes/iter` and *searched decisions per
+game* on p22 and diff against p29. `d353bb4` already found the per-episode
+search cost is close (10.7 vs 9.4 s) and the gap is in whole games, which
+points the same way.
+
+Two fixes that help regardless:
+- **Expand, then play out the turn.** On a first visit, instead of leaf-
+  evaluating immediately, continue with the prior's argmax until the
+  opponent's next decision (or the start of their turn), then evaluate. Every
+  iteration then sees its combat resolve and its spells land. The old C++
+  recipe did this and `trainer.py`'s docstring records why ("attack-declare
+  afterstates finally show their consequence instead of only their cost").
+  Bounded cost — it's a handful of cheap policy plies.
+- Collapse chains of our consecutive priority-pass decisions into one node
+  where nothing but Pass is sensible (dominance already does part of this;
+  it is off in the gate and self-play).
+
+## Other suspects for the monotonic decline, if Experiment 1 says the teacher is fine
+
+- **Temperature 1 for the whole game.** `az.rs` samples from visits at
+  every decision to the end. AlphaZero uses τ=1 for the opening (~30 moves)
+  and argmax after. Endgames played by sampling produce noisy outcome
+  labels for the value head and random-looking states for the policy.
+  Temperature 1 for the first ~8 searched decisions, then argmax.
+- **Dirichlet α=1 on ~7 actions** replaces a quarter of the prior with
+  near-uniform noise — that is a lot. AZ's α≈10/branching ≈ 1.4 is in the
+  same range, so this is probably fine, but it stacks with the above.
+- **The ratchet reverts on any decline vs the handcrafted bot.** Self-play
+  improvement and gate-vs-bot strength are different axes (your own
+  `head_to_head.py` docstring says so). Once Experiment 1's harness exists,
+  add a mirror-match gate (new vs best, 200 games) and promote on *that*,
+  keep the handcrafted gate as the reported number. Otherwise a policy that
+  genuinely improves at self-play but loses a little exploit-value against
+  the bot is discarded every 20 rounds — which would also look like
+  "monotonic decline".
+
+## Today, in order
+
+1. `az_h2h` entry + Experiment 1 (32-sim greedy vs 1-sim, mirror, paired).
+   Decides everything below. ~2 h including the gate.
+2. Sampled opponent model (one line) — re-run 1 and `AZ_GATE_OPP` paired.
+3. FPU + c_puct, paired at 16 and 32 sims on the handcrafted gate.
+4. p22 counters for `our_nodes/iter` and searched decisions per game.
+5. If 1 said the operator fails: branch the opponent. If 1 said it works:
+   temperature schedule + mirror-match promotion, then resume training at
+   32 sims (or 16 if step 3 rescued it).
+
+Don't resume training before step 1 — every run so far has been spent
+without knowing whether the teacher beats the student in the only domain
+where it plays.
+
+---
+
+# 2026-08-25 — original recommendation
 
 Read the whole search path (`spz-core/src/mcts.rs`, `az.rs`, `mcts_runner.rs`,
 `det_runner.rs`, `pybridge.rs`, `az_train.py`), the vendor patches, and the

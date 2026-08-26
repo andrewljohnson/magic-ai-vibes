@@ -538,6 +538,88 @@ fn ismcts_gate(
 /// this -- it builds both roles from `Mlp` files, and the AZ policy head
 /// is not an `Mlp`, so without this there is no way to measure whether the
 /// AZ loop is getting stronger.
+
+/// MIRROR MATCH: our net on both seats, a different search budget per seat.
+///
+/// The only measurement that asks whether search improves on the policy IN
+/// THE DOMAIN THE LOOP TRAINS ON. Every "search is worth +X" figure so far
+/// was taken against the built-in bot, where the greedy in-tree model is
+/// the WRONG model of the opponent -- so a loss there says nothing about
+/// self-play, where the real opponent IS our policy.
+///
+/// Returns (p1_wins, draws, finished, per_game) with per_game scored from
+/// seat one: 1.0 win, 0.5 draw, 0.0 loss, -1.0 unfinished.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn az_h2h(
+    py: Python<'_>,
+    catalog_json: String, value_path: String, policy_path: String,
+    iters_p1: usize, iters_p2: usize, c_puct: f64, decklists_path: String,
+    max_actions: usize, threads: usize, opponent: String,
+    specs: Vec<(String, String, u64)>,
+) -> PyResult<(usize, usize, usize, Vec<f64>)> {
+    let policy = build_policy(&catalog_json, &value_path, &value_path,
+                              0.0, 0, 1, 400, 999, 999)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let fh = crate::action_feat::PolicyHead::load(&policy_path)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+            format!("policy head {policy_path}: {e}")))?;
+    let policy = crate::policy::Policy { fast_head: Some(fh), ..policy };
+    let decks = decks::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let book = decks::DeckBook::load(&decklists_path)
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let cfg = crate::mcts::MctsConfig {
+        iters: iters_p1, c_puct, inert: false, use_dominance: false,
+        leaf_playout: false, leaf_blend: false, redeterminize_m: 1,
+        opponent: parse_opponent(&opponent)?,
+        max_decisions: crate::az::MAX_DECISIONS,
+        max_depth: 400,
+        root_noise_frac: 0.0,
+        root_noise_alpha: 1.0,
+        max_actions,
+    };
+    let n_threads = thread_count(threads, specs.len());
+    let policy = std::sync::Arc::new(policy);
+    let decks = std::sync::Arc::new(decks);
+    let book = std::sync::Arc::new(book);
+    let specs = std::sync::Arc::new(specs);
+    let cfg = std::sync::Arc::new(cfg);
+    crate::mcts::stats::reset();
+
+    let parts: Vec<Vec<(usize, f64)>> = py.detach(|| {
+        let mut handles = Vec::new();
+        for t in 0..n_threads {
+            let (policy, decks, book, specs, cfg) =
+                (policy.clone(), decks.clone(), book.clone(),
+                 specs.clone(), cfg.clone());
+            handles.push(std::thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut i = t;
+                while i < specs.len() {
+                    let (d1, d2, seed) = &specs[i];
+                    out.push((i, crate::az::play_h2h(
+                        &policy, &policy.tables, &decks, &book, d1, d2, *seed,
+                        &cfg, max_actions, iters_p1, iters_p2)));
+                    i += n_threads;
+                }
+                out
+            }));
+        }
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
+    let mut per = vec![-1.0f64; specs.len()];
+    for chunk in parts { for (i, v) in chunk { per[i] = v; } }
+    let (mut w, mut d, mut f) = (0usize, 0usize, 0usize);
+    for v in &per {
+        if *v < 0.0 { continue; }
+        f += 1;
+        if *v == 1.0 { w += 1; } else if *v == 0.5 { d += 1; }
+    }
+    Ok((w, d, f, per))
+}
+
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn az_gate(
@@ -1237,6 +1319,7 @@ fn spz_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(ismcts_choose, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_gate, m)?)?;
     m.add_function(wrap_pyfunction!(az_gate, m)?)?;
+    m.add_function(wrap_pyfunction!(az_h2h, m)?)?;
     m.add_function(wrap_pyfunction!(az_choose, m)?)?;
     m.add_function(wrap_pyfunction!(search_stats, m)?)?;
     m.add_function(wrap_pyfunction!(ismcts_stream_rows, m)?)?;
