@@ -510,7 +510,14 @@ def main():
             for j in range(k):
                 frac_left[i + j] = (k - j) / max(k, 1)
             for _ in range(k):
-                if r < 0:
+                if r == -2:
+                    # OUR CLOCK ran out, not the game. Drop it: we do not
+                    # know who was winning and the position is not at fault.
+                    # Distinct from the decision cap below, which IS the
+                    # policy failing to close a game out.
+                    z[i] = 0.5
+                    keep[i] = False
+                elif r < 0:
                     # Truncated. Score it the way the EVALUATOR does.
                     #
                     # First attempt scored it 0.5, which paid a losing

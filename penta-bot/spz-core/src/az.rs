@@ -94,6 +94,7 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
     let budget = std::env::var("AZ_GAME_SECS").ok()
         .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     let started = std::time::Instant::now();
+    let mut timed_out = false;
     let mut game = match BotGame::new(d1, d2, Opponent::External,
                                       PlayerId::Two, seed) {
         Ok(g) => g,
@@ -107,6 +108,7 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
 
     while game.result().is_none() && n < MAX_DECISIONS {
         if budget > 0 && started.elapsed().as_secs() >= budget {
+            timed_out = true;
             break;
         }
         let Some(seat) = game.decision_seat() else { break };
@@ -181,6 +183,14 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
     }
 
     let result = match game.result() {
+        // -2: OUR CLOCK ran out, not the game. A game stopped by the
+        // wall-clock budget says nothing about the position -- it is
+        // infrastructure giving up -- whereas a game that reached the
+        // DECISION cap is the policy failing to close, which is a real
+        // property worth penalising. Scoring both the same fed a fifth of
+        // the value target as "both players lost" when finish rates sat at
+        // 77-85%.
+        None if timed_out => -2,
         None => -1,
         Some(penta::GameResult::Draw) => 2,
         Some(penta::GameResult::Winner { winner, .. }) =>
