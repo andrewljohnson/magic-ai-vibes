@@ -99,10 +99,6 @@ on p29, plus targeted experiments:
 | the ratchet discarding good nets | **no** — promoting on the mirror instead changed nothing (0 promotions in 180 rounds) |
 | clock-truncated games poisoning labels | **already handled** — `r == -2` sets `keep=False`; only decision-cap (`-1`) games are scored as losses |
 
-What does differ on p29: iterations reach an opponent decision 63% of the
-time at 32 sims against p22's 80%, and a game costs roughly 10x the wall
-clock. Neither is explained.
-
 ## What actually moved the needle
 
 * **The value head must rank SIBLINGS, not positions.** Trained only on the
