@@ -242,8 +242,19 @@ pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
                 cfg: &MctsConfig, max_actions: usize,
                 iters_p1: usize, iters_p2: usize,
                 noise_p1: f64, noise_p2: f64) -> f64 {
-    let budget = std::env::var("AZ_GAME_SECS").ok()
-        .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    // AZ_H2H_SECS, falling back to AZ_GAME_SECS.
+    //
+    // Self-play wants a TIGHT per-game budget: a stuck game is wasted
+    // generation. A head-to-head wants a LOOSE one, because an unfinished
+    // game is DISCARDED, and discarding a third of the games is the guard
+    // deciding the measurement. The in-training mirror finished 69 of 100
+    // at 120s where the same comparison finished 172 of 200 at 600s, and
+    // that mirror is what promotes or reverts a net.
+    let budget = std::env::var("AZ_H2H_SECS").ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .or_else(|| std::env::var("AZ_GAME_SECS").ok()
+                 .and_then(|v| v.parse::<u64>().ok()))
+        .unwrap_or(0);
     let started = std::time::Instant::now();
     let mut game = match BotGame::new(d1, d2, Opponent::External,
                                       PlayerId::Two, seed) {
