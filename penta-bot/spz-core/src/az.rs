@@ -227,10 +227,21 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
 /// Returns 1.0 if seat one won, 0.0 if seat two won, 0.5 for a draw, and
 /// -1.0 for a game that never finished.
 #[allow(clippy::too_many_arguments)]
-pub fn play_h2h(policy: &Policy, tables: &Tables, decks: &Decks,
+/// Play one game with a SEPARATE net per seat.
+///
+/// This used to take a single `&Policy` and vary only `iters`, which meant
+/// it could not answer "is net A better than net B" at all -- and it was
+/// being used for exactly that. A mirror gate built on it played
+/// A-vs-A on half the games and B-vs-B on the other half, then combined
+/// them as though that were a head-to-head, so it read ~50% no matter how
+/// good either net was. See RESULTS.md.
+#[allow(clippy::too_many_arguments)]
+pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
+                tables: &Tables, decks: &Decks,
                 book: &DeckBook, d1: &str, d2: &str, seed: u64,
                 cfg: &MctsConfig, max_actions: usize,
-                iters_p1: usize, iters_p2: usize) -> f64 {
+                iters_p1: usize, iters_p2: usize,
+                noise_p1: f64, noise_p2: f64) -> f64 {
     let budget = std::env::var("AZ_GAME_SECS").ok()
         .and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     let started = std::time::Instant::now();
@@ -265,9 +276,14 @@ pub fn play_h2h(policy: &Policy, tables: &Tables, decks: &Decks,
         deck_slots[mi] = tables.deck_slots(book.counts(my_deck));
         deck_slots[1 - mi] = tables.deck_slots(book.counts(opp_deck));
 
+        let p1 = seat == PlayerId::One;
         let mut seat_cfg = cfg.clone();
-        seat_cfg.iters = if seat == PlayerId::One { iters_p1 } else { iters_p2 };
-        seat_cfg.root_noise_frac = 0.0;
+        seat_cfg.iters = if p1 { iters_p1 } else { iters_p2 };
+        // Per-seat root noise. Self-play's targets are generated WITH noise,
+        // so measuring the teacher without it measures a search we never
+        // actually run.
+        seat_cfg.root_noise_frac = if p1 { noise_p1 } else { noise_p2 };
+        let policy = if p1 { policy_p1 } else { policy_p2 };
 
         let search = Ismcts {
             policy, decks, deck_slots: &deck_slots,

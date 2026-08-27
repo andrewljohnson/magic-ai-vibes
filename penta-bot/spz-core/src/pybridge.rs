@@ -551,20 +551,37 @@ fn ismcts_gate(
 /// seat one: 1.0 win, 0.5 draw, 0.0 loss, -1.0 unfinished.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
+#[pyo3(signature = (catalog_json, value_path, policy_path, iters_p1, iters_p2,
+                   c_puct, decklists_path, max_actions, threads, opponent, specs,
+                   value_path_p2 = String::new(), policy_path_p2 = String::new(),
+                   noise_p1 = 0.0, noise_p2 = 0.0))]
 fn az_h2h(
     py: Python<'_>,
     catalog_json: String, value_path: String, policy_path: String,
     iters_p1: usize, iters_p2: usize, c_puct: f64, decklists_path: String,
     max_actions: usize, threads: usize, opponent: String,
     specs: Vec<(String, String, u64)>,
+    value_path_p2: String, policy_path_p2: String,
+    noise_p1: f64, noise_p2: f64,
 ) -> PyResult<(usize, usize, usize, Vec<f64>)> {
-    let policy = build_policy(&catalog_json, &value_path, &value_path,
-                              0.0, 0, 1, 400, 999, 999)
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
-    let fh = crate::action_feat::PolicyHead::load(&policy_path)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(
-            format!("policy head {policy_path}: {e}")))?;
-    let policy = crate::policy::Policy { fast_head: Some(fh), ..policy };
+    let load_net = |vp: &str, pp: &str| -> PyResult<crate::policy::Policy> {
+        let pol = build_policy(&catalog_json, vp, vp, 0.0, 0, 1, 400, 999, 999)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let fh = crate::action_feat::PolicyHead::load(pp)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+                format!("policy head {pp}: {e}")))?;
+        Ok(crate::policy::Policy { fast_head: Some(fh), ..pol })
+    };
+    let policy = load_net(&value_path, &policy_path)?;
+    // Seat two may play a DIFFERENT net. Empty paths mean "same net", which
+    // is the mirror-at-different-iteration-counts case.
+    let policy2 = if value_path_p2.is_empty() && policy_path_p2.is_empty() {
+        None
+    } else {
+        let vp = if value_path_p2.is_empty() { &value_path } else { &value_path_p2 };
+        let pp = if policy_path_p2.is_empty() { &policy_path } else { &policy_path_p2 };
+        Some(load_net(vp, pp)?)
+    };
     let decks = decks::load(&decklists_path)
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let book = decks::DeckBook::load(&decklists_path)
@@ -581,6 +598,7 @@ fn az_h2h(
     };
     let n_threads = thread_count(threads, specs.len());
     let policy = std::sync::Arc::new(policy);
+    let policy2 = std::sync::Arc::new(policy2);
     let decks = std::sync::Arc::new(decks);
     let book = std::sync::Arc::new(book);
     let specs = std::sync::Arc::new(specs);
@@ -590,17 +608,20 @@ fn az_h2h(
     let parts: Vec<Vec<(usize, f64)>> = py.detach(|| {
         let mut handles = Vec::new();
         for t in 0..n_threads {
-            let (policy, decks, book, specs, cfg) =
-                (policy.clone(), decks.clone(), book.clone(),
+            let (policy, policy2, decks, book, specs, cfg) =
+                (policy.clone(), policy2.clone(), decks.clone(), book.clone(),
                  specs.clone(), cfg.clone());
             handles.push(std::thread::spawn(move || {
+                let p2: &crate::policy::Policy =
+                    policy2.as_ref().as_ref().unwrap_or(&policy);
                 let mut out = Vec::new();
                 let mut i = t;
                 while i < specs.len() {
                     let (d1, d2, seed) = &specs[i];
                     out.push((i, crate::az::play_h2h(
-                        &policy, &policy.tables, &decks, &book, d1, d2, *seed,
-                        &cfg, max_actions, iters_p1, iters_p2)));
+                        &policy, p2, &policy.tables, &decks, &book, d1, d2,
+                        *seed, &cfg, max_actions, iters_p1, iters_p2,
+                        noise_p1, noise_p2)));
                     i += n_threads;
                 }
                 out

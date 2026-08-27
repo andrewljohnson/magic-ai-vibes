@@ -389,12 +389,20 @@ def main():
         it = args.gate_iters or args.iters
         t1 = time.time()
         # Seats swapped between halves so seat bias cancels.
+        #
+        # This passed the SAME net for both seats until 2026-08-26 -- the
+        # old `az_h2h` could only vary iteration count, not the net -- so it
+        # played current-vs-current on one half and best-vs-best on the
+        # other and combined them as though that were a head-to-head. It
+        # read ~50% regardless of either net's strength, which is exactly
+        # what 182 rounds of it reported. Seat two's net is now explicit.
         a = spz.az_h2h(catalog, val_path, pol_path, it, it, 1.5,
                        "builtin-decklists.json", args.max_actions,
-                       args.threads, "greedy", specs[:half])
+                       args.threads, "greedy", specs[:half], bv, bp, 0.0, 0.0)
         b = spz.az_h2h(catalog, bv, bp, it, it, 1.5,
                        "builtin-decklists.json", args.max_actions,
-                       args.threads, "greedy", specs[half:])
+                       args.threads, "greedy", specs[half:],
+                       val_path, pol_path, 0.0, 0.0)
         scores = [v for v in a[3] if v >= 0] + [1.0 - v for v in b[3] if v >= 0]
         if not scores:
             return None
