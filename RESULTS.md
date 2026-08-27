@@ -133,7 +133,7 @@ clock. Neither is explained.
   without that the first gate promoted 26.7% as "best" over the 48.3% net
   it started from, and the ratchet then defended the worse one.
 
-## Protocol 29: a policy transfers, a value function does not
+## Protocol 29: the port was clean; the loop is what is stuck
 
 The engine moved seven wire epochs and the server refuses protocol 22.
 Porting was mechanical (`CardDefinitionId` privatised, `PermanentObservation
@@ -145,10 +145,22 @@ feature layout (`action_dim` 184 either way).
 But:
 
 * the **policy** transfers — 42.5% at 1 sim on p29 against 39.3% on p22
-* the **value function** does not — search goes flat, so the loop stalls
 * ~300 rounds of value-only retraining plateaued at 43.3%
 * a **cold start on p29 reached only 23.3%**, twenty points behind the
   transferred policy, at comparable compute
+
+We previously recorded here that "the value function does not transfer —
+search goes flat". **That was wrong**, and it was wrong for a specific
+reason worth keeping: it was measured at 16 sims, which is below this
+search's usefulness threshold. At 32 sims search on p29 is worth +8.3 ± 4.2,
+and both retraining runs above also ran every round at 16 sims. The p29
+value head separates siblings slightly *better* than the p22 one
+(0.029/26% vs 0.022/29%).
+
+What genuinely differs on p29: iterations reach an opponent decision 63% of
+the time at 32 sims against p22's 80%, and a game costs roughly 10x the wall
+clock. Still unexplained, and ROADMAP argues it is not worth restoring the
+p22 vendor to chase.
 
 ## Speed
 
