@@ -78,11 +78,45 @@ targets are actively harmful**, given that search itself plays better than
 the policy (55.8% ± 3.5, a measurement that only varies iteration count and
 so was unaffected by this bug).
 
-**The policy never fits its own targets.** Across all 180 rounds
-`pol_ent` sits at 1.38–1.45 while `tgt_ent` is ~0.92, and `pol_ce` ~1.35–1.41.
-The policy stays much flatter than the targets it is trained on and never
-converges toward them. Whether that is too little signal in the targets or
-too little fitting is the open question — see ROADMAP.
+**Why the targets are harmful: we train on a search we never measured.**
+Experiment 1 measured search with NO root noise. Self-play generates its
+targets with 25% Dirichlet noise, and that is a different, much worse
+search. Same net, same mirror harness, 32 sims against the raw 1-sim
+policy:
+
+| searching seat | score vs raw policy |
+|---|---|
+| 32 sims, noise-free | **55.8% ± 3.5** |
+| 32 sims + 0.25 Dirichlet — **what generates our targets** | **44.2% ± 3.8** |
+
+An 11.6-point swing that turns a +5.8 teacher into a −5.8 one. At 32 visits
+over ~6 actions, replacing a quarter of the prior with near-uniform noise
+does not perturb the search, it dominates it. AlphaZero uses the same 25%
+at 800 visits, where it is a small perturbation.
+
+**And add-k flattens the target past the prior.** The policy target is
+`(visits + k) / sum`, with k=1 — seven pseudo-visits on 32 real ones.
+Measured over ~10k searched decisions, entropy of the target against
+entropy of the prior that generated it:
+
+| root noise | add-k | target ent | prior ent | target is |
+|---|---|---|---|---|
+| 0.00 | 0.0 | 1.068 | 1.232 | sharper (−0.164) |
+| 0.00 | **1.0** | 1.327 | 1.232 | **flatter (+0.095)** |
+| 0.25 | 0.0 | 1.094 | 1.129 | sharper (−0.035) |
+| **0.25** | **1.0** — ours | 1.296 | 1.129 | **flatter (+0.167)** |
+
+Add-k flips the sign in both noise settings. A target flatter than the
+prior can only push the policy toward uniform: it is trained, every round,
+toward a blurred copy of itself. Noise narrows the sharpening margin
+(−0.164 → −0.035) but does not flip it; noise's damage is to the *play*
+that produces the visits, per the table above.
+
+Add-k was introduced to stop target entropy collapsing at **8** sims, where
+a 8-visit histogram really is too coarse to trust. It was never revisited
+when the budget moved to 32. Search still finds something real — it moves
+the top action on 8.0% of decisions noise-free — but that signal is
+delivered inside a distribution flatter than the prior.
 
 **Corrections to our own earlier record.** "+15 to +22 on protocol 22" was
 never paired: it compared 1-sim play of one net (`az_best`, 39.3%) with
