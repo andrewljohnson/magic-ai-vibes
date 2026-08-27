@@ -311,6 +311,19 @@ def main():
     lock = threading.Lock()
 
     def heartbeat_loop():
+        """Heartbeat forever. This thread MUST NOT die.
+
+        It did: one `TimeoutError` from an SSL read escaped both handlers
+        below -- it is an OSError, not a urllib URLError -- and killed the
+        thread. The process stayed up (the main thread blocks on the invite
+        queue), so every liveness check said "daemon running" while the
+        server had long since dropped us from its presence list. The bot was
+        offline for twelve hours and nothing reported it.
+
+        So: catch EVERYTHING, and make silence itself an alarm.
+        """
+        last_ok = time.time()
+        warned = False
         while not _shutdown:
             try:
                 with lock:
@@ -320,6 +333,7 @@ def main():
                                  {"token": tok, "done": done,
                                   "compatibility": compatibility(engine)})
                 hb["beats"] += 1
+                last_ok, warned = time.time(), False
                 if hb["beats"] % 360 == 1:      # roughly hourly
                     print(f"heartbeat ok ({hb['beats']} total)", flush=True)
                 for inv in reply.get("invites", ()):
@@ -329,10 +343,33 @@ def main():
                     print(f"heartbeat {error.code}: re-registering",
                           flush=True)
                     with lock:
+                        # `engine` matters: without it the manifest claims
+                        # protocol 22 and the server answers 409 forever.
                         hb["state"] = register(args.server, args.name,
-                                               args.deck)
-            except urllib.error.URLError as error:
-                print(f"server unreachable: {error}", flush=True)
+                                               args.deck, engine)
+                else:
+                    print(f"heartbeat {error.code}; retrying", flush=True)
+            except Exception as error:      # noqa: BLE001 -- see docstring
+                print(f"heartbeat failed ({type(error).__name__}: {error}); "
+                      f"retrying", flush=True)
+
+            stale = time.time() - last_ok
+            if stale > 45 and not warned:
+                # The server's presence window is 45s, so past this we are
+                # NOT listed and nobody can invite us.
+                print(f"OFFLINE: no successful heartbeat in {stale:.0f}s -- "
+                      f"the server has dropped us from its bot list",
+                      flush=True)
+                warned = True
+            if stale > 300:
+                print("re-registering after 5 minutes offline", flush=True)
+                try:
+                    with lock:
+                        hb["state"] = register(args.server, args.name,
+                                               args.deck, engine)
+                    last_ok, warned = time.time(), False
+                except Exception as error:      # noqa: BLE001
+                    print(f"re-register failed ({error})", flush=True)
             time.sleep(args.heartbeat)
 
     threading.Thread(target=heartbeat_loop, daemon=True).start()
