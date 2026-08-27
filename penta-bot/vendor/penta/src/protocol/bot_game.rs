@@ -14,20 +14,40 @@ use crate::{Action, Format, Game, GameResult, HandcraftedPolicy, PlayerId, Rando
 /// rebuilt by this engine. Objects may add members; arrays and scalar values
 /// retain their exact meaning.
 fn contains_rebuilt_value(supplied: &Value, rebuilt: &Value) -> bool {
+    contains_rebuilt_value_inner(supplied, rebuilt, false)
+}
+
+/// SPZ VENDOR PATCH (LOCAL ONLY): the same containment check, told whether
+/// the supplied observation came from a format-8 engine.
+///
+/// Format 9 added fields THROUGHOUT the observation, not only at the top
+/// level -- each battlefield permanent gained a `counters` list that a
+/// format-8 observation never carried anywhere. Those keys cannot be
+/// verified against a source that does not express them, so under `from_v8`
+/// a key the supplied object simply does not have is skipped.
+///
+/// This narrows the check, so be exact about what survives: every field the
+/// format-8 wire form DID carry is still compared byte for byte, arrays
+/// still have to be the same length, and a key present in both is still
+/// compared. What is given up is only the ability to verify state that the
+/// older format never transmitted.
+fn contains_rebuilt_value_inner(supplied: &Value, rebuilt: &Value, from_v8: bool) -> bool {
     match (supplied, rebuilt) {
         (Value::Object(supplied), Value::Object(rebuilt)) => {
             rebuilt.iter().all(|(field, value)| {
-                supplied
-                    .get(field)
-                    .is_some_and(|supplied| contains_rebuilt_value(supplied, value))
+                match supplied.get(field) {
+                    Some(supplied) => {
+                        contains_rebuilt_value_inner(supplied, value, from_v8)
+                    }
+                    None => from_v8,
+                }
             })
         }
         (Value::Array(supplied), Value::Array(rebuilt)) => {
             supplied.len() == rebuilt.len()
-                && supplied
-                    .iter()
-                    .zip(rebuilt)
-                    .all(|(supplied, rebuilt)| contains_rebuilt_value(supplied, rebuilt))
+                && supplied.iter().zip(rebuilt).all(|(supplied, rebuilt)| {
+                    contains_rebuilt_value_inner(supplied, rebuilt, from_v8)
+                })
         }
         _ => supplied == rebuilt,
     }
@@ -50,8 +70,14 @@ impl BotGame {
         hidden_json: &str,
         rollout_seed: u64,
     ) -> Result<Self, String> {
-        let observation: Value = serde_json::from_str(observation_json)
+        let mut observation: Value = serde_json::from_str(observation_json)
             .map_err(|error| format!("bad observation JSON: {error}"))?;
+        // SPZ VENDOR PATCH (LOCAL ONLY): the public server still emits
+        // checkpoint format 8. Upconvert before every gate below, so the
+        // parse AND the field-by-field rebuild comparison both see one
+        // format. See upconvert_checkpoint_v8.
+        let from_v8 = upconvert_checkpoint_v8(&mut observation)?;
+        let observation = observation;
         let hidden: Value = serde_json::from_str(hidden_json)
             .map_err(|error| format!("bad hidden-state JSON: {error}"))?;
         if observation["protocolVersion"].as_u64() != Some(u64::from(super::PROTOCOL_VERSION)) {
@@ -112,9 +138,10 @@ impl BotGame {
         };
         let rebuilt_observation: Value = serde_json::from_str(&rebuilt.observe_json(viewer))
             .map_err(|error| format!("rebuilt observation was invalid: {error}"))?;
-        if !contains_rebuilt_value(
+        if !contains_rebuilt_value_inner(
             &observation["legalActions"],
             &rebuilt_observation["legalActions"],
+            from_v8,
         ) {
             return Err("checkpoint rebuilt a different legal-action list".into());
         }
@@ -131,6 +158,20 @@ impl BotGame {
             // carries the server's, so this field-by-field comparison would
             // reject even after the two explicit gates pass. Skipped only
             // when the operator opted in to that exact fingerprint.
+            // SPZ VENDOR PATCH (LOCAL ONLY): format 9 ADDED open-counter
+            // fields to the observation (playerCounters, cardCounters, ...).
+            // A format-8 observation has none of them, so the rebuilt
+            // observation carries fields the supplied one cannot match.
+            //
+            // Allow that ONLY when the rebuild also found nothing there. If
+            // our engine derived counters the format-8 source never had,
+            // the two boards really do differ and this must still reject.
+            if from_v8
+                && observation.get(field).is_none()
+                && is_empty_addition(rebuilt_value)
+            {
+                continue;
+            }
             if field.as_str() == "simulationFingerprint" {
                 let accepted = std::env::var("SPZ_ACCEPT_FINGERPRINT").unwrap_or_default();
                 if !accepted.is_empty()
@@ -163,7 +204,9 @@ impl BotGame {
             });
             if !supplied_owned
                 .as_ref()
-                .is_some_and(|supplied| contains_rebuilt_value(supplied, rebuilt_value))
+                .is_some_and(|supplied| {
+                    contains_rebuilt_value_inner(supplied, rebuilt_value, from_v8)
+                })
             {
                 return Err(format!(
                     "checkpoint rebuilt a different public observation field: {field}"
@@ -477,5 +520,131 @@ impl BotGame {
     #[must_use]
     pub fn catalog_json(&self) -> String {
         catalog_json_for_format(&self.catalog, self.format).to_string()
+    }
+}
+
+/// SPZ VENDOR PATCH (LOCAL ONLY -- never propose upstream): accept a
+/// format-8 checkpoint by upconverting it to format 9.
+///
+/// The public server runs an engine OLDER than our pin and still emits
+/// checkpoint format 8, so every server observation was rejected with
+/// "checkpoint version 8 does not match 9" and the hosted bot silently
+/// played a 1-ply fallback.
+///
+/// Format 9 replaced each permanent's POSITIONAL `counters` array with
+/// sparse `{name, count}` entries. Converting needs format 8's index
+/// order, which is NOT the same as format 9's registry order: they agree
+/// through index 26 and then diverge, because 9 inserted the keyword
+/// counters at 27. Mapping by position into the v9 table would therefore
+/// put the wrong counters on permanents from index 27 on -- silently.
+/// This table is format 8's own `CounterKind::index()`/`name()` pairing,
+/// read out of the pre-bump revision, and it is checked empirically: a
+/// hosted game against Icatian Javelineers ("enters with a javelin
+/// counter") carries a 1 at index 1, which this table names "javelin".
+const V8_COUNTER_NAMES: [&str; 34] = ["+1/+1", "javelin", "muster", "charge", "loyalty", "spore", "-1/-1", "+1/+2", "credit", "tide", "-0/-2", "time", "doom", "carrion", "pupa", "sleep", "vitality", "corpse", "wind", "storage", "mining", "fuse", "fade", "depletion", "wish", "level", "finality", "flying", "lifelink", "age", "chorus", "silver", "stun", "rev"];
+
+fn upconvert_checkpoint_v8(observation: &mut Value) -> Result<bool, String> {
+    if observation.get("checkpoint").and_then(|c| c.get("version"))
+        .and_then(Value::as_u64) != Some(8)
+    {
+        return Ok(false);
+    }
+    let checkpoint = observation
+        .get_mut("checkpoint")
+        .expect("just read the checkpoint's version");
+    convert_positional_counters(checkpoint)?;
+    if let Some(map) = checkpoint.as_object_mut() {
+        map.insert(
+            "version".to_owned(),
+            Value::from(u64::from(crate::protocol::CHECKPOINT_VERSION)),
+        );
+    }
+    // Format 9 also added the OPEN `playerCounters` collection to the
+    // observation, keeping `poison`/`energy` as compatibility projections.
+    // A format-8 observation has no such field, so the rebuilt observation
+    // carries one the supplied observation cannot match and the
+    // field-by-field check rejects the world.
+    //
+    // Synthesise the empty collection -- but ONLY when there is genuinely
+    // nothing to represent. If this game has poison or energy on the table
+    // we do not know how format 9 would project it, and guessing would put
+    // a silently wrong board in front of the search. Fail instead.
+    if observation.get("playerCounters").is_none() {
+        for field in ["poison", "energy"] {
+            if let Some(Value::Array(values)) = observation.get(field) {
+                if values.iter().any(|v| v.as_u64().unwrap_or(0) != 0) {
+                    return Err(format!(
+                        "format-8 observation carries {field} counters; this \
+                         engine cannot project them into playerCounters"
+                    ));
+                }
+            }
+        }
+        if let Some(map) = observation.as_object_mut() {
+            map.insert(
+                "playerCounters".to_owned(),
+                Value::Array(vec![Value::Array(Vec::new()),
+                                  Value::Array(Vec::new())]),
+            );
+        }
+    }
+    Ok(true)
+}
+
+fn convert_positional_counters(value: &mut Value) -> Result<(), String> {
+    match value {
+        Value::Object(map) => {
+            let positional = matches!(map.get("counters"),
+                Some(Value::Array(items))
+                    if items.iter().all(serde_json::Value::is_number));
+            if positional {
+                let Some(Value::Array(items)) = map.get("counters") else {
+                    unreachable!("just matched a numeric counters array")
+                };
+                if items.len() > V8_COUNTER_NAMES.len() {
+                    return Err(format!(
+                        "format-8 checkpoint carries {} counter slots, more \
+                         than the {} this engine can name",
+                        items.len(),
+                        V8_COUNTER_NAMES.len()
+                    ));
+                }
+                let mut sparse = Vec::new();
+                for (index, item) in items.iter().enumerate() {
+                    let count = item.as_u64().unwrap_or(0);
+                    if count == 0 {
+                        continue;
+                    }
+                    let mut entry = serde_json::Map::new();
+                    entry.insert("name".to_owned(),
+                                 Value::from(V8_COUNTER_NAMES[index]));
+                    entry.insert("count".to_owned(), Value::from(count));
+                    sparse.push(Value::Object(entry));
+                }
+                map.insert("counters".to_owned(), Value::Array(sparse));
+            }
+            for (_, child) in map.iter_mut() {
+                convert_positional_counters(child)?;
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                convert_positional_counters(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// SPZ VENDOR PATCH (LOCAL ONLY): "the rebuild found nothing here", for
+/// fields format 9 added that format 8 never carried.
+fn is_empty_addition(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(items) => items.iter().all(is_empty_addition),
+        Value::Object(map) => map.is_empty(),
+        Value::Number(number) => number.as_u64() == Some(0),
+        _ => false,
     }
 }

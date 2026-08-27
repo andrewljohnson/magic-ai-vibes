@@ -392,6 +392,26 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                             turn_land_would_unlock[turn] = unl
                 if ctype == "CastSpell" and "PrecombatMain" in str(obs.get("step")):
                     turn_cast_precombat[turn] = True
+                # DISCARDING A LAND WITH THE LAND DROP STILL UNUSED.
+                #
+                # Reported from hosted play: the bot discarded Mishra's
+                # Factory on a turn it could have played it. Discarding a
+                # land you were still allowed to play is strictly worse than
+                # playing it -- the card leaves your hand either way, and
+                # playing it leaves a permanent on the battlefield. Distinct
+                # from `skipped_land_drop`, which is merely not playing one.
+                if ctype == "DiscardCards" and not turn_played_land.get(turn):
+                    lands = [name_of(card_def(obs, c))
+                             for c in (chosen.get("cards") or ())
+                             if CARDS.get(card_def(obs, c),
+                                          ("", "", ""))[2] == "Land"]
+                    if lands and turn in turn_land_offered_pre:
+                        flags["discarded_a_playable_land"] += 1
+                        if len(examples["discarded_a_playable_land"]) < 12:
+                            examples["discarded_a_playable_land"].append(
+                                f"game {g} T{turn}: discarded "
+                                f"{', '.join(lands)} with the land drop "
+                                f"still unused")
                 if ctype == "PlayLand":
                     turn_played_land[turn] = True
                     # A land played AFTER combat produces mana this turn

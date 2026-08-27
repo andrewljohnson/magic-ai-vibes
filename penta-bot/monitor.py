@@ -420,6 +420,12 @@ def playout_report():
 # "bug" is never correct play, "suspect" is usually wrong, "judgement" is
 # often defensible and reported only so the RATE can be watched.
 FLAG_META = {
+    "discarded_a_playable_land": (
+        "bug", "Discarded a land it could have played",
+        "Discarding a land while the turn's land drop is still unused. The "
+        "card leaves hand either way, so playing it is strictly better -- it "
+        "leaves a permanent behind. Reported from hosted play (Mishra's "
+        "Factory discarded on a turn it could have been played)."),
     "x_spell_cast_for_zero": (
         "bug", "X spell cast for X=0",
         "An X spell cast with X=0 deals nothing and the card is spent. "
