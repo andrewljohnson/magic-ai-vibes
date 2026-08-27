@@ -956,8 +956,15 @@ impl<'a> Ismcts<'a> {
         // sharper policy produces sharper visits, which train it sharper
         // still.
         if self.cfg.root_noise_frac > 0.0 && root_avail.len() > 1 {
-            let nz = dirichlet(root_avail.len(),
-                               self.cfg.root_noise_alpha, prng);
+            // alpha=1.0 over ~7 actions is very close to uniform, which is a
+            // lot of the prior to replace when 25% of it is noise. AlphaZero
+            // scales alpha ~ 10/branching. Overridable so it can be measured
+            // without a rebuild.
+            let alpha = std::env::var("AZ_NOISE_ALPHA").ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|a| *a > 0.0)
+                .unwrap_or(self.cfg.root_noise_alpha);
+            let nz = dirichlet(root_avail.len(), alpha, prng);
             let root_idx = tree.get_or_create(&[]);
             for (k, &i) in root_avail.iter().enumerate() {
                 tree.arena[root_idx].stats

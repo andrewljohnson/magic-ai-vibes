@@ -45,25 +45,38 @@ where the real opponent **is** our policy. Report both numbers going
 forward: the handcrafted-model gate (exploitation of one known opponent) and
 the own-model mirror (portable strength).
 
-**Whether the policy absorbs what search finds is now UNKNOWN — the
-measurement that said it does not was broken.** 182 rounds with promotion
-gated on a "mirror match" reported 0 promotions, 2 reverts, and a best net
-byte-identical to its warm start. That mirror did not do what it claimed:
-`az_h2h` built one policy and used it for BOTH seats, varying only the
-iteration count, so `mirror_vs_best` played current-vs-current on half the
-games and best-vs-best on the other half and combined them as if the halves
-were opposite seats of one head-to-head. Both halves are symmetric by
-construction, so it reads ~50% however strong either net is — which is
-exactly what it reported, including 50.0 twice to the decimal. The two
-reverts were seat/deck noise.
+**Training does not fail to improve the net. It destroys it.** Measured
+correctly — a net per seat, seats swapped, 32 sims both sides, greedy
+in-tree opponent:
 
-So "the policy never absorbs search" is **retracted**, and with it the
-claim that the ratchet was not the problem. `az_h2h` now takes a net per
-seat; a correctly-paired current-vs-warm-start measurement is running.
+| comparison | score | games |
+|---|---|---|
+| warm start vs ITSELF (symmetry check) | 42.4% ± 6.1 | 66 |
+| **`az_mir` round 182 vs its own warm start** | **27.3% ± 3.4** | 172 |
 
-The handcrafted gate over those rounds is a real measurement and it
-declined: 45.8 → 45.0 → 40.0 → 34.6 → 46.7 → 45.0 → 41.7 → 35.8 → 37.9,
-every reading below the 45.0% warm-start floor.
+After 182 rounds and ~8700 self-play games the net loses at better than
+2-to-1 to the checkpoint it started from. The handcrafted gate said the
+same thing more quietly — nine gates, every one below the 45.0% floor,
+45.8 → 37.9.
+
+**A broken gate hid it the whole time.** The mirror gate meant to catch
+exactly this reported ~50% for 182 rounds and never once reverted for
+cause. `az_h2h` built ONE policy and used it for BOTH seats, varying only
+the iteration count, so `mirror_vs_best` played current-vs-current on half
+the specs and best-vs-best on the other half and combined them as though
+the halves were opposite seats of one head-to-head. Both halves are
+symmetric by construction. The tell was 50.0% twice to the decimal; the
+symmetry check above reproduces it (42.4% ± 6.1, statistically 50%).
+
+Two earlier claims die with it: "the policy never absorbs what search
+finds" (it absorbs something, and that something is harmful) and "the
+ratchet was not the problem" (it was never tested — the gate it ran on
+could not see a difference).
+
+So the open question is no longer whether the loop climbs. It is **why the
+targets are actively harmful**, given that search itself plays better than
+the policy (55.8% ± 3.5, a measurement that only varies iteration count and
+so was unaffected by this bug).
 
 **The policy never fits its own targets.** Across all 180 rounds
 `pol_ent` sits at 1.38–1.45 while `tgt_ent` is ~0.92, and `pol_ce` ~1.35–1.41.
