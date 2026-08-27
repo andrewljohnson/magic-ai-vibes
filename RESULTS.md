@@ -12,7 +12,7 @@ exact; the ±SE only matters for generalising to other opponents.
 
 ---
 
-## Search is worth +8.3 — but not the search that trains us
+## Search beats the policy. The policy does not absorb it.
 
 AlphaZero improves only while **search beats its own prior**. Measured
 PAIRED on identical games (the gate is deterministic, so the per-game score
@@ -24,37 +24,64 @@ against its own 1-sim play:
 | 22, `deploy_v1` | 43.3% | 46.7% (+3.3 ± 4.3) | 55.0% (**+11.7 ± 3.8**) |
 | 29, `deploy_p29` | 42.5% | 45.0% (−1.7 ± 6.1) | 50.8% (**+8.3 ± 4.2**) |
 
-Two things follow, and the second is the important one.
-
 **Search needs more than 16 sims.** At 16 it is inside the noise on p22 and
-negative on p29; at 32 it is worth +11.7 and +8.3. There is a threshold.
+negative on p29; at 32 it is worth +11.7 and +8.3. There is a threshold, and
+FPU is not what causes it (below).
 
-**The in-tree opponent model decides whether search teaches at all.** All of
-the above uses the HANDCRAFTED in-tree opponent, which is what `az_gate`
-runs. Self-play (`az_stream_episodes`) uses GREEDY. Same net, same 120
-games, same 32 sims:
+**In self-play's own domain, search is a real teacher.** Mirror match,
+alternating seats, same seeds, both seats our own net, greedy in-tree
+opponent — exactly the configuration self-play trains on. 32 sims against
+the raw 1-sim policy, 207 finished games:
 
-| in-tree opponent | score | paired vs 1 sim |
-|---|---|---|
-| handcrafted | 50.8% | **+8.3 ± 4.2** |
-| **greedy — what self-play uses** | 40.0% | **−2.5 ± 3.8** |
+> **55.8% ± 3.5**
 
-A 10.8-point swing. **The search that generates our training targets is
-worse than no search**, so every round distils a teacher weaker than the
-student. That is the direct explanation for the plateau: training at 32
-sims from the 50.8% net still walked 49.2 → 43.3 → 40.0 → 30.8 over 120
-rounds, reverting every gate.
+This retired an earlier conclusion of ours. We had measured the greedy
+in-tree model at **−2.5 ± 3.8** *against the handcrafted bot* and concluded
+"self-play distils a teacher weaker than its student". That measurement is
+real but answers a different question: against the handcrafted bot the
+greedy model is simply the wrong model of the opponent, and a best-response
+to the wrong opponent losing to no search says nothing about self-play,
+where the real opponent **is** our policy. Report both numbers going
+forward: the handcrafted-model gate (exploitation of one known opponent) and
+the own-model mirror (portable strength).
 
-Caveat on the comparison: the benchmark opponent IS the handcrafted bot, so
-part of that 10.8 is simply "model the opponent you actually face". In
-self-play the real opponent is our own policy. But the training implication
-stands on its own — the configuration that produces our targets is the one
-where search does not beat its prior.
+**But the policy does not absorb what search finds.** 180 rounds, ~8600
+self-play games, promotion gated on the mirror match rather than on the
+handcrafted bot:
+
+| | |
+|---|---|
+| promotions | **0** |
+| reverts | 2 |
+| best net after 180 rounds | **byte-identical to the warm start** |
+| mirror (current vs best) | 35.3, 50.0, 50.0, 36.4, 50.0, 45.5, 51.5, 53.1 |
+| handcrafted gate | 45.8 → 45.0 → 40.0 → 34.6 → 46.7 → 45.0 → 41.7 → 35.8 |
+
+The mirror hovers at 50%: the trained net is indistinguishable from the net
+it started at. So the loss is **between the search and the gradient** — the
+targets, or the fit — not in the search.
+
+This also ruled out the leading theory for the decline, which was that the
+ratchet reverts on the *handcrafted* gate and so discards nets that genuinely
+improve at self-play. Promoting on the mirror instead changed nothing: nets
+are not being wrongly discarded, they are not improving. Worth one run to
+learn.
+
+The mirror gate does disagree with the handcrafted gate, in both directions —
+at round 19 the gate read 45.8% (above the 45.0% floor, so it would have
+**promoted**) while the mirror read 35.3%.
+
+**The policy never fits its own targets.** Across all 180 rounds
+`pol_ent` sits at 1.38–1.45 while `tgt_ent` is ~0.92, and `pol_ce` ~1.35–1.41.
+The policy stays much flatter than the targets it is trained on and never
+converges toward them. Whether that is too little signal in the targets or
+too little fitting is the open question — see ROADMAP.
 
 **Corrections to our own earlier record.** "+15 to +22 on protocol 22" was
 never paired: it compared 1-sim play of one net (`az_best`, 39.3%) with
-32-sim play of another (`deploy_v1`, 54.3%). And "search is not a teacher on
-protocol 29" was an artifact of measuring at 16 sims.
+32-sim play of another (`deploy_v1`, 54.3%). "Search is not a teacher on
+protocol 29" was an artifact of measuring at 16 sims. And "self-play distils
+a weaker teacher" is withdrawn, as above.
 
 ## Ruled out, with evidence
 
@@ -68,6 +95,9 @@ on p29, plus targeted experiments:
 | apply / opponent-model failures | **no** — 0 of each |
 | the value head | **no** — a rollout leaf is far *worse* (−15.0 ± 7.1) |
 | depth cap, terminal handling | **no** — 3 hits in 400k iterations |
+| first-play urgency (FPU) | **no gain** — +0.0 ± 3.7 at 16 sims (c_puct 1.5); −4.2 ± 3.6 at c_puct 2.5 |
+| the ratchet discarding good nets | **no** — promoting on the mirror instead changed nothing (0 promotions in 180 rounds) |
+| clock-truncated games poisoning labels | **already handled** — `r == -2` sets `keep=False`; only decision-cap (`-1`) games are scored as losses |
 
 What does differ on p29: iterations reach an opponent decision 63% of the
 time at 32 sims against p22's 80%, and a game costs roughly 10x the wall
@@ -137,6 +167,45 @@ Rejected after measurement: catalog cloning (an `Arc` bump), JSON observe,
 table construction, the in-tree opponent model, descent depth, the
 reconstruction checkpoint (~1%). The node-state cache is worth 1.25x at
 `redeterminize_m=4`; m=8 buys 1.8x but costs 6.7 points of strength.
+
+## Deployment: the hosted bot was never searching
+
+For four days the hosted bot played a raw 1-ply pick. Three separate
+fingerprint gates rejected every server observation and one bare
+`except Exception` in `hosted_policy.py` swallowed all three, so the only
+symptom was weak play. The tell was in the transcripts all along: `median
+0ms, max 1ms` per move.
+
+`simulationFingerprint` hashes **every simulation source file plus the
+dependency closure**, so any patch of ours changes it — our additive
+accessors included. It also pins an exact upstream revision, and three
+different values are in play:
+
+| build | fingerprint |
+|---|---|
+| our pinned upstream `12366c87` | `99d5d284…` |
+| upstream HEAD (156 commits later) | `ae23099d…` |
+| **what the server runs** | `267b227d…` |
+
+So no build of ours can ever match the server, and rebuilding the engine
+from our patched vendor only moves the mismatch (it fixes engine ↔
+`spz_core` and breaks engine ↔ server).
+
+The fix is an opt-in `SPZ_ACCEPT_FINGERPRINT` naming the exact fingerprint
+to trust, applied in all three places that check it: the observation gate,
+the checkpoint gate, and the field-by-field rebuild comparison. The third
+normalises the fingerprint **string only** inside the nested checkpoint and
+still compares every other byte of game state, so the integrity check that
+would catch genuine rules drift stays armed. LOCAL ONLY — never propose
+upstream.
+
+Verified after the fix: 768 iterations over 6 decisions, 0 determinization
+errors, 0.66s median per move at 128 sims (room clock is 60s), so the bot
+now runs at 512 sims hosted.
+
+**The lesson is the one this project keeps relearning:** a fallback that
+does not announce itself is indistinguishable from working code. Search
+failures now print.
 
 ## What the bot does wrong
 

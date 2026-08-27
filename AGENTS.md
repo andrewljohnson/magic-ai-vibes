@@ -19,6 +19,14 @@ workload, and re-check them whenever the search budget changes.
 scored 2.1% where the same net gated 42.5%. It looked like bad play. Prefer
 an error.
 
+*This one recurred four days later, in the same file.* A bare
+`except Exception` in `AzSearchPolicy.choose` swallowed three different
+fingerprint rejections, and the hosted bot played 1-ply for four days. The
+only symptom was weak play; the tell was `median 0ms` per move in the
+transcripts. **A fallback must announce itself.** Search failures now
+print, and the counters (`spz_core.search_stats()`) are the way to prove a
+search actually ran: if `iters_started` did not move, it did not.
+
 **Measure on the code path that ships.** A value-head diagnostic that
 featurised without deck context reported 92.6% of decisions "blind"; on the
 real native path it was 56.5%. The conclusion survived, the number was five
@@ -48,12 +56,31 @@ baseline sat in five files for months. It was the lower bound of a
 confidence interval from an abandoned C++ project. Parity is 50%. Every
 chart drawn against it flattered its run by ~18 points.
 
+**A test built on stale inputs tests nothing.** Replaying four-day-old
+transcripts through the current build "passed" 12/12 — because those were
+protocol-22 observations and the failure was elsewhere. Two of that day's
+path checks also used the wrong path prefix and silently matched nothing,
+which read as "no drift". Check that a test can fail before trusting that
+it passed.
+
+**`pkill -f <script>` matches the shell running the command.** Killing
+daemons by pattern killed the calling shell mid-command, twice, which read
+as a mystery exit code. Use `pgrep -f '[h]osted_bot.py'` or a pidfile.
+
 ## Invariants
 
 * `aac_lockstep.py` holds native rows bit-identical to the Python path.
   Any change to the native runner must keep it passing.
 * Feature slots come from the sorted set of LEGAL card definitions.
   Changing legality changes the layout and invalidates every checkpoint.
-* Vendor patches in `vendor/penta` are marked `SPZ VENDOR PATCH`. They
-  change penta's `simulationFingerprint`, so an engine built elsewhere will
-  refuse observations from this one.
+* Vendor patches in `vendor/penta` are marked `SPZ VENDOR PATCH`. The
+  fingerprint hashes every simulation source file **and the dependency
+  closure**, so ANY patch changes it — additive accessors included — and it
+  also pins an exact upstream revision. Consequences: an engine built
+  elsewhere refuses observations from this one, and no build of ours ever
+  matches the public server. Hosted play therefore requires
+  `SPZ_ACCEPT_FINGERPRINT`; the three LOCAL-ONLY patches implementing it
+  must never be proposed upstream.
+* Keep the rebuild integrity check armed. The fingerprint-acceptance patch
+  normalises that string only and still compares every other byte of game
+  state, so genuine rules drift between us and the server is still caught.

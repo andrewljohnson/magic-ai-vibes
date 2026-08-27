@@ -2,63 +2,88 @@
 
 ## The problem, in one paragraph
 
-We have a 61% bot on protocol 22 that cannot be deployed, and a 43% bot on
-protocol 29 that can. Training on p29 has not improved past 43.3% because
-**search there has no measurable value over its own prior**
-(+0.8 points, inside a ±4.5 gate), and an AlphaZero
-loop climbs only at the rate its search beats its policy. On p22 that
-number was +15 to +22.
+Search beats our policy — **+55.8% ± 3.5** in a mirror match at 32 sims
+against the raw policy, measured in exactly the configuration self-play
+trains on. But the policy never absorbs it: 180 rounds and ~8600 games of
+self-play produced **zero promotions**, and the best net is still
+byte-identical to the net the run started from. The mirror score hovers at
+50%. So the teacher is good and the student does not learn, which puts the
+loss **between the search and the gradient** — in the targets, or in the
+fit.
 
-## The open problem
+## The open problem, and how to split it
 
-Self-play generates its training targets with the GREEDY in-tree opponent
-model, and with that model search is **worse than no search** (−2.5 ± 3.8
-at 32 sims). With the handcrafted model the same search is **+8.3 ± 4.2**.
-So the loop distils a teacher weaker than its student, every round, which is
-why training degrades the net on every configuration tried.
+Three measurements, each on one round of self-play data with no training.
+They decide everything below, and none of them needs a training run.
 
-The gate uses handcrafted. Self-play cannot: the handcrafted bot is scripted
-play knowledge, and the pure-build rule forbids training against it.
+1. **How much signal is in the target?** Per searched decision, compute
+   `KL(visit target || policy prior)` and how often search's argmax differs
+   from the prior's argmax. If argmax differs on only ~5% of decisions and
+   the KL is small, the policy gradient is mostly noise.
 
-So the question is how to get a self-play in-tree opponent that is actually
-good, without importing handcrafted knowledge. Candidates, none tested:
+2. **Does the search that generates the targets beat the prior?**
+   Experiment 1 was noise-free, but training targets come from 32 sims with
+   25% Dirichlet noise (α=1, near-uniform over ~7 actions) *plus* add-k=1
+   (7 pseudo-visits on 32 visits — about 18% more uniform). Re-run the
+   mirror h2h with `root_noise=0.25` on the 32-sim seat. If noisy search
+   ≈ prior, the targets carry nothing and the policy is being trained
+   toward a flattened version of itself — which is exactly "gets a bit
+   worse at r19, then hovers at 50%".
 
-* Sample the opponent's move from the policy instead of taking its greedy
-  argmax — cheap, and greedy-argmax self-play is known to be brittle.
-* Give the opponent a small search of its own (expensive; the descent
-  already dominates cost).
-* Use the previous best checkpoint as the opponent model rather than the
-  live policy.
+   Supporting evidence already in hand: across all 180 rounds `pol_ent`
+   sits at 1.38–1.45 against `tgt_ent` ~0.92. The policy stays flatter than
+   its targets and never converges.
 
-## Then
+3. **Is the policy fitting at all?** Train on a fixed buffer for 20 epochs
+   and re-gate the mirror. If overfitting to the search targets still does
+   not beat the warm start, the targets are the problem and not the
+   optimiser. If it does beat it, the fix is more epochs and more games per
+   generation — 960 games per promotion window is tiny for AlphaZero — and
+   not any search change.
 
-1. **First-play urgency.** Unvisited actions take Q=0, the worst score on a
-   [0,1] scale, so a confident prior never explores at a small budget. This
-   is the likeliest reason the threshold sits between 16 and 32 sims.
-   FPU = parent mean Q.
-2. **Why p29 costs ~10x p22 per game**, and reaches an opponent decision on
-   63% of iterations against 80%. Unexplained.
-3. **Representation.** Bag-of-cards features cannot express a pairwise
+## The fixes those measurements will point at
+
+* Noise 0.25 → 0.1, α closer to 0.3; add-k 0 at 32 sims (add-k was a fix
+  for 8-sim search and was never revisited).
+* Keep the root noise out of the prior the policy is trained toward. A
+  second noise-free pass at the root is too expensive, so cut the noise.
+* 2–4 epochs per round, promotion window ≥ 2000 games.
+
+## After the signal question is settled
+
+1. **Expand, then play the turn out.** On a first visit, continue with the
+   prior's argmax to the opponent's next decision before leaf-evaluating,
+   so every iteration sees its combat resolve. This improves the *teacher*,
+   and the current problem is the student — so it is not next.
+2. **Representation.** Bag-of-cards features cannot express a pairwise
    creature matchup; the bot attacks into strictly better blockers 0.86
    times a game. Deep-sets pooling over permanents. Invalidates every
    checkpoint.
+3. **Why p29 costs ~10x p22 per game** and reaches an opponent decision on
+   63% of iterations against 80%. Do **not** restore the p22 vendor for
+   this — the p29 `our_nodes/iter` counter already answers what matters,
+   and restoring p22 contaminated the tree once already.
 
 ## Cheaper things worth doing
 
-* Cap the wall-clock guards far above the workload, or remove them. They
-  have silently decided four separate measurements.
 * Gate on more games. 120 games is ±4.5; most of our arm comparisons were
   inside the noise.
+* Cap the wall-clock guards far above the workload, or remove them. They
+  have silently decided four separate measurements.
 * The `apply_enumerated` PR is pushed to `andrewljohnson/penta` branch
-  `apply-enumerated` and needs opening. ~30% of search time.
+  `apply-enumerated` and still needs opening. ~30% of search time.
 
 ## Tried and rejected — do not redo
 
 | idea | outcome |
 |---|---|
-| Cold start on p29 | 23.3% after ~500 rounds, 20 points behind the transferred policy — but every round of it ran at 16 sims |
+| Promoting on the mirror instead of the handcrafted gate | 0 promotions in 180 rounds — the ratchet was not the problem |
+| First-play urgency | +0.0 ± 3.7 at 16 sims; −4.2 ± 3.6 at c_puct 2.5 |
+| Sampled in-tree opponent instead of greedy argmax | no measurable change at the gate |
+| Truncation-as-loss as the cause of the decline | clock timeouts were already dropped; only decision-cap games score as losses |
+| Cold start on p29 | 23.3% after ~500 rounds, 20 points behind the transferred policy — but every round ran at 16 sims |
 | Value-only retraining on p29 | plateaus at 43.3% after ~300 rounds, also at 16 sims |
 | 8 sims for throughput | collapses the policy AND runs slower (degraded play grinds games out) |
 | Rollout leaf instead of the value net | −15.0 ± 7.1; the value head is much better than rollouts |
 | Raising `redeterminize_m` to 8 | 1.8x faster, −6.7 points |
-| Bigger nets before the loop works | pointless while search is not a teacher |
+| Bigger nets before the loop works | pointless while the policy does not absorb search |

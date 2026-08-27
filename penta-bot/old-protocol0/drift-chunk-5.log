@@ -1,3 +1,0 @@
-engine 0.1.0 protocol 0; features 675 (128 defs x 5 zones + 35 scalars)
-/opt/homebrew/Cellar/python@3.13/3.13.3/Frameworks/Python.framework/Versions/3.13/lib/python3.13/multiprocessing/resource_tracker.py:301: UserWarning: resource_tracker: There appear to be 6 leaked semaphore objects to clean up at shutdown: {'/mp-9nzbd6fr', '/mp-bb9ikqou', '/mp-p_rfj5ev', '/mp-ab5mtpfp', '/mp-6o28mia7', '/mp-eio2hhxx'}
-  warnings.warn(

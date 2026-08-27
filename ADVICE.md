@@ -1,3 +1,61 @@
+# 2026-08-26 (evening) — the mirror result changes the picture
+
+The mirror result changes the picture and the truncation hypothesis does not
+fit it well.
+
+## Read of the result
+
+Experiment 1 says search beats the policy (55.8%). The mirror says the
+policy never absorbs it — and at r19 it got *worse* (35.3%) before hovering
+at 50%. Search improving play while training does not move the net means
+the loss is **between the search and the gradient**: the targets, or the
+fit. That is a data/signal problem, but not the one proposed.
+
+**Truncation-as-loss is a weak candidate.** It only touches the value
+labels; the mirror shows the *policy* is not improving. And `az_train.py`
+already drops clock timeouts (`r == -2` -> `keep=False`); only decision-cap
+games (`-1`) are scored as losses. Check the `drop` column — if fin=85-90%
+is mostly clock, those games are already out. Run the drop arm in parallel
+if there is idle compute, but do not make it the next serial step.
+
+## What to measure first (one round of self-play data, no training)
+
+1. **How much signal is in the target?** Per searched decision:
+   `KL(visit target || policy prior)`, and whether search's argmax differs
+   from the prior's argmax. If argmax differs on ~5% of decisions and the KL
+   is small, the policy gradient is mostly noise.
+2. **Does the search that generates targets beat the prior?** Experiment 1
+   was noise-free. Training targets come from 32 sims with 25% Dirichlet
+   (alpha=1, ~uniform over 7 actions) plus add-k=1 (7 pseudo-visits on 32 =
+   ~18% more uniform). Re-run the h2h with `root_noise=0.25` on the 32-sim
+   seat. If noisy search ~= prior, the targets carry nothing and the policy
+   is being trained toward a flattened version of itself — which is exactly
+   "gets a bit worse, then hovers at 50%". Check `pol_ent` over rounds: if
+   it drifts up, that is the signature.
+3. **Is the policy fitting at all?** Train on a fixed buffer for 20 epochs
+   and re-gate the mirror. If overfitting to the search targets still does
+   not beat the warm start, the targets are the problem, not the optimiser.
+   If it does beat it, the fix is more epochs / more games per generation
+   (960 games per promotion window is tiny for AZ) rather than any search
+   change.
+
+## Likely fixes, in the order the measurements will point
+
+- Noise 0.25 -> 0.1 and alpha closer to 0.3; add-k 0 at 32 sims (it was a
+  fix for 8 sims).
+- Train the policy toward visits with the noise not mixed into the tree's
+  prior at the root (computing visits from a second noise-free pass at the
+  root is too expensive; instead just cut the noise).
+- 2-4 epochs per round, promotion window >= 2000 games.
+
+Skip #4 (p22 vendor); the p29 `our_nodes/iter` counter already answers what
+matters. "Play the turn out on expansion" stays worth doing but **after**
+the signal question is settled — it improves the teacher, and the current
+problem is that the student is not learning from a teacher we have now
+shown is good.
+
+---
+
 # 2026-08-26 — answers to FOR_FABLE.md, and what to do today
 
 Read FOR_FABLE.md, the corrected RESULTS/ROADMAP, and the diff since

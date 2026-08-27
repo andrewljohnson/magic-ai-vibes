@@ -16,20 +16,27 @@ rate, so anything below 50% is losing.**
 | net | protocol | 32 sims | 128 sims |
 |---|---|---|---|
 | `checkpoints/deploy_v1` | 22 | **54.3%** | **61.0%** |
-| `checkpoints/deploy_p29` | 29 | 43.3% (16 sims) | not measured |
+| `checkpoints/deploy_p29` | 29 | 50.8% | not measured |
 
 The strong net plays protocol 22. **The public server requires protocol 29
 and refuses to register anything else**, so the deployable net is the weaker
-one. Closing that gap is the open problem.
+one.
+
+**The open problem is that the loop does not climb.** Search beats our
+policy — 55.8% ± 3.5 in a mirror match at 32 sims, measured in exactly the
+configuration self-play trains on — but 180 rounds and ~8600 games produced
+zero promotions and left the best net byte-identical to its warm start. The
+teacher is good; the student does not learn from it. See ROADMAP.
+
+A bot is deployed and playing on the public server at 512 sims per move.
+Hosted play needs `SPZ_ACCEPT_FINGERPRINT` set to the server's advertised
+`simulationFingerprint`; without it every observation is rejected and the
+bot silently plays a 1-ply pick. See RESULTS.
 
 **The protocol-22 numbers are historical.** `spz-core` now embeds the
-protocol-29 engine, so they cannot be re-measured as the tree stands. To
-reproduce them, restore the old engine and rebuild:
-
-```sh
-git checkout 62948bf~1 -- penta-bot/vendor/penta   # the protocol-22 vendor
-cd penta-bot/spz-core && cargo build --release
-```
+protocol-29 engine, so they cannot be re-measured as the tree stands.
+Restoring the p22 vendor contaminated the tree once; ROADMAP explains why
+it is not worth redoing.
 
 ## Architecture
 
@@ -62,12 +69,14 @@ the value head at the leaf, and the visit counts become the policy target.
 The opponent is a fixed in-tree model, never branched.
 
 **Scale.** Protocol 22 reached 61% after roughly 100k self-play games.
-Protocol 29 has had roughly 25k and sits at 43%.
+Protocol 29 has had roughly 34k and sits at 50.8% at 32 sims.
 
 ## What it is
 
-* **Engine** — `vendor/penta`, built into `spz-core`. Carries four local
-  patches, each marked `SPZ VENDOR PATCH`.
+* **Engine** — `vendor/penta`, built into `spz-core`. Carries eleven local
+  patches, each marked `SPZ VENDOR PATCH`. Eight are additive accessors
+  proposed upstream; three are the LOCAL-ONLY fingerprint acceptance that
+  hosted play needs.
 * **`spz-core/`** — Rust: features, ISMCTS search, self-play generation,
   gating. Exposed to Python through PyO3.
 * **`az_train.py`** — the AlphaZero loop. Generation in Rust, learning in
@@ -87,6 +96,14 @@ PENTA_ENGINE_DIR=engine-p29 PENTA_CATALOG=pinned-catalog-p29.json \
 AZ_GAME_SECS=45 AZ_GATE_SECS=300 \
 python3 az_train.py --iters 16 --games 48 --threads 14 \
     --gate-every 20 --gate-games 120 --save-prefix run
+
+# host it on the public server (search needs the server's fingerprint)
+FP=$(curl -s https://penta.lacker.workers.dev/_bots \
+     | python3 -c "import json,sys;print(json.load(sys.stdin)['compatibility']['simulationFingerprint'])")
+PENTA_ENGINE_DIR=engine-p29 PENTA_CATALOG=pinned-catalog-p29.json \
+SPZ_ACCEPT_FINGERPRINT=$FP \
+python3 hosted_bot.py --server https://penta.lacker.workers.dev \
+    --engine-dir engine-p29 --az deploy_p29 --az-iters 512
 
 # watch what it actually does
 PENTA_ENGINE_DIR=engine-p29 python3 playout_log.py --net checkpoints/deploy_p29

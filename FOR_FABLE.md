@@ -1,97 +1,53 @@
-# Follow-up for review
+# Brief: where penta-bot stands
 
-`ADVICE.md` was followed in order. Its method found the cause; its suspect
-was wrong. Here is what it produced and where we are stuck.
+Read `RESULTS.md` for the findings record, `ROADMAP.md` for the plan,
+`AGENTS.md` for the traps. This is the short version and the open question.
 
-## Your suspects, tested and cleared
+## The state
 
-Counters on every silent failure you listed (`spz_core.search_stats()`),
-protocol 29, 32 sims, 400k determinizations:
+* Search **is** a real teacher. Mirror match, alternating seats, same seeds,
+  both seats our own net, greedy in-tree opponent — exactly what self-play
+  trains on — 32 sims vs the raw 1-sim policy: **55.8% ± 3.5** over 207
+  games.
+* The policy **never absorbs it**. 180 rounds, ~8600 self-play games,
+  promotion gated on that same mirror match: **0 promotions**, 2 reverts,
+  best net byte-identical to the warm start. The mirror hovers at 50%.
+* The policy never fits its targets either: `pol_ent` 1.38–1.45 against
+  `tgt_ent` ~0.92, flat across all 180 rounds.
+* Deployed and playing on the public server at 512 sims/move.
 
-```
-det_ok 386816   det_err 0
-opp_action_none 0   opp_apply_fail 0   our_apply_fail 0
-depth_cap 0   terminal 15490   our_nodes/iter 4.0
-iterations reaching an opponent decision: 63%
-```
+## What the last round of advice settled
 
-| suspect | verdict |
+| question | answer |
 |---|---|
-| determinization failing | **no** — 0 errors in 400k |
-| determinization implausible | **no** — `AZ_ORACLE_WORLD=1` (true hidden state) changes the result not at all |
-| apply / opponent-action failures | **no** — 0 of each |
-| value head | **no** — a rollout leaf is far *worse* (−15.0 ± 7.1) |
+| Is search a weaker teacher than the student? | **No** — that measurement was against the handcrafted bot, the wrong opponent model. Withdrawn. |
+| Is the ratchet discarding genuinely-improved nets? | **No** — promoting on the mirror instead changed nothing. |
+| Is FPU why the 16/32-sim threshold exists? | **No** — +0.0 ± 3.7 at 16 sims; −4.2 ± 3.6 at c_puct 2.5. |
+| Is truncation-as-loss poisoning the labels? | **Mostly no** — clock timeouts were already dropped; only decision-cap games score as losses. |
 
-Experiment B needed `rollout_to_end` fixed first: it scored via
-`greedy_index`, cloning and re-featurising per action, which is why it had
-never produced a number in three attempts.
+## The open question
 
-## What the paired measurement found instead
+The teacher is good and the student does not learn, so the loss is between
+the search and the gradient — the targets, or the fit. Three measurements
+split it, none needing a training run:
 
-Your insistence on pairing is what cracked it. 120 games, each net against
-its own 1-sim play:
+1. `KL(visit target ‖ policy prior)` per searched decision, and how often
+   search's argmax differs from the prior's. Small KL + rare disagreement =
+   the gradient is mostly noise.
+2. Re-run the mirror h2h with `root_noise=0.25` on the searching seat. The
+   targets carry 25% Dirichlet (α=1 over ~7 actions) plus add-k=1 (~18%
+   more uniform on 32 visits). If noisy search ≈ prior, the policy is being
+   trained toward a flattened version of itself.
+3. Train on a fixed buffer for 20 epochs and re-gate the mirror. If
+   overfitting the targets still cannot beat the warm start, the targets are
+   the problem and not the optimiser.
 
-| protocol / net | 1 sim | 16 sims | 32 sims |
-|---|---|---|---|
-| 22, `deploy_v1` | 43.3% | +3.3 ± 4.3 | **+11.7 ± 3.8** |
-| 29, `deploy_p29` | 42.5% | −1.7 ± 6.1 | **+8.3 ± 4.2** |
+## Constraints worth knowing before advising
 
-Search works on both protocols above ~16 sims. Two of our recorded findings
-were wrong: "+15 to +22 on p22" was never paired (1-sim of one net vs
-32-sim of another), and "search is not a teacher on p29" was a 16-sim
-artifact.
-
-**But retraining at 32 sims still degraded monotonically** — 49.2, 43.3,
-40.0, 30.8 over 120 rounds from the 50.8% net, every gate reverted. So the
-budget was not the whole story.
-
-## The actual blocker
-
-The in-tree opponent model. Same net, same games, same 32 sims:
-
-| in-tree opponent | score | paired vs 1 sim |
-|---|---|---|
-| handcrafted (`az_gate`) | 50.8% | **+8.3 ± 4.2** |
-| **greedy (`az_stream_episodes`)** | 40.0% | **−2.5 ± 3.8** |
-
-**Self-play generates its targets with the model where search is worse than
-no search.** The loop distils a teacher weaker than its student, every
-round. Every +8.3 we used to justify training was measured with a model
-self-play never uses.
-
-The gate may use the handcrafted bot; self-play may not — that is scripted
-play knowledge and the pure-build rule forbids training against it.
-
-Caveat we would flag: the benchmark opponent IS the handcrafted bot, so part
-of the 10.8-point gap is "model the opponent you actually face". In
-self-play the true opponent is our own policy. We do not think that rescues
-it, because the target-producing configuration is still the one where search
-loses to its prior — but tell us if that reasoning is wrong.
-
-## What we would value your view on
-
-1. **How do we get a self-play in-tree opponent that is actually good,
-   without importing handcrafted knowledge?** Untested candidates: sample
-   the opponent's move from the policy rather than greedy argmax; give the
-   opponent its own small search; use the previous best checkpoint as the
-   opponent model. Is one of these obviously right, or is the single-observer
-   framing itself the problem?
-2. **Is +8.3 with an accurate opponent model and −2.5 with our own policy
-   telling us the search is only ever exploiting a *known* opponent** — i.e.
-   that this architecture cannot self-improve at all, and the p22 61% was
-   likewise exploitation of the built-in bot rather than strength?
-3. **FPU.** Unvisited actions take Q=0, the worst score on [0,1], so a
-   confident prior never explores at low budget. Is that the reason the
-   threshold sits between 16 and 32 sims, and is FPU = parent mean Q the fix?
-   Cheap search matters: p29 costs ~10x p22 per game.
-4. **63% vs 80%** of iterations reaching an opponent decision (p29 vs p22 at
-   32 sims), and the ~10x wall-clock gap. Both unexplained.
-
-## State
-
-`checkpoints/deploy_p29` — 50.8% at 32 sims on protocol 29 (parity),
-deployable once one fingerprint bug is fixed. `checkpoints/deploy_v1` —
-55.0% at 32 sims on protocol 22, which the server refuses.
-`RESULTS.md` has the numbers and the ruled-out table, `AGENTS.md` the traps.
-Nearly every wrong conclusion this week came from an unpaired comparison, a
-wall-clock guard that bound, or a fallback that looked like a decision.
+* No handcrafted play knowledge in training. Evaluation helpers are fine.
+* The gate is EXACTLY deterministic, so comparing two nets on it is paired
+  and exact; ±SE only matters for generalising to other opponents.
+* 50% is parity. The gate reports our own head-to-head win rate.
+* Wall-clock guards have silently decided four separate measurements.
+* Protocol-22 numbers are historical and are not worth restoring the p22
+  vendor to reproduce.

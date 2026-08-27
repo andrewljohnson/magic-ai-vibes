@@ -8,3 +8,10 @@ vendor/penta/target/
 *.spzw
 vendor/penta/bindings/penta-py/target/
 vendor/penta/bindings/penta-ffi/
+
+# Run artifacts. Findings belong in RESULTS.md, not in 400 stale logs --
+# we accumulated 302M of dead run output across five days before this.
+*.log
+*.out
+*.azp
+*.npz
