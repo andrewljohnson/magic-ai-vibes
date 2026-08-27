@@ -84,15 +84,26 @@ targets with 25% Dirichlet noise, and that is a different, much worse
 search. Same net, same mirror harness, 32 sims against the raw 1-sim
 policy:
 
-| searching seat | score vs raw policy |
-|---|---|
-| 32 sims, noise-free | **55.8% ± 3.5** |
-| 32 sims + 0.25 Dirichlet — **what generates our targets** | **44.2% ± 3.8** |
+| root noise | alpha | score vs raw policy |
+|---|---|---|
+| 0.00 (Experiment 1) | — | **55.8% ± 3.5** |
+| 0.05 | 0.3 | **54.3% ± 3.8** |
+| 0.10 | 0.3 | 51.2% ± 3.9 |
+| 0.10 | 1.0 | 52.1% ± 3.8 |
+| **0.25** | 1.0 — what we trained on | **44.2% ± 3.8** |
 
-An 11.6-point swing that turns a +5.8 teacher into a −5.8 one. At 32 visits
-over ~6 actions, replacing a quarter of the prior with near-uniform noise
-does not perturb the search, it dominates it. AlphaZero uses the same 25%
-at 800 visits, where it is a small perturbation.
+An 11.6-point swing from teacher to anti-teacher, monotonic in the noise
+FRACTION. Alpha is irrelevant over this range (51.2 vs 52.1 at the same
+fraction), so the concentration of the noise does not matter — how much of
+the prior it replaces does. At 32 visits over ~6 actions, replacing a
+quarter of the prior with near-uniform noise does not perturb the search,
+it dominates it. AlphaZero uses the same 25% at 800 visits, where it is a
+small perturbation.
+
+0.05 keeps essentially all of search's edge, and is the setting training
+now runs at. **0.10 is already neutral (51.2%), and a run at 0.10 degraded
+the net over 25 rounds and was reverted by the gate** — so "a teacher worth
+1 point" is not enough to climb.
 
 **And add-k flattens the target past the prior.** The policy target is
 `(visits + k) / sum`, with k=1 — seven pseudo-visits on 32 real ones.
