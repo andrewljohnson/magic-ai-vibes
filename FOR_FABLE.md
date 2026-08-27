@@ -9,9 +9,10 @@ Read `RESULTS.md` for the findings record, `ROADMAP.md` for the plan,
   both seats our own net, greedy in-tree opponent — exactly what self-play
   trains on — 32 sims vs the raw 1-sim policy: **55.8% ± 3.5** over 207
   games.
-* The policy **never absorbs it**. 180 rounds, ~8600 self-play games,
-  promotion gated on that same mirror match: **0 promotions**, 2 reverts,
-  best net byte-identical to the warm start. The mirror hovers at 50%.
+* Whether the policy absorbs it is **unknown**. The mirror gate that
+  reported 0 promotions over 182 rounds was broken — `az_h2h` used one net
+  for both seats, so it never compared current against best and returned
+  ~50% by construction. Fixed; being re-measured.
 * The policy never fits its targets either: `pol_ent` 1.38–1.45 against
   `tgt_ent` ~0.92, flat across all 180 rounds.
 * Deployed and playing on the public server at 512 sims/move.

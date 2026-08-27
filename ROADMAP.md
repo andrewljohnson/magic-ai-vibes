@@ -2,14 +2,15 @@
 
 ## The problem, in one paragraph
 
-Search beats our policy — **+55.8% ± 3.5** in a mirror match at 32 sims
-against the raw policy, measured in exactly the configuration self-play
-trains on. But the policy never absorbs it: 180 rounds and ~8600 games of
-self-play produced **zero promotions**, and the best net is still
-byte-identical to the net the run started from. The mirror score hovers at
-50%. So the teacher is good and the student does not learn, which puts the
-loss **between the search and the gradient** — in the targets, or in the
-fit.
+Search beats our policy — **55.8% ± 3.5** in a mirror match at 32 sims
+against the raw policy, and that measurement is sound (it varies only the
+iteration count on one net, which is what the old `az_h2h` could actually
+do). What we do NOT know is whether the policy absorbs it. The mirror gate
+that appeared to answer "no" over 182 rounds was broken: it never played
+the two nets against each other, and returned ~50% by construction. It is
+fixed; the corrected current-vs-warm-start number is being measured. What
+is certain is that the handcrafted gate declined across those rounds and
+every reading sat below the warm-start floor.
 
 ## The open problem, and how to split it
 

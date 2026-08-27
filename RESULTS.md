@@ -45,31 +45,25 @@ where the real opponent **is** our policy. Report both numbers going
 forward: the handcrafted-model gate (exploitation of one known opponent) and
 the own-model mirror (portable strength).
 
-**But the policy does not absorb what search finds.** 180 rounds, ~8600
-self-play games, promotion gated on the mirror match rather than on the
-handcrafted bot:
+**Whether the policy absorbs what search finds is now UNKNOWN — the
+measurement that said it does not was broken.** 182 rounds with promotion
+gated on a "mirror match" reported 0 promotions, 2 reverts, and a best net
+byte-identical to its warm start. That mirror did not do what it claimed:
+`az_h2h` built one policy and used it for BOTH seats, varying only the
+iteration count, so `mirror_vs_best` played current-vs-current on half the
+games and best-vs-best on the other half and combined them as if the halves
+were opposite seats of one head-to-head. Both halves are symmetric by
+construction, so it reads ~50% however strong either net is — which is
+exactly what it reported, including 50.0 twice to the decimal. The two
+reverts were seat/deck noise.
 
-| | |
-|---|---|
-| promotions | **0** |
-| reverts | 2 |
-| best net after 180 rounds | **byte-identical to the warm start** |
-| mirror (current vs best) | 35.3, 50.0, 50.0, 36.4, 50.0, 45.5, 51.5, 53.1 |
-| handcrafted gate | 45.8 → 45.0 → 40.0 → 34.6 → 46.7 → 45.0 → 41.7 → 35.8 |
+So "the policy never absorbs search" is **retracted**, and with it the
+claim that the ratchet was not the problem. `az_h2h` now takes a net per
+seat; a correctly-paired current-vs-warm-start measurement is running.
 
-The mirror hovers at 50%: the trained net is indistinguishable from the net
-it started at. So the loss is **between the search and the gradient** — the
-targets, or the fit — not in the search.
-
-This also ruled out the leading theory for the decline, which was that the
-ratchet reverts on the *handcrafted* gate and so discards nets that genuinely
-improve at self-play. Promoting on the mirror instead changed nothing: nets
-are not being wrongly discarded, they are not improving. Worth one run to
-learn.
-
-The mirror gate does disagree with the handcrafted gate, in both directions —
-at round 19 the gate read 45.8% (above the 45.0% floor, so it would have
-**promoted**) while the mirror read 35.3%.
+The handcrafted gate over those rounds is a real measurement and it
+declined: 45.8 → 45.0 → 40.0 → 34.6 → 46.7 → 45.0 → 41.7 → 35.8 → 37.9,
+every reading below the 45.0% warm-start floor.
 
 **The policy never fits its own targets.** Across all 180 rounds
 `pol_ent` sits at 1.38–1.45 while `tgt_ent` is ~0.92, and `pol_ce` ~1.35–1.41.
