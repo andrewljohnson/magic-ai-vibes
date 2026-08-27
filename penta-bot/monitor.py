@@ -25,8 +25,11 @@ import os
 import re
 import statistics
 import sys
+import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PENTA_MONITOR_PORT", "8899"))
@@ -40,10 +43,13 @@ PORT = int(os.environ.get("PENTA_MONITOR_PORT", "8899"))
 STALE_FLOOR_SECS = 1800     # never call a run dead sooner than this
 STALE_INTERVALS = 3.0       # ... or before 3x its own gate spacing
 
-# 400-game gates -> ~2.5 point standard error on a single gate. Everything
-# in the UI that compares runs uses a MEAN over gates for this reason; a
-# single gate is not a result.
-GATE_SE = 2.5
+# A single gate is not a result. Every gate line states its OWN standard
+# error ("37.9% +/- 4.4"), which is parsed and used; this is only the
+# fallback for old AAC lines that did not print one. It is deliberately the
+# error of a ~120-game gate, the size this loop actually runs -- the 2.5
+# that sat here described 400-game gates nobody runs any more and made
+# every mean look four times more certain than it was.
+GATE_SE = 4.6
 # PARITY with the built-in bot is 50% -- the gate scores OUR win rate in
 # head-to-head games against it, so below 50% is losing to it.
 #
@@ -76,7 +82,22 @@ AZ_ROUND_RE = re.compile(
     r"round (\d+): (\d+) games \d+s \(([0-9.]+) g/s\).*?"
     r"fin=(\d+)%.*?pol_ent=([0-9.]+).*?tgt_ent=([0-9.]+).*?"
     r"vmse=([0-9.]+)/([0-9.]+)")
-AZ_GATE_RE = re.compile(r"GATE round \d+: ([0-9.]+)%")  # first % only
+# GATE round 179: 37.9% +/- 4.4 (capped-as-draw 38.3%) (45W 1D 74L / 120, 1 capped)
+AZ_GATE_RE = re.compile(
+    r"GATE round (\d+): ([0-9.]+)%"
+    r"(?:\s*\+/-\s*([0-9.]+))?"
+    r"(?:.*?capped-as-draw ([0-9.]+)%)?"
+    r"(?:.*?\((\d+)W (\d+)D (\d+)L / (\d+)(?:, (\d+) capped)?\))?")
+# The net this run started from, re-gated before round 0. Training has to
+# beat THIS, not merely its own first gate, so the chart draws it as a floor.
+AZ_FLOOR_RE = re.compile(
+    r"GATE warm-start baseline: ([0-9.]+)%(?:\s*\+/-\s*([0-9.]+))?")
+# KNOWN BROKEN as of 2026-08-26: the comparison behind this line did not
+# actually play the two nets against each other, so the percentage means
+# nothing yet. Parsed and shown so the repair can be watched, but never
+# presented as a measurement -- see the "suspect" styling in the page.
+AZ_MIRROR_RE = re.compile(
+    r"MIRROR round (\d+): current vs best ([0-9.]+)% over (\d+) games")
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
 
@@ -103,6 +124,12 @@ def live_prefixes():
         for i, a in enumerate(argv):
             if a == b"--save-prefix" and i + 1 < len(argv):
                 out.add(argv[i + 1].decode(errors="replace"))
+            # A run is named after its LOG here, and --log need not match
+            # --save-prefix. Matching both stops a live run being drawn as
+            # "stopped" just because the two flags disagree.
+            elif a == b"--log" and i + 1 < len(argv):
+                name = os.path.basename(argv[i + 1].decode(errors="replace"))
+                out.add(name[:-4] if name.endswith(".log") else name)
     return out
 
 
@@ -111,6 +138,7 @@ def parse_log(path):
     gates, config, done = [], "", None
     az, az_games, az_last = False, 0, {}
     az_hist = []
+    floor, mirror = None, []
     stamps = []
     matchups = []
     try:
@@ -153,10 +181,32 @@ def parse_log(path):
                                 except ValueError:
                                     pass
                         continue
+                    m = AZ_FLOOR_RE.search(line)
+                    if m:
+                        floor = {"pct": float(m.group(1)),
+                                 "se": float(m.group(2)) if m.group(2)
+                                 else None}
+                        continue
+                    m = AZ_MIRROR_RE.search(line)
+                    if m:
+                        mirror.append({"round": int(m.group(1)),
+                                       "pct": float(m.group(2)),
+                                       "games": int(m.group(3))})
+                        continue
                     m = AZ_GATE_RE.search(line)
                     if m:
+                        n = int(m.group(8)) if m.group(8) else None
+                        capped = int(m.group(9)) if m.group(9) else None
                         gates.append({
-                            "games": az_games, "pct": float(m.group(1)),
+                            "round": int(m.group(1)),
+                            "games": az_games, "pct": float(m.group(2)),
+                            "se": float(m.group(3)) if m.group(3) else None,
+                            "draw_pct": (float(m.group(4)) if m.group(4)
+                                         else None),
+                            "w": int(m.group(5)) if m.group(5) else None,
+                            "d": int(m.group(6)) if m.group(6) else None,
+                            "l": int(m.group(7)) if m.group(7) else None,
+                            "n": n,
                             # vmse against its own baseline is this loop's
                             # analogue of critic_loss: below 1.0 means the
                             # value head beats predicting the mean.
@@ -170,7 +220,14 @@ def parse_log(path):
                             # opinion; pinned at 0.0 means it is not
                             # branching at all.
                             "gmean": az_last.get("tgt_ent"),
-                            "capped": None, "gps": az_last.get("gps"),
+                            "capped": capped,
+                            # An AZ gate reports capped games for THAT gate,
+                            # not a running total, so it is already a rate --
+                            # the differencing below would turn it to noise.
+                            "capped_pct": (round(100.0 * capped / n, 1)
+                                           if capped is not None and n
+                                           else None),
+                            "gps": az_last.get("gps"),
                             "ts": stamps[-1] if stamps else None})
                         continue
                     continue
@@ -198,7 +255,8 @@ def parse_log(path):
                     gates.append({"games": int(m.group(1)),
                                   "pct": float(m.group(2)), "closs": None,
                                   "entropy": None, "gmean": None,
-                                  "capped": None, "gps": None, "ts": None})
+                                  "capped": None, "gps": None, "ts": None,
+                                  "se": None, "n": None})
                     continue
                 m = GATE_RE.search(line)
                 if m:
@@ -212,7 +270,8 @@ def parse_log(path):
                          "gmean": float(m.group(5)) if m.group(5) else None,
                          "capped": int(m.group(6)) if m.group(6) else None,
                          "gps": float(m.group(7)) if m.group(7) else None,
-                         "ts": stamps[-1] if stamps else None}
+                         "ts": stamps[-1] if stamps else None,
+                         "se": None, "n": None}
                     gates.append(g)
         mtime = os.path.getmtime(path)
     except OSError:
@@ -237,13 +296,15 @@ def parse_log(path):
     prev = None
     for g in gates:
         g["rate"] = None
-        g["capped_pct"] = None
+        g.setdefault("capped_pct", None)
         if prev and g["ts"] is not None and prev["ts"] is not None:
             dt = (g["ts"] - prev["ts"]) % 86400
             dg = g["games"] - prev["games"]
             if dt > 0 and dg > 0:
                 g["rate"] = round(dg / dt, 2)
-            if dg > 0 and g["capped"] is not None and prev["capped"] is not None:
+            if (g["capped_pct"] is None and dg > 0
+                    and g["capped"] is not None
+                    and prev["capped"] is not None):
                 g["capped_pct"] = round(
                     100.0 * (g["capped"] - prev["capped"]) / dg, 1)
         if g["games"] > 0:
@@ -313,7 +374,19 @@ def parse_log(path):
         "mean": statistics.fmean(pcts) if pcts else None,
         "recent": statistics.fmean(recent) if recent else None,
         "recent_n": len(recent),
-        "se": GATE_SE / len(pcts) ** 0.5 if pcts else None,
+        # SE of the MEAN of n gates, built from each gate's own reported
+        # error rather than one hard-coded constant.
+        "se": ((sum((g["se"] or GATE_SE) ** 2 for g in scored) ** 0.5)
+               / len(scored)) if scored else None,
+        # Games behind ONE gate -- the page used to claim 400 in prose while
+        # the loop ran 120, which is a different result entirely.
+        "gate_games": next((g["n"] for g in reversed(scored)
+                            if g.get("n")), None),
+        "floor": floor,
+        # Deliberately last and deliberately unused by any headline: the
+        # mirror comparison is broken upstream, so the page shows it only
+        # under a "suspect" label.
+        "mirror": mirror[-12:],
         "entropy": next((g["entropy"] for g in reversed(scored)
                          if g["entropy"] is not None), None),
         "gps": next((g["gps"] for g in reversed(scored)
@@ -383,6 +456,265 @@ FLAG_META = {
         "one through your own main phase gives up mana for no gain."),
 }
 
+
+
+# ======================================================================
+# HOSTED PLAY (hosted_bot.py against penta.lacker.workers.dev)
+#
+# Training is one thing; the bot actually being up and playing strangers
+# is another, and nothing here reported it. The three failure modes worth
+# a panel, in order of how quietly they happen:
+#
+#   1. The daemon died. Nothing plays; the site just stops offering us.
+#   2. The daemon is alive but the server does not list us online -- the
+#      registration lapsed, or heartbeats stopped landing.
+#   3. Worst, because it is invisible from outside: search throws on every
+#      move and HostedPolicy silently falls back to the first legal action.
+#      That is a 1-ply bot wearing our name. It printed "SEARCH FAILED"
+#      into hosted_bot.out and nobody was reading hosted_bot.out.
+# ======================================================================
+HOSTED_SERVER = os.environ.get("PENTA_HOSTED_SERVER",
+                               "https://penta.lacker.workers.dev")
+HOSTED_OUT = os.path.join(HERE, "hosted_bot.out")
+HOSTED_STATE = os.path.join(HERE, "hosted_bot_state.json")
+HOSTED_GAMES = os.path.join(HERE, "hosted-games")
+SEARCH_FAILED = "SEARCH FAILED"
+BOTS_TTL = 25          # seconds to cache the server's bot listing
+GAMES_SHOWN = 12       # most recent transcripts rendered as rows
+GAMES_SCANNED = 400    # cap the directory walk; transcripts are large
+
+_bots_cache = {"at": 0.0, "value": None}
+_game_cache = {}       # path -> (mtime, size, summary, [ms])
+# hosted_bot.out only ever appends, and it runs for days. Re-reading the
+# whole thing every poll is wasted work that grows without bound, so the
+# scan resumes from the last offset and resets only if the file is replaced.
+_out_scan = {"pos": 0, "failed": 0, "heartbeat": None, "tail": [],
+             "examples": []}
+# The server is threaded so one slow /_bots fetch cannot stall the page,
+# which means two pollers can land in here at once. The incremental log
+# scan is not re-entrant -- both would count the same SEARCH FAILED lines.
+_hosted_lock = threading.Lock()
+
+
+def _hosted_proc():
+    """The running hosted_bot.py, if any: (pid, argv-tail) or None."""
+    if not os.path.isdir("/proc"):
+        return None
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                argv = [a.decode(errors="replace")
+                        for a in f.read().split(b"\0") if a]
+        except OSError:
+            continue
+        if any(a.endswith("hosted_bot.py") for a in argv):
+            try:
+                started = os.path.getmtime(f"/proc/{pid}")
+            except OSError:
+                started = None
+            return {"pid": int(pid),
+                    "args": " ".join(argv[1:])[:200],
+                    "started": started}
+    return None
+
+
+def _bots_listing():
+    """GET /_bots, cached. Never raises: the network is not the dashboard."""
+    now = time.time()
+    if _bots_cache["value"] is not None and now - _bots_cache["at"] < BOTS_TTL:
+        return _bots_cache["value"]
+    out = {"ok": False, "error": None, "bots": []}
+    try:
+        req = urllib.request.Request(f"{HOSTED_SERVER}/_bots",
+                                     headers={"User-Agent": "penta-monitor"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            doc = json.loads(r.read().decode())
+        out = {"ok": True, "error": None,
+               "bots": doc.get("bots") or [],
+               "protocol": (doc.get("compatibility") or {})
+               .get("protocolVersion")}
+    except Exception as error:                # noqa: BLE001 - any failure
+        out["error"] = f"{type(error).__name__}: {error}"[:160]
+    _bots_cache.update(at=now, value=out)
+    return out
+
+
+def _scan_game(path):
+    """Summarise one transcript, cached on (mtime, size).
+
+    Deliberately does NOT json-parse the move rows: each one embeds a full
+    observation, so a finished game is ~160KB and a naive parse of every
+    poll would cost more than everything else on this page combined. Only
+    the short result/error rows are parsed; latency is pulled out with a
+    substring scan.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    hit = _game_cache.get(path)
+    if hit and hit[0] == st.st_mtime and hit[1] == st.st_size:
+        return hit[2], hit[3]
+    summary = {"file": os.path.basename(path), "mtime": st.st_mtime,
+               "outcome": None, "message": None, "moves": 0, "seconds": None,
+               "abandoned": False, "errors": 0, "slow": 0, "no_worlds": 0,
+               "med_ms": None, "max_ms": None}
+    ms = []
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                if '"t": "move"' in line:
+                    summary["moves"] += 1
+                    i = line.find('"ms": ')
+                    if i >= 0:
+                        j = i + 6
+                        k = j
+                        while k < len(line) and line[k].isdigit():
+                            k += 1
+                        if k > j:
+                            ms.append(int(line[j:k]))
+                    if '"worlds": 0' in line or '"worlds": null' in line:
+                        summary["no_worlds"] += 1
+                    continue
+                if '"t": "result"' in line:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    res = row.get("result") or {}
+                    summary["outcome"] = res.get("outcome")
+                    summary["message"] = res.get("message")
+                    summary["seconds"] = row.get("seconds")
+                elif '"t": "abandoned"' in line:
+                    summary["abandoned"] = True
+                    try:
+                        summary["seconds"] = json.loads(line).get("seconds")
+                    except ValueError:
+                        pass
+                elif '"t": "slow-move"' in line:
+                    summary["slow"] += 1
+                elif "-error" in line:
+                    summary["errors"] += 1
+    except OSError:
+        return None
+    if ms:
+        ordered = sorted(ms)
+        summary["med_ms"] = ordered[len(ordered) // 2]
+        summary["max_ms"] = ordered[-1]
+    _game_cache[path] = (st.st_mtime, st.st_size, summary, ms)
+    return summary, ms
+
+
+def _pct(values, q):
+    if not values:
+        return None
+    ordered = sorted(values)
+    i = min(len(ordered) - 1, int(q * len(ordered)))
+    return ordered[i]
+
+
+def hosted_status():
+    """Everything the hosted panel shows. Cheap enough for a 20s poll."""
+    with _hosted_lock:
+        return _hosted_status()
+
+
+def _hosted_status():
+    proc = _hosted_proc()
+    state = {}
+    try:
+        with open(HOSTED_STATE) as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        pass
+    name = state.get("name")
+
+    # --- the log: heartbeats, and the one string that matters -----------
+    log_mtime = None
+    try:
+        st = os.stat(HOSTED_OUT)
+        log_mtime = st.st_mtime
+        if st.st_size < _out_scan["pos"]:        # truncated or replaced
+            _out_scan.update(pos=0, failed=0, heartbeat=None, tail=[],
+                             examples=[])
+        if st.st_size > _out_scan["pos"]:
+            with open(HOSTED_OUT, errors="replace") as f:
+                f.seek(_out_scan["pos"])
+                for line in f:
+                    if SEARCH_FAILED in line:
+                        _out_scan["failed"] += 1
+                        if len(_out_scan["examples"]) < 4:
+                            _out_scan["examples"].append(line.strip()[:200])
+                    if line.startswith("heartbeat ok"):
+                        _out_scan["heartbeat"] = line.strip()
+                    _out_scan["tail"].append(line.rstrip("\n")[:200])
+                    if len(_out_scan["tail"]) > 60:
+                        del _out_scan["tail"][:30]
+                _out_scan["pos"] = f.tell()
+    except OSError:
+        pass
+    failed = _out_scan["failed"]
+    heartbeats = _out_scan["heartbeat"]
+    fail_lines = list(_out_scan["examples"])
+    tail = list(_out_scan["tail"])
+
+    # --- the server's own view of us ------------------------------------
+    listing = _bots_listing()
+    mine = None
+    for bot in listing["bots"]:
+        if bot.get("id") == state.get("id") or (
+                name and bot.get("name") == name):
+            mine = bot
+            break
+
+    # --- transcripts ------------------------------------------------------
+    paths = sorted(glob.glob(os.path.join(HOSTED_GAMES, "*.jsonl")))
+    paths = paths[-GAMES_SCANNED:]
+    games, all_ms = [], []
+    for p in paths:
+        got = _scan_game(p)
+        if not got:
+            continue
+        summary, ms = got
+        games.append(summary)
+        all_ms.extend(ms)
+    games.sort(key=lambda g: g["mtime"], reverse=True)
+    finished = [g for g in games if g["outcome"]]
+    wins = sum(1 for g in finished if g["outcome"] == "win")
+    losses = sum(1 for g in finished if g["outcome"] == "loss")
+    other = len(finished) - wins - losses
+    # A game whose only row is the result never gave us a decision -- the
+    # opponent walked before we moved. Counting those as play would flatter
+    # the record, so they are reported on their own.
+    walkovers = sum(1 for g in finished if g["moves"] == 0)
+    return {
+        "server": HOSTED_SERVER,
+        "daemon": proc,
+        "registration": {"name": name, "id": state.get("id"),
+                         "deck": state.get("deck"),
+                         "server": state.get("server")},
+        "listing": {"ok": listing["ok"], "error": listing["error"],
+                    "count": len(listing["bots"]), "me": mine,
+                    "age": round(time.time() - _bots_cache["at"])},
+        "search_failed": failed,
+        "search_failed_examples": fail_lines,
+        "heartbeat": heartbeats,
+        "log_mtime": log_mtime,
+        "log_tail": tail[-12:],
+        "games": {"total": len(games), "finished": len(finished),
+                  "win": wins, "loss": losses, "other": other,
+                  "walkover": walkovers,
+                  "abandoned": sum(1 for g in games if g["abandoned"]),
+                  "errors": sum(g["errors"] for g in games),
+                  "slow": sum(g["slow"] for g in games),
+                  "pct": (100.0 * wins / len(finished)) if finished else None},
+        "latency": {"moves": len(all_ms), "med": _pct(all_ms, 0.5),
+                    "p90": _pct(all_ms, 0.9), "max": max(all_ms)
+                    if all_ms else None},
+        "recent": games[:GAMES_SHOWN],
+    }
 
 
 def collect():
@@ -479,12 +811,37 @@ tr:last-child td{border-bottom:none}
   text-transform:uppercase;letter-spacing:.04em;text-align:left}
 .mu td.v{text-align:right;font-variant-numeric:tabular-nums;
   border-radius:4px;color:var(--text-primary)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;
+  border-radius:999px;font-size:12px;font-weight:600;
+  border:1px solid var(--rule);color:var(--text-secondary)}
+.pill i{width:8px;height:8px;border-radius:50%;background:currentColor;
+  flex:none}
+.ok{color:var(--s3);border-color:color-mix(in oklab,var(--s3) 40%,transparent)}
+.warn{color:var(--s4);border-color:color-mix(in oklab,var(--s4) 40%,transparent)}
+.bad{color:var(--s8);border-color:color-mix(in oklab,var(--s8) 45%,transparent);
+  background:color-mix(in oklab,var(--s8) 8%,transparent)}
+.alarm{border:1px solid var(--s8);border-radius:8px;padding:10px 12px;
+  margin:10px 0 0;background:color-mix(in oklab,var(--s8) 10%,transparent)}
+.alarm b{color:var(--s8)}
+.alarm .n{font-size:26px;font-variant-numeric:tabular-nums;color:var(--s8);
+  font-weight:600;line-height:1.1}
+.suspect{border:1px dashed var(--s4);border-radius:8px;padding:10px 12px;
+  background:color-mix(in oklab,var(--s4) 7%,transparent)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+  color:var(--text-secondary);white-space:pre-wrap;word-break:break-all}
 </style></head><body><div class="wrap">
 <h1>penta bot — training monitor</h1>
-<p class="sub">Evaluation: actor argmax vs the engine's handcrafted bot.
-Gates are 400 games (standard error ±2.5 points), so compare <b>means</b>,
-never a single gate.</p>
+<p class="sub" id="sub">Evaluation: our bot vs the engine's built-in
+handcrafted bot. <b>50% is parity</b> — below it we are losing. Each gate
+carries its own ± standard error, so compare <b>means</b>, never a single
+gate.</p>
 <div class="tiles" id="tiles"></div>
+<div class="card"><h2>Hosted bot — playing on the live server</h2>
+  <p class="foot" style="margin:0 0 10px">Training tells you what the net
+  scores in the lab. This is the daemon (<code>hosted_bot.py</code>) that
+  actually sits on the server and plays whoever shows up.</p>
+  <div id="hosted"><p class="empty">loading…</p></div>
+</div>
 <div class="card"><h2>Now training</h2>
   <p class="foot" style="margin:0 0 10px">Round-by-round progress of the
   live run. The chart below plots GATES, which only happen every
@@ -506,16 +863,19 @@ never a single gate.</p>
   the misplays it found — a win rate cannot tell you the bot aimed Fireball
   at its own face.</p>
 </div>
+<div class="card"><h2>Current vs best (mirror) — <span style="color:var(--s4)">suspect, under repair</span></h2>
+  <div id="mirror"></div>
+</div>
 <div class="card"><h2>Win rate by opponent deck</h2>
   <p class="foot" style="margin:0 0 10px">Our bot pilots <b>Sligh</b> in
   every one of these games; the named deck is piloted by the engine's
   <b>built-in handcrafted bot</b>. 50% is parity; below that we lose. Seats
-  alternate. Latest evaluation per live run — one aggregate number hides
+  alternate. Latest evaluation per run — one aggregate number hides
   everything that matters here.<br>
   The <b>Sligh mirror is absent by construction</b>: the gate builds its
-  opponent list as every deck EXCEPT the one we pilot. Measured separately
-  at round 239 it is 53.3% ± 4.6, our strongest matchup — we know that deck
-  best because we pilot it every game.</p>
+  opponent list as every deck EXCEPT the one we pilot, so no number for it
+  appears below. Any mirror figure has to come from a separate run, and the
+  one this loop logs is currently broken — see the panel above.</p>
   <div id="grid"></div>
 </div>
 <div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
@@ -546,6 +906,27 @@ function draw(){
   // Runs with no gate yet still belong in the table and the live panel;
   // only the CHART needs gate points to plot.
   const all=DATA.runs.filter(r=>r.gates.length||r.live);
+  // Zero live runs is a NORMAL state now, not an error: training gets
+  // stopped, and old logs get archived. Say so plainly instead of rendering
+  // an empty chart, -Infinity headline tiles and a bare table.
+  if(!all.length){
+    document.getElementById("tiles").innerHTML=`
+      <div class="tile"><div class="k">training</div>
+        <div class="v">—</div><div class="n">no run in progress</div></div>`;
+    document.getElementById("chart").innerHTML=
+      `<text x="20" y="40" font-size="13" fill="${css("--text-muted")}">`+
+      `No run logs in penta-bot/ — nothing to plot.</text>`;
+    document.getElementById("legend").innerHTML="";
+    document.getElementById("rows").innerHTML=
+      `<tr><td class="l" colspan="9" style="color:var(--text-muted)">`+
+      `No training run. The hosted panel above still works.</td></tr>`;
+    document.getElementById("foot").textContent="";
+    document.getElementById("sub").innerHTML=
+      "Evaluation: our bot vs the engine's built-in handcrafted bot. "+
+      "<b>50% is parity</b> — below it we are losing.";
+    now([]);panels([]);grid([]);mirror([]);
+    return;
+  }
   // The CHART shows only what is training. Finished and stopped runs pile
   // up one per experiment arm, and 19 series on an 8-hue palette repeats
   // colours and buries the runs that matter. Falls back to the most recent
@@ -575,7 +956,14 @@ function draw(){
     s+=`<text x="${X(g)}" y="${H-12}" text-anchor="middle" font-size="11"
         fill="${css("--text-muted")}">${Math.round(g/1000)}k</text>`;}
   // annotated reference lines: the bar we beat, and the milestone
-  for(const [v,lab] of [[DATA.baseline,"parity with built-in bot 50%"]]){
+  // The warm-start floor: the score of the net this run STARTED from.
+  // Training that sits below its own floor is going backwards, and that is
+  // invisible without the line.
+  const fl=runs.map(r=>r.floor).find(f=>f);
+  const refs=[[DATA.baseline,"parity with built-in bot 50%"]];
+  if(fl) refs.push([fl.pct,`warm-start floor ${fl.pct.toFixed(1)}% `+
+    `(the net this run began from)`]);
+  for(const [v,lab] of refs){
     if(v<lo||v>hi)continue;
     s+=`<line x1="${P.l}" y1="${Y(v)}" x2="${W-P.r}" y2="${Y(v)}"
         stroke="${css("--rule")}" stroke-width="1" stroke-dasharray="4 4"/>
@@ -636,7 +1024,9 @@ function draw(){
     const {r,g,i}=best;
     tip.innerHTML=`<div class="row"><b>${r.name}</b>
       <i class="chip" style="background:${css(SERIES[i%8])}"></i></div>
-      <div>${g.games.toLocaleString()} games — <b>${fmt(g.pct)}%</b></div>`+
+      <div>${g.games.toLocaleString()} games — <b>${fmt(g.pct)}%</b>`+
+      (g.se!=null?` ± ${fmt(g.se)}`:"")+`</div>`+
+      (g.w!=null?`<div>${g.w}W ${g.d}D ${g.l}L / ${g.n}</div>`:"")+
       (g.entropy!=null?`<div>entropy ${fmt(g.entropy,3)}`+
       (g.gps!=null?` · ${fmt(g.gps,2)} g/s`:"")+`</div>`:"");
     tip.style.left=(e.clientX+14)+"px";
@@ -658,7 +1048,7 @@ function draw(){
       <div class="n">last 8 gates</div></div>
     <div class="tile"><div class="k">games played</div>
       <div class="v">${(tot/1000).toFixed(0)}k</div>
-      <div class="n">across ${all.length} runs</div></div>
+      <div class="n">across ${all.length} run${all.length===1?"":"s"}</div></div>
     <div class="tile"><div class="k">live runs</div>
       <div class="v">${live.length}</div>
       <div class="n">${all.length-live.length} stopped/finished</div></div>`;
@@ -685,9 +1075,23 @@ function draw(){
   now(DATA.runs);
   panels(runs);
   grid(runs);
+  mirror(all);
   document.getElementById("foot").textContent =
-    "mean ± is the standard error of that run's gate mean. entropy below ~0.15 "
-    + "with a flat curve means the policy has stopped exploring.";
+    "mean ± is the standard error of that run's gate mean, built from the ± "
+    + "each gate reported. 50% is parity with the built-in bot.";
+  // Read the gate size and error off the LOG. The prose here used to
+  // assert "400 games, ±2.5" while the loop ran 120-game gates at ±4.5.
+  const top=all.find(r=>r.gate_games)||{};
+  const lastSe=(top.gates||[]).map(g=>g.se).filter(v=>v!=null).pop();
+  document.getElementById("sub").innerHTML =
+    "Evaluation: our bot vs the engine's built-in handcrafted bot. "
+    + "<b>50% is parity</b> — below it we are losing."
+    + (top.gate_games
+       ? ` Each gate is ${top.gate_games} games`
+         + (lastSe!=null?` (±${lastSe.toFixed(1)} points on one gate)`:"")
+         + `, so compare <b>means</b>, never a single gate.`
+       : " Each gate carries its own ± standard error, so compare"
+         + " <b>means</b>, never a single gate.");
 }
 // Small multiples. Each measures a different thing, so each gets its own
 // y scale; a shared axis would be meaningless and a dual axis is never the
@@ -697,8 +1101,8 @@ const PANELS=[
    why:"Leading indicator. Drifting to ~0.15 with a flat score = stopped exploring."},
   {k:"rate", t:"Games / sec (actual)", d:1,
    why:"Per-interval, not the log's cumulative average. Falls as an actor strengthens."},
-  {k:"capped_pct", t:"Episodes discarded %", d:1,
-   why:"Hit the 600-decision cap and were dropped. Long games are lost from training."},
+  {k:"capped_pct", t:"Games hitting the cap %", d:1,
+   why:"Ran past the decision cap and were cut short. Long games are the ones we lose."},
   {k:"closs", t:"Critic loss", d:2,
    why:"Is the value estimate tracking? Rising with flat entropy is trouble."},
 ];
@@ -785,6 +1189,35 @@ function now(runs){
   }).join("<hr style='border:0;border-top:1px solid var(--border);margin:14px 0'>");
 }
 
+// The MIRROR line (current net vs the best net) is KNOWN BROKEN as of
+// 2026-08-26: the comparison did not actually play the two nets against
+// each other, so the percentage is not a measurement of anything. It is
+// shown anyway -- deleting the display would hide the repair -- but it is
+// fenced off, never fed into a headline tile, and never plotted next to a
+// real gate where it could be mistaken for one.
+function mirror(runs){
+  const box=document.getElementById("mirror");
+  const rs=(runs||[]).filter(r=>r.mirror&&r.mirror.length);
+  const warn=`<p class="foot" style="margin:0"><b style="color:var(--s4)">
+    Do not read these as results.</b> The comparison behind the MIRROR line
+    did not actually play the current net against the best net, so the
+    percentages below measure nothing. They are parsed and displayed only so
+    the fix can be seen landing — the values should start moving once the
+    underlying match is repaired.</p>`;
+  if(!rs.length){box.innerHTML=`<div class="suspect">${warn}
+    <p class="empty" style="margin:6px 0 0">No MIRROR lines in the current
+    log.</p></div>`;return;}
+  box.innerHTML=`<div class="suspect">${warn}
+    <table class="mu" style="margin-top:8px"><tr><th>run</th><th>round</th>
+    <th>reported</th><th>games</th></tr>
+    ${rs.flatMap(r=>r.mirror.slice(-6).reverse().map(m=>
+      `<tr><td>${r.name}</td><td>${m.round}</td>
+       <td class="v" style="color:var(--text-muted)">${m.pct.toFixed(1)}%
+       <span class="cfg">(suspect)</span></td>
+       <td class="v">${m.games}</td></tr>`)).join("")}
+    </table></div>`;
+}
+
 function grid(runs){
   const rs=runs.filter(r=>r.matchups&&r.matchups.length);
   const box=document.getElementById("grid");
@@ -807,12 +1240,133 @@ function grid(runs){
       const by=Object.fromEntries(r.matchups);
       return `<tr><td>${r.name}</td>${decks.map(d=>cell(by[d])).join("")}</tr>`;
     }).join("")}</table></div>
-    <p class="foot">Blue above 50%, orange below. Sligh is the deck we
-    pilot; these are the fourteen it faces.</p>`;
+    <p class="foot">Blue above 50%, orange below; 50% is parity with the
+    built-in bot. Sligh is the deck we pilot; these are the
+    ${decks.length} it faces.</p>`;
 }
 
+
+// ---- hosted bot -------------------------------------------------------
+// Three questions, in the order they go wrong: is the process alive, does
+// the server think we are online, and is SEARCH ACTUALLY RUNNING. The last
+// one is the reason this panel exists: on a search failure HostedPolicy
+// falls back to the first legal action and keeps playing, so a dead search
+// looks exactly like a live bot from every angle except this counter.
+const ago=t=>{
+  if(!t)return "—";
+  const s=Math.max(0,Date.now()/1000-t);
+  if(s<90)return Math.round(s)+"s ago";
+  if(s<5400)return Math.round(s/60)+"m ago";
+  if(s<172800)return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+};
+const esc=x=>String(x==null?"":x).replace(/[<>&]/g,c=>
+  ({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));
+
+function hosted(h){
+  const box=document.getElementById("hosted");
+  if(!h){box.innerHTML=`<p class="empty">no hosted data</p>`;return;}
+  const pill=(cls,txt)=>`<span class="pill ${cls}"><i></i>${txt}</span>`;
+  const d=h.daemon, me=(h.listing||{}).me, g=h.games||{}, lat=h.latency||{};
+  let pills="";
+  pills+= d ? pill("ok",`daemon up · pid ${d.pid}`)
+            : pill("bad","daemon NOT running");
+  if(!h.listing.ok)
+    pills+=pill("warn","server unreachable");
+  else if(me&&me.online)
+    pills+=pill("ok",`registered online as ${esc(me.name)}`+
+                     (me.busy?" · in a game":" · idle"));
+  else if(me)
+    pills+=pill("bad",`listed but OFFLINE as ${esc(me.name)}`);
+  else
+    pills+=pill("bad",`not listed on the server (${h.listing.count} bot`+
+                      `${h.listing.count===1?"":"s"} up)`);
+  pills+= h.search_failed
+        ? pill("bad",`${h.search_failed.toLocaleString()} SEARCH FAILED`)
+        : pill("ok","search healthy");
+
+  // The alarm. Loud, red, and above the numbers, because every other
+  // number on this panel is meaningless while this one is nonzero.
+  const alarm = h.search_failed ? `
+    <div class="alarm">
+      <div class="n">${h.search_failed.toLocaleString()} × SEARCH FAILED</div>
+      <div><b>The bot is playing a 1-ply fallback.</b> Search threw and
+      HostedPolicy played the first legal action instead. Every hosted
+      result below was produced by that fallback, not by the net + search —
+      read them as noise until this is zero.</div>
+      ${(h.search_failed_examples||[]).map(e=>
+        `<div class="mono">${esc(e)}</div>`).join("")}
+      <div class="foot">Only the first few failures print;
+      <code>hosted_bot.out</code> goes quiet after that by design.</div>
+    </div>` : "";
+
+  const tile=(k,v,n)=>`<div class="tile"><div class="k">${k}</div>
+    <div class="v">${v}</div><div class="n">${n||""}</div></div>`;
+  const record = g.finished
+    ? `${g.win}W ${g.loss}L${g.other?` ${g.other} other`:""}`
+    : "no finished games";
+  const tiles=`<div class="tiles" style="margin:12px 0 0">
+    ${tile("games", g.total||0,
+           `${g.finished||0} finished${g.abandoned?` · ${g.abandoned} abandoned`:""}`)}
+    ${tile("record", record,
+           g.pct!=null?`${g.pct.toFixed(0)}% of finished games`:"—")}
+    ${tile("median move", lat.med!=null?lat.med+" ms":"—",
+           lat.p90!=null?`p90 ${lat.p90} ms · max ${lat.max} ms`:"no moves logged")}
+    ${tile("heartbeat", h.heartbeat?h.heartbeat.replace("heartbeat ok ",""):"—",
+           h.log_mtime?`log written ${ago(h.log_mtime)}`:"no hosted_bot.out")}
+  </div>`;
+
+  // A win handed over because the opponent's clock ran out is not evidence
+  // the bot played well; separating them keeps the record honest.
+  const caveat = g.walkover
+    ? `<p class="foot">${g.walkover} of ${g.finished} finished game${
+        g.finished===1?"":"s"} ended before we made a single move (opponent
+        walked or timed out) — those say nothing about how we play.</p>` : "";
+
+  const rows=(h.recent||[]).map(r=>{
+    const out = r.abandoned ? `<span style="color:var(--s4)">abandoned</span>`
+      : r.outcome==="win" ? `<span style="color:var(--s3)">win</span>`
+      : r.outcome==="loss" ? `<span style="color:var(--s8)">loss</span>`
+      : r.outcome ? esc(r.outcome) : `<span class="cfg">in progress</span>`;
+    return `<tr><td class="l cfg">${esc(r.file)}</td>
+      <td class="l">${out}</td>
+      <td>${r.moves}</td>
+      <td>${r.seconds!=null?r.seconds+"s":"—"}</td>
+      <td>${r.med_ms!=null?r.med_ms+" ms":"—"}</td>
+      <td>${r.no_worlds?`<span style="color:var(--s4)">${r.no_worlds}</span>`:0}</td>
+      <td>${r.errors||0}</td>
+      <td class="l cfg">${esc(r.message||"")}</td></tr>`;}).join("");
+
+  box.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:8px">${pills}</div>
+    ${alarm}${tiles}${caveat}
+    <p class="foot" style="margin-top:14px">${esc(h.server)} ·
+    registered as <b>${esc((h.registration||{}).name||"—")}</b> piloting
+    <b>${esc((h.registration||{}).deck||"—")}</b>
+    · id <span class="cfg">${esc((h.registration||{}).id||"—")}</span>
+    ${h.listing.ok?`· listing ${h.listing.age}s old`
+      :`· <span style="color:var(--s8)">${esc(h.listing.error||"fetch failed")}</span>`}</p>
+    ${rows?`<div style="overflow-x:auto"><table style="margin-top:6px">
+      <thead><tr><th class="l">transcript</th><th class="l">result</th>
+      <th>our moves</th><th>length</th><th>median move</th>
+      <th>no-worlds moves</th><th>errors</th><th class="l">server message</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="foot">One row per file in <code>hosted-games/</code>, newest
+      first. <b>no-worlds moves</b> are decisions where every hypothesis
+      reconstruction failed, so the move came from the unpruned fallback
+      rather than the determinized search.</p>`
+     :`<p class="empty">No transcripts in hosted-games/ yet.</p>`}`;
+}
+
+async function pollHosted(){
+  try{hosted(await (await fetch("/hosted-data",{cache:"no-store"})).json());}
+  catch(e){document.getElementById("hosted").innerHTML=
+    `<p class="empty">hosted status unavailable (${e})</p>`;}
+}
+pollHosted();setInterval(pollHosted,20000);
+
 async function poll(){
-  try{DATA=await (await fetch("/data")).json();draw();}catch(e){}
+  try{DATA=await (await fetch("/data",{cache:"no-store"})).json();draw();}
+  catch(e){}
 }
 poll();setInterval(poll,15000);
 addEventListener("resize",draw);
@@ -982,6 +1536,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/data"):
             body = json.dumps(collect()).encode()
             ctype = "application/json"
+        elif self.path.startswith("/hosted-data"):
+            # Its own route, not folded into /data: this one reaches out to
+            # the network, and a slow server must never stall the training
+            # numbers on the same page.
+            body = json.dumps(hosted_status()).encode()
+            ctype = "application/json"
         elif self.path.startswith("/playout-data"):
             body = json.dumps(playout_report()).encode()
             ctype = "application/json"
@@ -1007,9 +1567,19 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     snap = collect()
-    print(f"penta monitor: {len(snap['runs'])} run logs in {HERE}")
-    print(f"  -> http://localhost:{PORT}")
+    host = hosted_status()
+    # flush: stdout is a redirect to monitor.out in normal use, so without
+    # this the startup banner sits in the buffer until the process exits --
+    # which is precisely when nobody is looking for it.
+    print(f"penta monitor: {len(snap['runs'])} run logs in {HERE}", flush=True)
+    print(f"  hosted bot: daemon "
+          f"{'up' if host['daemon'] else 'DOWN'}, "
+          f"{host['games']['total']} transcripts, "
+          f"{host['search_failed']} SEARCH FAILED", flush=True)
+    print(f"  -> http://localhost:{PORT}", flush=True)
     try:
-        HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+        # Threaded: /hosted-data reaches the network, and on a single
+        # thread one slow server call froze every other request on the page.
+        ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
     except KeyboardInterrupt:
         sys.exit(0)
