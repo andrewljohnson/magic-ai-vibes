@@ -1071,7 +1071,7 @@ function draw(){
     document.getElementById("sub").innerHTML=
       "Evaluation: our bot vs the engine's built-in handcrafted bot. "+
       "<b>50% is parity</b> — below it we are losing.";
-    now([]);panels([]);grid([]);mirror([]);
+    now([]);panels([]);grid([]);pool([]);mirror([]);
     return;
   }
   // The CHART shows only what is training. Finished and stopped runs pile
@@ -1222,6 +1222,9 @@ function draw(){
   now(DATA.runs);
   panels(runs);
   grid(runs);
+  // The FULL list again: the pool gate belongs to whichever run is
+  // training, which need not be one of the 8 charted series.
+  pool(DATA.runs);
   mirror(all);
   document.getElementById("foot").textContent =
     "mean ± is the standard error of that run's gate mean, built from the ± "
@@ -1332,6 +1335,18 @@ function now(runs){
       ${cell("value mse / base",
              (l.vmse||0).toFixed(3)+" / "+(l.vbase||0).toFixed(3))}
       ${cell("last gate", r.last!=null? r.last.toFixed(1)+"%" : "none yet")}
+      ${l.pool_games?cell("pooled games",
+             l.pool_games+"/"+l.round_games,
+             `<div class="foot" style="margin:0">${
+               (l.opp_records||0).toLocaleString()} opp records dropped of ${
+               (l.drop||0).toLocaleString()}</div>`):""}
+      ${cell("last pool gate", r.pool_last!=null
+             ? r.pool_last.pct.toFixed(1)+"%" : "none yet",
+             r.pool_last!=null?`<div class="foot" style="margin:0">${
+               r.pool_last.games} games, ${r.pool_last.dropped==null?"?":
+               r.pool_last.dropped} dropped${r.pool_last.anchor
+               ?` · anchor ${r.pool_last.anchor.pct.toFixed(0)}%`:``}</div>`
+             :"")}
      </div>`;
   }).join("<hr style='border:0;border-top:1px solid var(--border);margin:14px 0'>");
 }
@@ -1341,6 +1356,131 @@ function now(runs){
 // The bug is FIXED -- the POOL gate above replaced it -- but the numbers
 // already in the old logs are still bogus, so they stay here, labelled,
 // never fed into a headline tile, and never plotted next to a real gate.
+// ---- POOL gate --------------------------------------------------------
+// The promotion decision, and the only ABSOLUTE reading the loop produces.
+// A pooled score mixes the anchor (the net the run started from) with the
+// recent champions; beating the champions alone is a purely local signal --
+// a run once took four winning mirrors in a row and then scored 45.9%
+// against its own warm start. So the ANCHOR share is pulled out and shown
+// on its own, in red when it is below parity, even when the pooled number
+// cleared the promotion bar.
+//
+// Every percentage here is printed with the number of games behind it AND
+// the number the wall-clock guard dropped. A rate whose sample size is
+// invisible has misled this project before and is treated as untrustworthy.
+function pool(runs){
+  const box=document.getElementById("pool");
+  const bar=(DATA&&DATA.promote_bar)||55, rev=(DATA&&DATA.revert_floor)||45;
+  const rs=(runs||[]).filter(r=>r.pool&&r.pool.length)
+    .sort((a,b)=>((!a.done&&!a.stale)?0:1)-((!b.done&&!b.stale)?0:1));
+  if(!rs.length){box.innerHTML=`<p class="empty">No POOL lines yet — one is
+    logged at every gate round, so a fresh run shows nothing here for the
+    first --gate-every rounds.</p>`;return;}
+  const drops=p=>p.dropped==null?`<span class="drops">(drop count not
+    logged)</span>`
+    :`<span class="drops">(${p.dropped} unfinished, dropped)</span>`;
+  box.innerHTML=rs.map(r=>{
+    const p=r.pool[r.pool.length-1];
+    const ok=p.pct>=bar, lost=p.pct<rev;
+    const col=ok?"var(--s3)":lost?"var(--s8)":"var(--s4)";
+    const asked=p.games+(p.dropped||0);
+    const verdict=ok
+      ? `cleared the ${bar}% promotion bar`
+      : `<b>${(bar-p.pct).toFixed(1)} points short</b> of the ${bar}% bar`
+        +(lost?` — and below the ${rev}% revert floor`:"");
+    const a=p.anchor;
+    const anchorBox=a
+      ? `<div class="callout${a.pct<50?" neg":""}">
+          <div class="n">${a.pct.toFixed(1)}%</div>
+          <div style="margin-top:2px"><b>vs the net this run started
+          from</b> — the only absolute measure of progress. Over
+          ${a.games} games; ${p.dropped==null?"drop count not logged"
+            :p.dropped+" of "+asked+" pool games dropped unfinished"}.</div>
+          ${a.pct<50?`<div style="margin-top:6px;color:var(--s8)">
+            <b>REGRESSION.</b> Below 50% means the candidate is LOSING to
+            the net the run started from${ok?`, even though the pooled
+            score cleared the bar — the pooled number is being carried by
+            wins over its own recent champions, which is exactly the
+            walking-in-a-circle failure the anchor exists to catch`:``}.
+            </div>`:``}
+        </div>`
+      : `<div class="callout neg"><div class="n">—</div>
+          <div><b>No anchor in this pool.</b> Without the net the run
+          started from, every number here is relative to the run's own
+          recent past and says nothing about absolute progress.</div></div>`;
+    const c=r.pool_counts||{};
+    const l=r.live||{};
+    const comp=(l.pool_games&&l.round_games)
+      ? `<p class="foot" style="margin:10px 0 0">Round composition:
+         <b>${l.pool_games}/${l.round_games} games</b> of each round are
+         played against a pool opponent, and a pooled game trains on the
+         learner's decisions only — ${(l.opp_records||0).toLocaleString()}
+         opponent records dropped last round out of
+         ${(l.drop||0).toLocaleString()} dropped in total. Half the games
+         contribute about half their records.</p>`
+      : ``;
+    return `
+     <div><b>${r.name}</b> <span class="foot">${r.label||""} · pool gate at
+       round ${p.round}${p.secs?` · ${p.secs}s`:``}</span></div>
+     <div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:8px">
+      <div style="min-width:280px;flex:1">
+        <div class="foot" style="margin:0">pooled score (all opponents)</div>
+        <div class="big" style="color:${col}">${p.pct.toFixed(1)}%</div>
+        <div class="meter">
+          <div class="fill" style="width:${Math.max(0,Math.min(100,p.pct))}%;
+            background:${col};opacity:.55"></div>
+          <div class="bar rev" style="left:${rev}%" title="revert floor"></div>
+          <div class="bar" style="left:${bar}%" title="promotion bar"></div>
+        </div>
+        <div>over <b>${p.games} games</b> ${drops(p)} — ${verdict}</div>
+        <div class="foot" style="margin:6px 0 0">Ticks: black =
+          ${bar}% promotion bar, red = ${rev}% revert floor.</div>
+        <div style="margin-top:8px">
+          <span class="pill">outcome: <b>${p.outcome||"—"}</b></span>
+          ${p.detail?`<span class="foot">${p.detail}</span>`:``}</div>
+        <div style="margin-top:8px">
+          <span class="pill">promoted <b>${c.promoted||0}</b></span>
+          <span class="pill">reverted <b>${c.reverted||0}</b></span>
+          <span class="pill">kept <b>${c.kept||0}</b></span></div>
+      </div>
+      <div style="min-width:280px;flex:1">${anchorBox}</div>
+     </div>
+     <table class="mu" style="margin-top:12px"><tr>
+       <th>opponent</th><th>score</th><th>games</th></tr>
+       ${p.parts.map(x=>{
+         const an=x.name==="anchor";
+         return `<tr><td>${an?`<b>anchor</b> <span class="cfg">the net this
+           run started from</span>`:x.name}</td>
+           <td class="v" style="${an?`font-weight:600;`:``}color:${
+             x.pct<50?"var(--s8)":"inherit"}">${x.pct.toFixed(1)}%</td>
+           <td class="v">${x.games}</td></tr>`;}).join("")}
+       <tr><td><b>pooled</b></td>
+         <td class="v" style="font-weight:600">${p.pct.toFixed(1)}%</td>
+         <td class="v">${p.games} <span class="drops">${
+           p.dropped==null?"":"+"+p.dropped+" dropped"}</span></td></tr>
+     </table>
+     <p class="foot" style="margin:6px 0 0">champ-N are this run's own
+     earlier promoted nets: beating them says the net moved, not that it
+     improved. Only the anchor row says that.</p>
+     ${comp}
+     <table class="mu" style="margin-top:12px"><tr><th>round</th>
+       <th>pooled</th><th>games</th><th>dropped</th><th>anchor</th>
+       <th>outcome</th></tr>
+       ${r.pool.slice(-8).reverse().map(q=>`<tr>
+         <td>${q.round}</td>
+         <td class="v" style="color:${q.pct>=bar?"var(--s3)":
+           q.pct<rev?"var(--s8)":"inherit"}">${q.pct.toFixed(1)}%</td>
+         <td class="v">${q.games}</td>
+         <td class="v">${q.dropped==null?"—":q.dropped}</td>
+         <td class="v" style="color:${q.anchor&&q.anchor.pct<50
+           ?"var(--s8)":"inherit"}">${q.anchor
+           ?q.anchor.pct.toFixed(1)+"% <span class=\"drops\">("+
+            q.anchor.games+")</span>":"—"}</td>
+         <td>${q.outcome||"—"}</td></tr>`).join("")}
+     </table>`;
+  }).join("<hr style='border:0;border-top:1px solid var(--border);margin:16px 0'>");
+}
+
 function mirror(runs){
   const box=document.getElementById("mirror");
   const rs=(runs||[]).filter(r=>r.mirror&&r.mirror.length);
