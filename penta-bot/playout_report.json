@@ -1,65 +1,76 @@
 {
- "net": "deploy_v1",
- "iters": 32,
- "games": 14,
+ "net": "az_t54b",
+ "iters": 128,
+ "games": 24,
  "deck": "Sligh",
  "record": {
-  "win": 6,
-  "loss": 8,
+  "win": 12,
+  "loss": 12,
   "other": 0
  },
- "decisions": 2900,
+ "decisions": 5105,
  "flags": {
-  "no_attack_into_undefended": 2,
-  "skipped_land_drop": 5,
+  "skipped_land_drop": 11,
   "kept_hand_with_no_mana": 2,
-  "x_spell_cast_for_zero": 1,
-  "damage_pointed_at_self": 1,
-  "attacked_into_bigger_blocker": 12
+  "floated_mana_into_burn": 32,
+  "x_spell_cast_for_zero": 2,
+  "attacked_into_bigger_blocker": 6,
+  "buffed_opponent_creature": 1
  },
  "per_game_rate": {
-  "no_attack_into_undefended": 0.14,
-  "skipped_land_drop": 0.36,
-  "kept_hand_with_no_mana": 0.14,
-  "x_spell_cast_for_zero": 0.07,
-  "damage_pointed_at_self": 0.07,
-  "attacked_into_bigger_blocker": 0.86
+  "skipped_land_drop": 0.46,
+  "kept_hand_with_no_mana": 0.08,
+  "floated_mana_into_burn": 1.33,
+  "x_spell_cast_for_zero": 0.08,
+  "attacked_into_bigger_blocker": 0.25,
+  "buffed_opponent_creature": 0.04
  },
  "examples": {
-  "no_attack_into_undefended": [
-   "game 0 T9 DeclareAttackers: declined to attack with Attack with Goblin Balloon Brigade -> p2 -- they have NO untapped creatures",
-   "game 5 T14 DeclareAttackers: declined to attack with Attack with Goblins of the Flarg -> p1; Attack with Goblins of the Flarg -> p1 -- they have NO untapped creatures"
-  ],
   "skipped_land_drop": [
    "game 0 T7: could play a land, did not",
-   "game 2 T3: could play a land, did not",
+   "game 0 T9: could play a land, did not",
+   "game 5 T10: could play a land, did not",
    "game 9 T6: could play a land, did not",
    "game 9 T8: could play a land, did not",
-   "game 10 T9: could play a land, did not"
+   "game 11 T12: could play a land, did not",
+   "game 12 T11: could play a land, did not",
+   "game 16 T11: could play a land, did not",
+   "game 20 T5: could play a land, did not",
+   "game 22 T15: could play a land, did not",
+   "game 23 T22: could play a land, did not"
   ],
   "kept_hand_with_no_mana": [
    "game 1 T1 Upkeep: kept Goblin Balloon Brigade, Ironclaw Orcs, Goblins of the Flarg, Lightning Bolt, Goblin Balloon Brigade, Chaos Orb, Chain Lightning -- no land, no Mox, no Lotus",
    "game 5 T1 Upkeep: kept Goblins of the Flarg, Goblins of the Flarg, Lightning Bolt, Goblin Balloon Brigade, Blood Moon, Chain Lightning, Goblin Balloon Brigade -- no land, no Mox, no Lotus"
   ],
-  "x_spell_cast_for_zero": [
-   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) -- X=0 deals nothing, card wasted"
+  "floated_mana_into_burn": [
+   "game 1 T14 CombatDamage: Tap Mox Ruby for mana with nothing to spend it on -- burns for that much",
+   "game 2 T7 Draw: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 2 T9 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T7 BeginningOfCombat: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 7 T18 EndOfCombat: Tap Mishra's Factory for mana with nothing to spend it on -- burns for that much",
+   "game 7 T18 EndOfCombat: Tap Mishra's Factory for mana with nothing to spend it on -- burns for that much",
+   "game 7 T18 EndOfCombat: Tap Mishra's Factory for mana with nothing to spend it on -- burns for that much",
+   "game 10 T5 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 10 T5 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 10 T9 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 10 T9 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 11 T6 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much"
   ],
-  "damage_pointed_at_self": [
-   "game 3 T6 PrecombatMain: Cast Fireball -> player p2 (US) [own face]"
+  "x_spell_cast_for_zero": [
+   "game 2 T3 PrecombatMain: Cast Fireball -> player p2 -- X=0 deals nothing, card wasted",
+   "game 3 T4 PrecombatMain: Cast Fireball -> Goblins of the Flarg -- X=0 deals nothing, card wasted"
   ],
   "attacked_into_bigger_blocker": [
-   "game 4 T18 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Serra Angel (4/4) -- it dies, the blocker lives",
-   "game 5 T12 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into White Knight (2/2) -- it dies, the blocker lives",
-   "game 5 T12 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into White Knight (2/2) -- it dies, the blocker lives",
-   "game 5 T12 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into White Knight (2/2) -- it dies, the blocker lives",
-   "game 6 T7 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Erhnam Djinn (4/5) -- it dies, the blocker lives",
-   "game 9 T10 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Atog (1/2) -- it dies, the blocker lives",
-   "game 11 T16 DeclareAttackers: Attack with Goblin Balloon Brigade -> p1 (1/1) into Serendib Efreet (3/4) -- it dies, the blocker lives",
-   "game 12 T5 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Su-Chi (4/4) -- it dies, the blocker lives",
-   "game 13 T6 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Sedge Troll (3/3) -- it dies, the blocker lives",
-   "game 13 T6 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Sedge Troll (3/3) -- it dies, the blocker lives",
-   "game 13 T8 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Sedge Troll (3/3) -- it dies, the blocker lives",
-   "game 13 T8 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Sedge Troll (3/3) -- it dies, the blocker lives"
+   "game 8 T19 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Su-Chi (4/4) -- it dies, the blocker lives",
+   "game 14 T7 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Hypnotic Specter (2/2) -- it dies, the blocker lives",
+   "game 16 T9 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Su-Chi (4/4) -- it dies, the blocker lives",
+   "game 18 T12 DeclareAttackers: Attack with Goblin Balloon Brigade -> p2 (1/1) into White Knight (2/2) -- it dies, the blocker lives",
+   "game 19 T12 DeclareAttackers: Attack with Goblin Balloon Brigade -> p1 (1/1) into Serendib Efreet (3/4) -- it dies, the blocker lives",
+   "game 22 T9 DeclareAttackers: Attack with Goblin Balloon Brigade -> p2 (1/1) into Atog (1/2) -- it dies, the blocker lives"
+  ],
+  "buffed_opponent_creature": [
+   "game 14 T14 DeclareBlockers: Activate Mishra's Factory -> Mishra's Factory -- that creature is THEIRS"
   ]
  }
 }

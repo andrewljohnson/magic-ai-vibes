@@ -269,14 +269,33 @@ failures now print.
 
 ## What the bot does wrong
 
-From `playout_log.py`, rule-level errors only — judgement calls excluded:
+From `playout_log.py`, rule-level errors only — judgement calls excluded.
+24 games, current best net at 128 sims:
 
 | rate | defect |
 |---|---|
-| 0.86/game | attacks into a strictly better blocker (2/2 into an untapped 4/4) |
-| 0.60/game | skips a land drop entirely |
-| 0.14/game | keeps an opening hand with no land, no Mox, no Lotus |
-| 0.07/game | casts an X spell for X=0 |
+| **1.33/game** | **makes mana it cannot spend, and burns for it** |
+| 0.46/game | skips a land drop entirely |
+| 0.25/game | attacks into a strictly better blocker |
+| 0.08/game | keeps an opening hand with no land, no Mox, no Lotus |
+| 0.08/game | casts an X spell for X=0 |
+| 0.04/game | pumps an opponent's creature |
+| 0.00/game | discards a land it could have played |
+
+**Mana burn is the biggest single defect, by a factor of three.** Mana burn
+is a live rule in this format, so activating a mana ability with nothing to
+spend it on is not idle — it deals that much damage to us. Found by playing
+the hosted bot: it tapped Mishra's Factory for colourless during its OWN
+upkeep and burned for 1. The detector fires when a mana ability is chosen
+and the same decision offers no spell to cast and no ability with a mana
+cost, so the mana provably has nowhere to go.
+
+Why the loop does not train this away is the interesting part: the cost
+arrives as one point of life at the END of the step, several plies after
+the decision, and the value head sees only the eventual game result. This is
+a credit-assignment defect with a rule-level signature, which makes it a
+good test case for whether the loop can learn a delayed self-inflicted cost
+at all.
 
 The encoding is bag-of-cards counts per zone. It cannot express "my 2/2
 versus their 4/4" as a pairwise relation, which is exactly the combat
