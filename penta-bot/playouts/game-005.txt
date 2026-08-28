@@ -2,23 +2,25 @@
   T1 Upkeep [their turn] life [20, 20] | 2 options -> TakeMulligan
   T1 Upkeep [their turn] life [20, 20] | 2 options -> KeepHand
   T1 Upkeep [their turn] life [20, 20] | 7 options -> BottomCards
-  T4 PrecombatMain [our turn] life [20, 15] | 2 options -> PlayLand Mountain
-  T4 PrecombatMain [our turn] life [20, 15] | 15 options -> Cast Chain Lightning -> White Knight
-  T6 Upkeep [our turn] life [18, 9] | 5 options -> Cast Lightning Bolt -> Savannah Lions
-  T8 Upkeep [our turn] life [18, 9] | 5 options -> PassPriority
-  T8 Draw [our turn] life [18, 9] | 5 options -> PassPriority
-  T8 PrecombatMain [our turn] life [18, 9] | 11 options -> Cast Goblins of the Flarg
-  T8 PrecombatMain [our turn] life [18, 9] | 2 options -> PlayLand Mountain
-  T8 PrecombatMain [our turn] life [18, 9] | 10 options -> Cast Goblins of the Flarg
-  T10 Upkeep [our turn] life [17, 6] | 8 options -> PassPriority
-  T10 Draw [our turn] life [17, 6] | 8 options -> Cast Lightning Bolt -> player p1
-  T10 Draw [our turn] life [17, 6] | 2 options -> PassPriority
-  T10 Draw [our turn] life [14, 6] | 2 options -> PassPriority
-  T10 PrecombatMain [our turn] life [14, 6] | 6 options -> Cast Goblins of the Flarg
+  T4 PrecombatMain [our turn] life [20, 15] | 2 options -> PassPriority
+  T4 PostcombatMain [our turn] life [20, 15] | 2 options -> PlayLand Mountain
+  T4 PostcombatMain [our turn] life [20, 15] | 15 options -> Cast Lightning Bolt -> White Knight
+  T6 Upkeep [our turn] life [18, 9] | 2 options -> PassPriority
+  T6 Draw [our turn] life [18, 9] | 5 options -> PassPriority
+  T6 PrecombatMain [our turn] life [18, 9] | 13 options -> Cast Lightning Bolt -> Savannah Lions
+  T8 Upkeep [our turn] life [18, 9] | 2 options -> PassPriority
+  T8 Draw [our turn] life [18, 9] | 2 options -> PassPriority
+  T8 PrecombatMain [our turn] life [18, 9] | 11 options -> Cast Chain Lightning -> player p1
+  T8 PrecombatMain [our turn] life [15, 9] | 2 options -> PlayLand Mountain
+  T8 PrecombatMain [our turn] life [15, 9] | 7 options -> Cast Goblins of the Flarg
+  T10 Upkeep [our turn] life [14, 6] | 3 options -> PassPriority
+  T10 Draw [our turn] life [14, 6] | 3 options -> PassPriority
+  T10 PrecombatMain [our turn] life [14, 6] | 8 options -> Cast Goblin Balloon Brigade
+  T10 PrecombatMain [our turn] life [14, 6] | 2 options -> PassPriority
+  T10 PrecombatMain [our turn] life [14, 6] | 7 options -> Cast Goblins of the Flarg
   T10 PrecombatMain [our turn] life [14, 6] | 2 options -> PlayLand Mountain
-  T10 PrecombatMain [our turn] life [14, 6] | 4 options -> Cast Goblin Balloon Brigade
-  T10 DeclareAttackers [our turn] life [14, 6] | 3 options -> Attack with Goblins of the Flarg -> p1
-  T10 DeclareAttackers [our turn] life [14, 6] | 2 options -> FinishDeclaringAttackers
+  T10 PrecombatMain [our turn] life [14, 6] | 5 options -> Cast Goblins of the Flarg
+  T10 DeclareAttackers [our turn] life [14, 6] | 2 options -> Attack with Goblins of the Flarg -> p1
   T12 Upkeep [our turn] life [12, 3] | 5 options -> PassPriority
   T12 Draw [our turn] life [12, 3] | 5 options -> PassPriority
   T12 PrecombatMain [our turn] life [12, 3] | 7 options -> PassPriority
@@ -37,14 +39,13 @@
   T13 Upkeep [their turn] life [10, 3] | 5 options -> Tap Mountain for mana
   T13 Upkeep [their turn] life [10, 3] | 4 options -> Activate Goblin Balloon Brigade
   T13 Upkeep [their turn] life [10, 3] | 4 options -> Tap Mountain for mana
-  T13 Upkeep [their turn] life [10, 3] | 3 options -> PassPriority
   T13 Upkeep [their turn] life [10, 3] | 3 options -> Activate Goblin Balloon Brigade
   T13 DeclareBlockers [their turn] life [10, 4] | 5 options -> Block White Knight with Goblins of the Flarg
   T13 DeclareBlockers [their turn] life [10, 4] | 4 options -> Block White Knight with Goblins of the Flarg
-  T13 DeclareBlockers [their turn] life [10, 4] | 3 options -> Block White Knight with Goblin Balloon Brigade
+  T13 DeclareBlockers [their turn] life [10, 4] | 3 options -> FinishDeclaringBlockers
   T14 Upkeep [our turn] life [10, 1] | 5 options -> PassPriority
   T14 Draw [our turn] life [10, 1] | 5 options -> PassPriority
   T14 PrecombatMain [our turn] life [10, 1] | 7 options -> Cast Blood Moon
   T14 DeclareAttackers [our turn] life [10, 1] | 3 options -> Attack with Goblin Balloon Brigade -> p1
-  T14 DeclareAttackers [our turn] life [10, 1] | 2 options -> FinishDeclaringAttackers
+  T14 DeclareAttackers [our turn] life [10, 1] | 2 options -> Attack with Goblins of the Flarg -> p1
 === result: LOSS after 206 decisions ===

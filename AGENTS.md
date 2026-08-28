@@ -67,6 +67,19 @@ it passed.
 daemons by pattern killed the calling shell mid-command, twice, which read
 as a mystery exit code. Use `pgrep -f '[h]osted_bot.py'` or a pidfile.
 
+**A flag that is set is not a flag that is running.** Play-the-turn-out was
+added to the search, the env var was set, the strings were in the compiled
+binary, and a 200-game paired mirror came back 48.4% -- a clean null result.
+The descent has TWO expansion sites and only one had been patched, so the
+search did nothing differently. An `expand_calls` counter showed 0 and
+settled it in a single run. Before believing that a change did not help,
+prove the change RAN: count something it must increment, and check the
+count moved.
+
+**Grep for every site, not the first one.** The same edit was needed at two
+places 40 lines apart. `git grep` for the surrounding pattern (here
+`first_visit`) rather than trusting the first match a search returns.
+
 ## Invariants
 
 * `aac_lockstep.py` holds native rows bit-identical to the Python path.
