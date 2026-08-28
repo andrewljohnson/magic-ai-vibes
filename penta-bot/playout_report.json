@@ -8,86 +8,83 @@
   "loss": 9,
   "other": 0
  },
- "decisions": 3712,
+ "decisions": 3559,
  "flags": {
-  "buffed_opponent_creature": 1,
+  "floated_mana_into_burn": 20,
   "kept_hand_with_no_mana": 2,
-  "floated_mana_into_burn": 16,
-  "skipped_land_drop": 20,
-  "animated_a_tapped_land": 9,
-  "no_attack_into_undefended": 2,
-  "attacked_into_bigger_blocker": 9
+  "skipped_land_drop": 21,
+  "x_spell_cast_for_zero": 1,
+  "damage_pointed_at_self": 1,
+  "attacked_into_bigger_blocker": 5,
+  "animated_a_tapped_land": 6,
+  "no_attack_into_undefended": 1
  },
  "per_game_rate": {
-  "buffed_opponent_creature": 0.06,
+  "floated_mana_into_burn": 1.25,
   "kept_hand_with_no_mana": 0.12,
-  "floated_mana_into_burn": 1.0,
-  "skipped_land_drop": 1.25,
-  "animated_a_tapped_land": 0.56,
-  "no_attack_into_undefended": 0.12,
-  "attacked_into_bigger_blocker": 0.56
+  "skipped_land_drop": 1.31,
+  "x_spell_cast_for_zero": 0.06,
+  "damage_pointed_at_self": 0.06,
+  "attacked_into_bigger_blocker": 0.31,
+  "animated_a_tapped_land": 0.38,
+  "no_attack_into_undefended": 0.06
  },
  "examples": {
-  "buffed_opponent_creature": [
-   "game 0 T10 DeclareAttackers: Activate Mishra's Factory -> Mishra's Factory -- that creature is THEIRS"
+  "floated_mana_into_burn": [
+   "game 0 T5 Draw: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 1 T14 EndOfCombat: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 2 T3 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 2 T7 Draw: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 3 T4 Draw: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 3 T6 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T3 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T7 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T9 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T9 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 4 T9 Draw: Tap Mountain for mana with nothing to spend it on -- burns for that much",
+   "game 10 T5 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much"
   ],
   "kept_hand_with_no_mana": [
    "game 1 T1 Upkeep: kept Goblin Balloon Brigade, Ironclaw Orcs, Goblins of the Flarg, Lightning Bolt, Goblin Balloon Brigade, Chaos Orb, Chain Lightning -- no land, no Mox, no Lotus",
    "game 5 T1 Upkeep: kept Goblins of the Flarg, Goblins of the Flarg, Lightning Bolt, Goblin Balloon Brigade, Blood Moon, Chain Lightning, Goblin Balloon Brigade -- no land, no Mox, no Lotus"
-  ],
-  "floated_mana_into_burn": [
-   "game 1 T14 EndOfCombat: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 2 T3 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 4 T3 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 4 T3 PrecombatMain: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 10 T5 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 10 T9 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T10 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T12 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T14 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T16 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T22 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much",
-   "game 15 T24 Upkeep: Tap Mountain for mana with nothing to spend it on -- burns for that much"
   ],
   "skipped_land_drop": [
    "game 1 T10: could play a land, did not",
    "game 1 T12: could play a land, did not",
    "game 1 T14: could play a land, did not",
    "game 1 T16: could play a land, did not",
+   "game 4 T9: could play a land, did not",
    "game 8 T11: could play a land, did not",
    "game 9 T6: could play a land, did not",
    "game 9 T8: could play a land, did not",
+   "game 9 T10: could play a land, did not",
+   "game 12 T11: could play a land, did not",
    "game 13 T4: could play a land, did not",
-   "game 15 T2: could play a land, did not",
-   "game 15 T6: could play a land, did not",
-   "game 15 T10: could play a land, did not",
-   "game 15 T12: could play a land, did not"
+   "game 15 T2: could play a land, did not"
   ],
-  "animated_a_tapped_land": [
-   "game 3 T4 PostcombatMain: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 8 T5 Draw: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 8 T5 DeclareBlockers: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 9 T10 PostcombatMain: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 13 T6 BeginningOfCombat: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 13 T8 DeclareBlockers: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 13 T16 Upkeep: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 13 T16 Draw: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
-   "game 15 T6 Upkeep: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block"
+  "x_spell_cast_for_zero": [
+   "game 3 T6 PostcombatMain: Cast Fireball -> player p2 (US) -- X=0 deals nothing, card wasted"
   ],
-  "no_attack_into_undefended": [
-   "game 5 T10 DeclareAttackers: declined to attack with Attack with Goblins of the Flarg -> p1 -- they have NO untapped creatures",
-   "game 5 T14 DeclareAttackers: declined to attack with Attack with Goblins of the Flarg -> p1 -- they have NO untapped creatures"
+  "damage_pointed_at_self": [
+   "game 3 T6 PostcombatMain: Cast Fireball -> player p2 (US) [own face]"
   ],
   "attacked_into_bigger_blocker": [
    "game 5 T12 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into White Knight (2/2) -- it dies, the blocker lives",
    "game 8 T15 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Atog (1/2) -- it dies, the blocker lives",
    "game 9 T10 DeclareAttackers: Attack with Goblins of the Flarg -> p1 (1/1) into Atog (1/2) -- it dies, the blocker lives",
-   "game 12 T5 DeclareAttackers: Attack with Mishra's Factory -> p2 (2/2) into Su-Chi (4/4) -- it dies, the blocker lives",
    "game 12 T5 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Su-Chi (4/4) -- it dies, the blocker lives",
-   "game 12 T11 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Su-Chi (4/4) -- it dies, the blocker lives",
-   "game 14 T9 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Juz\u00e1m Djinn (5/5) -- it dies, the blocker lives",
-   "game 14 T9 DeclareAttackers: Attack with Mishra's Factory -> p2 (2/2) into Juz\u00e1m Djinn (5/5) -- it dies, the blocker lives",
-   "game 14 T9 DeclareAttackers: Attack with Ironclaw Orcs -> p2 (2/2) into Juz\u00e1m Djinn (5/5) -- it dies, the blocker lives"
+   "game 14 T7 DeclareAttackers: Attack with Goblins of the Flarg -> p2 (1/1) into Hypnotic Specter (2/2) -- it dies, the blocker lives"
+  ],
+  "animated_a_tapped_land": [
+   "game 8 T5 Draw: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
+   "game 8 T5 BeginningOfCombat: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
+   "game 13 T6 BeginningOfCombat: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
+   "game 13 T8 CombatDamage: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
+   "game 13 T14 Draw: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block",
+   "game 15 T6 Upkeep: paid to animate Mishra's Factory while it was already tapped -- it cannot attack or block"
+  ],
+  "no_attack_into_undefended": [
+   "game 13 T16 DeclareAttackers: declined to attack with Attack with Mishra's Factory -> p1 -- they have NO untapped creatures"
   ]
  }
 }

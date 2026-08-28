@@ -176,6 +176,34 @@ gate could fall 8.4 points at round 124 while the mirror promoted.
 Two lessons, both general: a ratchet needs a fixed reference somewhere in
 it, and "beats its predecessor" is not a measurement of progress.
 
+## Play-the-turn-out: helps combat, does NOT fix mana burn
+
+On first visit the search now plays on with the prior's argmax through both
+seats instead of evaluating the afterstate immediately, so an iteration sees
+its own combat resolve and its own step end. Same net, same 16 seeds, 128
+sims, raw counts (16 games is a small sample — read these as directional):
+
+| defect | OFF | ON |
+|---|---|---|
+| attacks into a strictly better blocker | 9 | **5** |
+| animated a tapped land | 9 | 6 |
+| **makes mana it cannot spend** | **16** | **20** |
+| skips a land drop | 20 | 21 |
+
+Record was 7-9 both ways, so no strength change is visible at this sample.
+
+**The combat defect moved and the mana defect did not**, which is the
+informative part. Combat consequences are LARGE in value terms — a creature
+dies, several damage lands — so once the search can see them it avoids them.
+Mana burn is **one point of life**, which is almost certainly below the value
+head's resolution: making the cost visible does not help if the cost is too
+small to register against the noise in a win-probability estimate.
+
+So "the search cannot see the consequence" was only half the story. For
+burn, the other half is that the consequence is tiny. That is an argument for
+removing the action rather than waiting for the loop to learn it — the
+credit-assignment fix is real but does not reach this defect.
+
 ## Ruled out, with evidence
 
 Instrumented counters (`spz_core.search_stats()`) over 105k determinizations
