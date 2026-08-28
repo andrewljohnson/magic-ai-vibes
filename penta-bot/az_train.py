@@ -257,7 +257,7 @@ def main():
                          "The gate is DETERMINISTIC -- fixed seeds, fixed "
                          "opponent, no root noise -- so comparing two nets "
                          "over the same 300 games is paired and EXACT: "
-                         "re-gating frozen weights reproduced 54.3% to the "
+                         "re-gating frozen weights reproduced 54.3%% to the "
                          "game. So any decline is real and 0 is right -- "
                          "keep the best net, and let each 20-round attempt "
                          "be a fresh try from it.")
@@ -266,6 +266,19 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--pool-champions", type=int, default=3,
+                    help="how many recent champions join the anchor in the "
+                         "promotion pool")
+    ap.add_argument("--promote-bar", type=float, default=0.55,
+                    help="pooled score a candidate must clear. A FIXED bar, "
+                         "not 50%% plus noise: promotion selects on a noisy "
+                         "read, so every promoted delta is biased upward. "
+                         "AlphaGo Zero used 55%% over 400 games.")
+    ap.add_argument("--expand-plies", type=int, default=0,
+                    help="plies of prior-argmax play-out after expanding a "
+                         "search node, so an iteration sees its own combat "
+                         "resolve and its own mana burn land. 0 = evaluate "
+                         "the afterstate immediately.")
     ap.add_argument("--mirror-games", type=int, default=0,
                     help="If >0, also play the current net against the best "
                          "net head to head and promote on THAT. The "
@@ -368,47 +381,67 @@ def main():
 
     gopps = [d for d in decks if d != args.learner_deck]
 
-    def mirror_vs_best(tag):
-        """Play the CURRENT net against the BEST net, both searching.
+    def mirror_vs_pool(tag):
+        """Score the candidate against a POOL: the anchor plus recent champions.
 
-        The handcrafted gate measures how well we exploit one fixed,
-        deterministic opponent. A net can get better at the game and worse
-        at that -- and the ratchet would discard it every time. This asks
-        the question the loop is actually optimising: is the new net better
-        than the one it came from?
+        Promoting on a head-to-head against the PREVIOUS BEST only ever asks
+        a local question, and a chain of local wins does not imply progress.
+        Measured: a run took four promotions whose mirrors read 56.3, 54.7,
+        58.9 and 57.7 against their immediate predecessors, and the final net
+        then scored 45.9% +/- 3.8 against the warm start it began from. Each
+        net beat the one before it; the lineage went nowhere. That is the
+        cycling a best-response operator is prone to, and the moving-target
+        gate is structurally unable to see it.
+
+        So the ANCHOR (the net the run started from) stays in the pool
+        forever, which is what stops the chain walking in a circle, and the
+        last few champions come along to keep the comparison honest about
+        recent play. Games are split equally and seats swapped within each
+        opponent.
+
+        There is also a winner's curse to pay for: we promote when a noisy
+        read clears a bar, so every promoted delta is biased upward. Hence a
+        55% bar over many games rather than 50% plus a standard error --
+        AlphaGo Zero used 55% over 400.
         """
-        if best.get("policy") is None:
+        opponents = []
+        if anchor_paths:
+            opponents.append(("anchor", anchor_paths))
+        for i, champ in enumerate(reversed(champions[-args.pool_champions:])):
+            opponents.append((f"champ-{len(champions)-i}", champ))
+        if not opponents:
             return None
-        bp = pol_path.replace(".azp", "_best.azp")
-        bv = val_path.replace(".spzw", "_best.spzw")
-        if not (os.path.exists(bp) and os.path.exists(bv)):
-            return None
-        specs = [(decks[g % len(decks)], decks[g % len(decks)], 400_000 + g)
-                 for g in range(args.mirror_games)]
-        half = len(specs) // 2
+        per = max(args.mirror_games // len(opponents), 2)
         it = args.gate_iters or args.iters
         t1 = time.time()
-        # Seats swapped between halves so seat bias cancels.
-        #
-        # This passed the SAME net for both seats until 2026-08-26 -- the
-        # old `az_h2h` could only vary iteration count, not the net -- so it
-        # played current-vs-current on one half and best-vs-best on the
-        # other and combined them as though that were a head-to-head. It
-        # read ~50% regardless of either net's strength, which is exactly
-        # what 182 rounds of it reported. Seat two's net is now explicit.
-        a = spz.az_h2h(catalog, val_path, pol_path, it, it, 1.5,
-                       "builtin-decklists.json", args.max_actions,
-                       args.threads, "greedy", specs[:half], bv, bp, 0.0, 0.0)
-        b = spz.az_h2h(catalog, bv, bp, it, it, 1.5,
-                       "builtin-decklists.json", args.max_actions,
-                       args.threads, "greedy", specs[half:],
-                       val_path, pol_path, 0.0, 0.0)
-        scores = [v for v in a[3] if v >= 0] + [1.0 - v for v in b[3] if v >= 0]
-        if not scores:
+        all_scores, parts = [], []
+        for name, (ov, op) in opponents:
+            specs = [(decks[g % len(decks)], decks[g % len(decks)],
+                      400_000 + abs(hash(name)) % 10_000 + g)
+                     for g in range(per)]
+            half = len(specs) // 2
+            a = spz.az_h2h(catalog, val_path, pol_path, it, it, 1.5,
+                           "builtin-decklists.json", args.max_actions,
+                           args.threads, "greedy", specs[:half], ov, op,
+                           0.0, 0.0, args.expand_plies, args.expand_plies)
+            b = spz.az_h2h(catalog, ov, op, it, it, 1.5,
+                           "builtin-decklists.json", args.max_actions,
+                           args.threads, "greedy", specs[half:],
+                           val_path, pol_path, 0.0, 0.0,
+                           args.expand_plies, args.expand_plies)
+            sc = [v for v in a[3] if v >= 0] + [1.0 - v for v in b[3] if v >= 0]
+            if not sc:
+                continue
+            all_scores += sc
+            parts.append(f"{name} {100*sum(sc)/len(sc):.0f}%({len(sc)})")
+        if not all_scores:
             return None
-        rate = sum(scores) / len(scores)
-        log(f"  MIRROR {tag}: current vs best {100*rate:.1f}% "
-            f"over {len(scores)} games [{time.time()-t1:.0f}s]", args.log)
+        rate = sum(all_scores) / len(all_scores)
+        # Say what the guard did to the sample, every time.
+        asked = per * len(opponents)
+        log(f"  POOL {tag}: {100*rate:.1f}% over {len(all_scores)} games "
+            f"({asked - len(all_scores)} unfinished, dropped) "
+            f"[{', '.join(parts)}] [{time.time()-t1:.0f}s]", args.log)
         return rate
 
     def run_gate(tag):
@@ -518,7 +551,7 @@ def main():
         out = spz.az_stream_episodes(
             catalog, val_path, pol_path, args.iters, 1.5,
             "builtin-decklists.json", args.max_actions, args.threads,
-            args.root_noise, specs)
+            args.root_noise, specs, args.expand_plies)
         (cand_b, rec, vis_b, priv_b, seat, ep_rec, ep_res, feat) = out
         gen = time.time() - t0
 
@@ -835,7 +868,7 @@ def main():
             # Promote, revert, or carry on. The band is 2 SE wide so an
             # ordinary noisy gate does not throw away a good net -- only a
             # drop too large to be sampling noise triggers a revert.
-            mirror = mirror_vs_best(f"round {rnd}") if args.mirror_games else None
+            mirror = mirror_vs_pool(f"round {rnd}") if args.mirror_games else None
             prev = best["rate"]
             # With a mirror gate, promote when the net beats the one it came
             # from, and let the handcrafted gate be a report rather than a
@@ -845,10 +878,12 @@ def main():
             # carries a worse net forward, which is the no-floor bug again
             # on a different axis. The band is one standard error of the
             # mirror itself so an ordinary noisy result does neither.
-            mirror_se = (0.25 / max(args.mirror_games, 1)) ** 0.5
-            promote = (mirror > 0.5 + mirror_se) if mirror is not None \
+            # A FIXED bar, not 50% plus noise: promotion is a selection on a
+            # noisy read, so the promoted delta is biased upward (winner's
+            # curse). AlphaGo Zero used 55% over 400 games.
+            promote = (mirror > args.promote_bar) if mirror is not None \
                 else (prev is None or rate > prev)
-            mirror_lost = mirror is not None and mirror < 0.5 - mirror_se
+            mirror_lost = mirror is not None and mirror < 0.45
             if prev is None or promote:
                 best.update(rate=rate, round=rnd,
                             policy={k: v.detach().clone()
@@ -858,6 +893,13 @@ def main():
                 export_policy(policy, pol_path.replace(".azp", "_best.azp"),
                               state_dim, action_dim)
                 export_value(value, val_path.replace(".spzw", "_best.spzw"))
+                # Keep this champion in the pool so later candidates keep
+                # being asked to beat it, not just their immediate parent.
+                cp = pol_path.replace(".azp", f"_champ{len(champions)+1}.azp")
+                cv = val_path.replace(".spzw", f"_champ{len(champions)+1}.spzw")
+                export_policy(policy, cp, state_dim, action_dim)
+                export_value(value, cv)
+                champions.append((cv, cp))
                 reverts = []
                 log(f"    PROMOTED: new best {100*rate:.1f}%"
                     + (f" (was {100*prev:.1f}%)" if prev is not None else

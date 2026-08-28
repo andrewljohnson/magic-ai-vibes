@@ -244,6 +244,8 @@ pub struct MctsConfig {
     /// Dirichlet concentration. AlphaZero scales it to the branching
     /// factor (~10 / typical legal moves); decisions here offer ~7.
     pub root_noise_alpha: f64,
+    /// Plies of prior-argmax play-out after expanding a node. 0 = off.
+    pub expand_plies: usize,
     /// Above this many legal actions, do NOT search the decision -- score
     /// the candidates once with the policy head and play the argmax. 0
     /// disables the cap.
@@ -265,6 +267,7 @@ impl Default for MctsConfig {
             max_depth: 400,
             root_noise_frac: 0.0,
             root_noise_alpha: 1.0,
+            expand_plies: 0,
             max_actions: 0,
             c_puct: 1.5,
             inert: false,
@@ -338,11 +341,12 @@ pub mod stats {
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
     use std::sync::Mutex;
 
-    pub const N: usize = 10;
+    pub const N: usize = 12;
     pub const NAMES: [&str; N] = [
         "det_ok", "det_err", "iters_started", "iters_reached_opponent",
         "opp_action_none", "opp_apply_fail", "our_apply_fail",
         "max_depth_hits", "terminal_leaves", "our_nodes",
+        "expand_plies_played", "expand_calls",
     ];
     pub const DET_OK: usize = 0;
     pub const DET_ERR: usize = 1;
@@ -354,12 +358,14 @@ pub mod stats {
     pub const DEPTH_HITS: usize = 7;
     pub const TERMINAL: usize = 8;
     pub const OUR_NODES: usize = 9;
+    pub const EXPAND_PLIES: usize = 10;
+    pub const EXPAND_CALLS: usize = 11;
 
     static C: [AtomicU64; N] = [
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
-        AtomicU64::new(0),
+        AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
     ];
     static ERRS: Mutex<Option<std::collections::HashMap<String, u64>>> =
         Mutex::new(None);
@@ -396,6 +402,67 @@ pub mod stats {
 }
 
 impl<'a> Ismcts<'a> {
+    /// Advance through the REST OF OUR OWN TURN with the prior's argmax,
+    /// stopping at the opponent's next decision, a terminal state, or a ply
+    /// budget. See the call site for why.
+    ///
+    /// Off by default until measured: `AZ_EXPAND_PLIES=0` disables it.
+    fn expand_playout(&self, world: &mut Game, _prng: &mut SplitMix64) {
+        stats::bump(stats::EXPAND_CALLS);
+        let budget = if self.cfg.expand_plies > 0 {
+            self.cfg.expand_plies
+        } else {
+            std::env::var("AZ_EXPAND_PLIES").ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0)
+        };
+        for _ in 0..budget {
+            if terminal_value(world, self.our_seat).is_some() {
+                return;
+            }
+            let Some(seat) = world.decision_player() else { return };
+            // Continue through the OPPONENT's plies too, with the same
+            // prior-argmax, rather than stopping the moment they get
+            // priority.
+            //
+            // Stopping there was the first thing tried and it measured
+            // 48.4% +/- 4.0 -- no gain. The reason is a rules detail: both
+            // players get priority in EVERY step, so after our mana ability
+            // in upkeep the opponent has a decision immediately and the
+            // play-out ended one ply later. Mana burn lands at the END of
+            // the step, which that variant never reached: the one case this
+            // was built for was the one case it could not see.
+            //
+            // `AZ_EXPAND_STOP_AT_OPP=1` restores the old behaviour.
+            if seat != self.our_seat
+                && std::env::var("AZ_EXPAND_STOP_AT_OPP").as_deref() == Ok("1")
+            {
+                return;
+            }
+            let (raw, quick) = world.legal_and_protocol_actions(seat);
+            if quick.is_empty() {
+                return;
+            }
+            let pick = if quick.len() == 1 {
+                0
+            } else {
+                let want: Vec<usize> = (0..quick.len()).collect();
+                let priors = self.action_priors(world, seat, &quick, &want);
+                let mut best = 0usize;
+                for (i, p) in priors.iter().enumerate() {
+                    if *p > priors[best] {
+                        best = i;
+                    }
+                }
+                best
+            };
+            if world.apply_enumerated(seat, &raw, quick[pick].clone()).is_err() {
+                return;
+            }
+            stats::bump(stats::EXPAND_PLIES);
+        }
+    }
+
     fn leaf_eval(&self, world: &Game) -> f64 {
         if let Some(t) = terminal_value(world, self.our_seat) {
             return t;
@@ -695,6 +762,12 @@ impl<'a> Ismcts<'a> {
                 }
                 path.push(sel_key);
                 if first_visit {
+                    // Same expansion as the other arm below: play the turn
+                    // out before evaluating. There are TWO expansion sites
+                    // in this descent and patching only one is a silent
+                    // no-op -- the counter said expand_calls=0 while the
+                    // code was compiled in and the flag was set.
+                    self.expand_playout(world, prng);
                     leaf = timed!(4, self.leaf_eval(world));
                     break;
                 }
@@ -734,7 +807,24 @@ impl<'a> Ismcts<'a> {
             }
             path.push(sel_key);
             if first_visit {
-                // Expansion: leaf-eval the afterstate and stop descending.
+                // Expansion. Instead of evaluating the afterstate straight
+                // away, PLAY THE REST OF OUR TURN OUT with the prior's
+                // argmax and evaluate where that lands.
+                //
+                // The afterstate right after our action is the wrong place
+                // to judge it: the consequence has not happened yet. Tapping
+                // a land produces a state whose pool reads "mana available"
+                // and whose burn lands several plies later; an attack has
+                // not been blocked; a spell has not resolved. The value head
+                // sees none of it, and the outcome label is dozens of
+                // decisions away, so nothing in the loop connects the action
+                // to its own cost. Measured consequence: the bot makes mana
+                // it cannot spend 1.33 times a game and burns for it.
+                //
+                // Bounded: it stops at the opponent's next decision, so it
+                // is a handful of cheap policy plies, and forced plies (most
+                // of them) cost no scoring at all.
+                self.expand_playout(world, prng);
                 leaf = timed!(4, self.leaf_eval(world));
                 break;
             }

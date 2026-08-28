@@ -241,7 +241,8 @@ pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
                 book: &DeckBook, d1: &str, d2: &str, seed: u64,
                 cfg: &MctsConfig, max_actions: usize,
                 iters_p1: usize, iters_p2: usize,
-                noise_p1: f64, noise_p2: f64) -> f64 {
+                noise_p1: f64, noise_p2: f64,
+                expand_p1: usize, expand_p2: usize) -> f64 {
     // AZ_H2H_SECS, falling back to AZ_GAME_SECS.
     //
     // Self-play wants a TIGHT per-game budget: a stuck game is wasted
@@ -294,6 +295,7 @@ pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
         // so measuring the teacher without it measures a search we never
         // actually run.
         seat_cfg.root_noise_frac = if p1 { noise_p1 } else { noise_p2 };
+        seat_cfg.expand_plies = if p1 { expand_p1 } else { expand_p2 };
         let policy = if p1 { policy_p1 } else { policy_p2 };
 
         let search = Ismcts {
@@ -396,6 +398,8 @@ mod prof_tests {
             root_noise_frac: std::env::var("AZ_NOISE").ok()
                 .and_then(|v| v.parse().ok()).unwrap_or(0.0),
             root_noise_alpha: 1.0,
+            expand_plies: 0,
+        expand_plies: 0,
             max_actions: 0,
         };
         crate::mcts::prof::reset();

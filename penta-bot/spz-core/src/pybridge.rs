@@ -343,6 +343,7 @@ fn ismcts_choose_at(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions: 0,
     };
     let search = crate::mcts::Ismcts {
@@ -402,6 +403,7 @@ fn ismcts_choose(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions: 0,
     };
     let search = crate::mcts::Ismcts {
@@ -471,6 +473,7 @@ fn az_choose(
         // Deployment plays the policy the loop produced, not a noised one.
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions,
     };
     let search = crate::mcts::Ismcts {
@@ -526,6 +529,7 @@ fn ismcts_gate(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions: 0,
     };
     let (w, d, f, c, _per) = run_gate(py, policy, decks, book, cfg,
@@ -554,7 +558,8 @@ fn ismcts_gate(
 #[pyo3(signature = (catalog_json, value_path, policy_path, iters_p1, iters_p2,
                    c_puct, decklists_path, max_actions, threads, opponent, specs,
                    value_path_p2 = String::new(), policy_path_p2 = String::new(),
-                   noise_p1 = 0.0, noise_p2 = 0.0))]
+                   noise_p1 = 0.0, noise_p2 = 0.0,
+                   expand_p1 = 0, expand_p2 = 0))]
 fn az_h2h(
     py: Python<'_>,
     catalog_json: String, value_path: String, policy_path: String,
@@ -563,6 +568,7 @@ fn az_h2h(
     specs: Vec<(String, String, u64)>,
     value_path_p2: String, policy_path_p2: String,
     noise_p1: f64, noise_p2: f64,
+    expand_p1: usize, expand_p2: usize,
 ) -> PyResult<(usize, usize, usize, Vec<f64>)> {
     let load_net = |vp: &str, pp: &str| -> PyResult<crate::policy::Policy> {
         let pol = build_policy(&catalog_json, vp, vp, 0.0, 0, 1, 400, 999, 999)
@@ -594,6 +600,7 @@ fn az_h2h(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions,
     };
     let n_threads = thread_count(threads, specs.len());
@@ -621,7 +628,7 @@ fn az_h2h(
                     out.push((i, crate::az::play_h2h(
                         &policy, p2, &policy.tables, &decks, &book, d1, d2,
                         *seed, &cfg, max_actions, iters_p1, iters_p2,
-                        noise_p1, noise_p2)));
+                        noise_p1, noise_p2, expand_p1, expand_p2)));
                     i += n_threads;
                 }
                 out
@@ -704,6 +711,7 @@ fn az_gate(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         // Same cap self-play uses. See MctsConfig::max_actions.
         max_actions: 64,
     };
@@ -823,6 +831,7 @@ fn ismcts_stream_rows(
         max_depth: 400,
         root_noise_frac: 0.0,
         root_noise_alpha: 1.0,
+        expand_plies: 0,
         max_actions: 0,
     };
     let threads = if workers == 0 {
@@ -1221,12 +1230,16 @@ fn az_action_dim(catalog_json: String, belief: bool) -> PyResult<usize> {
 /// ```
 #[pyfunction]
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
+#[pyo3(signature = (catalog_json, value_path, policy_path, iters, c_puct,
+                   decklists_path, max_actions, threads, root_noise, specs,
+                   expand_plies = 0))]
 fn az_stream_episodes(
     py: Python<'_>,
     catalog_json: String, value_path: String, policy_path: String,
     iters: usize, c_puct: f64, decklists_path: String,
     max_actions: usize, threads: usize, root_noise: f64,
     specs: Vec<(String, String, u64)>,
+    expand_plies: usize,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                pyo3::Bound<'_, pyo3::types::PyBytes>,
                pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u8>, Vec<u32>,
@@ -1262,6 +1275,7 @@ fn az_stream_episodes(
         // actually produced, so it leaves this at zero.
         root_noise_frac: root_noise,
         root_noise_alpha: 1.0,
+        expand_plies,
         max_actions: 0,
     };
     let n_threads = thread_count(threads, specs.len());
