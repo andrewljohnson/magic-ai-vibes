@@ -10,184 +10,71 @@
   T3 PrecombatMain [our turn] life [21, 20] | 3 options -> Cast Ironclaw Orcs
   T5 Upkeep [our turn] life [21, 20] | 3 options -> PassPriority
   T5 Draw [our turn] life [21, 20] | 3 options -> PassPriority
-  T5 PrecombatMain [our turn] life [21, 20] | 7 options -> Cast Ironclaw Orcs
-  T5 PrecombatMain [our turn] life [21, 20] | 4 options -> PlayLand Mountain
-  T5 PrecombatMain [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 BeginningOfCombat [our turn] life [21, 20] | 2 options -> PassPriority
+  T5 PrecombatMain [our turn] life [21, 20] | 7 options -> PlayLand Mountain
+  T5 PrecombatMain [our turn] life [21, 20] | 6 options -> Cast Ball Lightning
+  T5 DeclareAttackers [our turn] life [21, 20] | 3 options -> Attack with Ball Lightning -> p2
   T5 DeclareAttackers [our turn] life [21, 20] | 2 options -> Attack with Ironclaw Orcs -> p2
-  T5 DeclareAttackers [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 DeclareBlockers [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 CombatDamage [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 EndOfCombat [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 PostcombatMain [our turn] life [21, 20] | 2 options -> PassPriority
-  T5 End [our turn] life [21, 20] | 2 options -> PassPriority
-  T6 Upkeep [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 Upkeep [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 Draw [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 PrecombatMain [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 BeginningOfCombat [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 DeclareAttackers [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 DeclareBlockers [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 CombatDamage [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 EndOfCombat [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 PostcombatMain [their turn] life [21, 20] | 2 options -> PassPriority
-  T6 End [their turn] life [21, 20] | 2 options -> PassPriority
-  T7 Upkeep [our turn] life [21, 20] | 4 options -> PassPriority
-  T7 Draw [our turn] life [21, 20] | 4 options -> PassPriority
-  T7 PrecombatMain [our turn] life [21, 20] | 8 options -> Cast Ball Lightning
-  T7 PrecombatMain [our turn] life [21, 20] | 3 options -> PlayLand Mountain
-  T7 PrecombatMain [our turn] life [21, 20] | 3 options -> PassPriority
-  T7 BeginningOfCombat [our turn] life [21, 20] | 2 options -> PassPriority
-  T7 DeclareAttackers [our turn] life [21, 20] | 3 options -> Attack with Ball Lightning -> p2
-  T7 DeclareAttackers [our turn] life [21, 20] | 2 options -> Attack with Ironclaw Orcs -> p2
-  T7 DeclareAttackers [our turn] life [21, 20] | 2 options -> PassPriority
-  T7 DeclareBlockers [our turn] life [21, 20] | 2 options -> PassPriority
-  T7 CombatDamage [our turn] life [21, 12] | 2 options -> PassPriority
-  T7 EndOfCombat [our turn] life [21, 12] | 2 options -> PassPriority
-  T7 PostcombatMain [our turn] life [21, 12] | 3 options -> PassPriority
-  T7 End [our turn] life [21, 12] | 2 options -> PassPriority
-  T7 End [our turn] life [21, 12] | 2 options -> PassPriority
-  T8 Upkeep [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 Draw [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 PrecombatMain [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 BeginningOfCombat [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 DeclareAttackers [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 DeclareBlockers [their turn] life [21, 12] | 2 options -> PassPriority
-  T8 CombatDamage [their turn] life [20, 12] | 2 options -> PassPriority
-  T8 EndOfCombat [their turn] life [20, 12] | 2 options -> PassPriority
-  T8 PostcombatMain [their turn] life [20, 12] | 2 options -> PassPriority
-  T8 End [their turn] life [20, 12] | 2 options -> PassPriority
-  T9 Upkeep [our turn] life [20, 12] | 5 options -> PassPriority
-  T9 Draw [our turn] life [20, 12] | 5 options -> PassPriority
-  T9 PrecombatMain [our turn] life [20, 12] | 8 options -> PassPriority
-  T9 BeginningOfCombat [our turn] life [20, 12] | 5 options -> PassPriority
-  T9 DeclareAttackers [our turn] life [20, 12] | 2 options -> Attack with Ironclaw Orcs -> p2
-  T9 DeclareAttackers [our turn] life [20, 12] | 5 options -> PassPriority
-  T9 DeclareBlockers [our turn] life [20, 12] | 5 options -> PassPriority
-  T9 CombatDamage [our turn] life [20, 10] | 5 options -> PassPriority
-  T9 EndOfCombat [our turn] life [20, 10] | 5 options -> PassPriority
-  T9 PostcombatMain [our turn] life [20, 10] | 8 options -> PlayLand Mountain
-  T9 PostcombatMain [our turn] life [20, 10] | 7 options -> PassPriority
-  T9 End [our turn] life [20, 10] | 6 options -> PassPriority
-  T10 Upkeep [their turn] life [20, 10] | 6 options -> PassPriority
-  T10 Draw [their turn] life [20, 10] | 6 options -> PassPriority
-  T10 PrecombatMain [their turn] life [20, 10] | 6 options -> PassPriority
-  T10 PrecombatMain [their turn] life [20, 10] | 5 options -> PassPriority
-  T10 PrecombatMain [their turn] life [20, 10] | 5 options -> PassPriority
-  T10 BeginningOfCombat [their turn] life [20, 10] | 5 options -> PassPriority
-  T10 DeclareAttackers [their turn] life [20, 10] | 5 options -> PassPriority
-  T10 DeclareBlockers [their turn] life [20, 10] | 5 options -> PassPriority
-  T10 CombatDamage [their turn] life [19, 10] | 5 options -> PassPriority
-  T10 EndOfCombat [their turn] life [19, 10] | 5 options -> PassPriority
-  T10 PostcombatMain [their turn] life [19, 10] | 5 options -> PassPriority
-  T10 End [their turn] life [19, 10] | 5 options -> PassPriority
-  T11 Upkeep [our turn] life [19, 10] | 5 options -> PassPriority
-  T11 Draw [our turn] life [19, 10] | 5 options -> PassPriority
-  T11 PrecombatMain [our turn] life [19, 10] | 8 options -> PassPriority
-  T11 BeginningOfCombat [our turn] life [19, 10] | 5 options -> PassPriority
-  T11 DeclareAttackers [our turn] life [19, 10] | 2 options -> Attack with Ironclaw Orcs -> p2
-  T11 DeclareAttackers [our turn] life [19, 10] | 5 options -> PassPriority
-  T11 DeclareBlockers [our turn] life [19, 10] | 5 options -> PassPriority
-  T11 CombatDamage [our turn] life [19, 8] | 5 options -> PassPriority
-  T11 EndOfCombat [our turn] life [19, 8] | 5 options -> PassPriority
-  T11 PostcombatMain [our turn] life [19, 8] | 8 options -> PlayLand Mishra's Factory
-  T11 PostcombatMain [our turn] life [19, 8] | 8 options -> PassPriority
-  T11 End [our turn] life [19, 8] | 7 options -> PassPriority
-  T12 Upkeep [their turn] life [19, 8] | 7 options -> PassPriority
-  T12 Upkeep [their turn] life [19, 8] | 7 options -> PassPriority
-  T12 Draw [their turn] life [19, 8] | 7 options -> PassPriority
-  T12 PrecombatMain [their turn] life [19, 8] | 7 options -> Activate Mishra's Factory
-  T12 PrecombatMain [their turn] life [19, 8] | 6 options -> PassPriority
-  T12 PrecombatMain [their turn] life [19, 8] | 5 options -> Tap Mountain for mana
-  T12 PrecombatMain [their turn] life [19, 8] | 4 options -> Activate Mishra's Factory
-  T12 PrecombatMain [their turn] life [19, 8] | 4 options -> PassPriority
-  T12 PrecombatMain [their turn] life [19, 8] | 4 options -> Tap Mountain for mana
-  T12 PrecombatMain [their turn] life [19, 8] | 3 options -> Activate Mishra's Factory
-  T12 PrecombatMain [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 PrecombatMain [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 PrecombatMain [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 BeginningOfCombat [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 DeclareAttackers [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 DeclareBlockers [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 CombatDamage [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 EndOfCombat [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 PostcombatMain [their turn] life [19, 8] | 3 options -> PassPriority
-  T12 End [their turn] life [19, 8] | 3 options -> PassPriority
-  T13 Upkeep [our turn] life [19, 8] | 7 options -> PassPriority
-  T13 Draw [our turn] life [19, 8] | 13 options -> Cast Lightning Bolt -> player p2
-  T13 Draw [our turn] life [19, 8] | 6 options -> PassPriority
-  T13 Draw [our turn] life [19, 5] | 6 options -> PassPriority
-  T13 PrecombatMain [our turn] life [19, 5] | 8 options -> PlayLand Mountain
-  T13 PrecombatMain [our turn] life [19, 5] | 8 options -> PassPriority
-  T13 BeginningOfCombat [our turn] life [19, 5] | 7 options -> PassPriority
-  T13 DeclareAttackers [our turn] life [19, 5] | 2 options -> FinishDeclaringAttackers
-  T13 DeclareAttackers [our turn] life [19, 5] | 7 options -> PassPriority
-  T13 DeclareBlockers [our turn] life [19, 5] | 7 options -> PassPriority
-  T13 CombatDamage [our turn] life [19, 5] | 7 options -> PassPriority
-  T13 EndOfCombat [our turn] life [19, 5] | 7 options -> PassPriority
-  T13 PostcombatMain [our turn] life [19, 5] | 8 options -> PassPriority
-  T13 End [our turn] life [19, 5] | 7 options -> PassPriority
-  T14 Upkeep [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 Draw [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 PrecombatMain [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 PrecombatMain [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 BeginningOfCombat [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 BeginningOfCombat [their turn] life [19, 5] | 8 options -> PassPriority
-  T14 DeclareAttackers [their turn] life [19, 5] | 8 options -> PassPriority
-  T14 DeclareBlockers [their turn] life [19, 5] | 3 options -> FinishDeclaringBlockers
-  T14 DeclareBlockers [their turn] life [19, 5] | 8 options -> Activate Mishra's Factory
-  T14 DeclareBlockers [their turn] life [19, 5] | 7 options -> Activate Mishra's Factory
-  T14 DeclareBlockers [their turn] life [19, 5] | 6 options -> PassPriority
-  T14 DeclareBlockers [their turn] life [19, 5] | 7 options -> PassPriority
-  T14 DeclareBlockers [their turn] life [19, 5] | 7 options -> Activate Mishra's Factory
-  T14 DeclareBlockers [their turn] life [19, 5] | 6 options -> PassPriority
-  T14 DeclareBlockers [their turn] life [19, 5] | 6 options -> PassPriority
-  T14 CombatDamage [their turn] life [11, 5] | 6 options -> PassPriority
-  T14 EndOfCombat [their turn] life [11, 5] | 6 options -> PassPriority
-  T14 PostcombatMain [their turn] life [11, 4] | 6 options -> PassPriority
-  T14 End [their turn] life [11, 4] | 6 options -> PassPriority
-  T15 Upkeep [their turn] life [11, 4] | 4 options -> PassPriority
-  T15 Draw [their turn] life [11, 4] | 4 options -> PassPriority
-  T15 Draw [their turn] life [13, 4] | 4 options -> PassPriority
-  T15 PrecombatMain [their turn] life [13, 4] | 4 options -> PassPriority
-  T15 BeginningOfCombat [their turn] life [13, 4] | 4 options -> PassPriority
-  T15 BeginningOfCombat [their turn] life [13, 4] | 5 options -> PassPriority
-  T15 DeclareAttackers [their turn] life [13, 4] | 5 options -> PassPriority
-  T15 DeclareBlockers [their turn] life [13, 4] | 5 options -> PassPriority
-  T15 CombatDamage [their turn] life [5, 4] | 5 options -> PassPriority
-  T15 EndOfCombat [their turn] life [5, 4] | 5 options -> PassPriority
-  T15 PostcombatMain [their turn] life [5, 3] | 5 options -> PassPriority
-  T15 End [their turn] life [5, 3] | 5 options -> PassPriority
-  T16 Upkeep [our turn] life [5, 3] | 8 options -> PassPriority
-  T16 Draw [our turn] life [5, 3] | 8 options -> PassPriority
-  T16 PrecombatMain [our turn] life [5, 3] | 10 options -> Cast Goblins of the Flarg
-  T16 PrecombatMain [our turn] life [5, 3] | 7 options -> PassPriority
-  T16 PrecombatMain [our turn] life [5, 3] | 8 options -> PlayLand Strip Mine
-  T16 PrecombatMain [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 BeginningOfCombat [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 DeclareAttackers [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 DeclareBlockers [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 CombatDamage [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 EndOfCombat [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 PostcombatMain [our turn] life [5, 3] | 20 options -> PassPriority
-  T16 End [our turn] life [5, 3] | 20 options -> PassPriority
-  T17 Upkeep [their turn] life [5, 3] | 20 options -> PassPriority
-  T17 Draw [their turn] life [5, 3] | 20 options -> PassPriority
-  T17 PrecombatMain [their turn] life [5, 3] | 20 options -> PassPriority
-  T17 PrecombatMain [their turn] life [5, 3] | 7 options -> PassPriority
-  T17 BeginningOfCombat [their turn] life [5, 3] | 7 options -> PassPriority
-  T17 BeginningOfCombat [their turn] life [5, 3] | 8 options -> PassPriority
-  T17 DeclareAttackers [their turn] life [5, 3] | 8 options -> PassPriority
-  T17 DeclareBlockers [their turn] life [5, 3] | 4 options -> Block Icatian Javelineers with Goblins of the Flarg
-  T17 DeclareBlockers [their turn] life [5, 3] | 8 options -> Tap Mountain for mana
-  T17 DeclareBlockers [their turn] life [5, 3] | 7 options -> Activate Mishra's Factory
-  T17 DeclareBlockers [their turn] life [5, 3] | 7 options -> PassPriority
-  T17 DeclareBlockers [their turn] life [5, 3] | 8 options -> Activate Mishra's Factory
-  T17 DeclareBlockers [their turn] life [5, 3] | 7 options -> PassPriority
-  T17 DeclareBlockers [their turn] life [5, 3] | 7 options -> Activate Mishra's Factory
-  T17 DeclareBlockers [their turn] life [5, 3] | 6 options -> PassPriority
-  T17 DeclareBlockers [their turn] life [5, 3] | 6 options -> Tap Mountain for mana
-  T17 DeclareBlockers [their turn] life [5, 3] | 5 options -> Activate Mishra's Factory
-  T17 DeclareBlockers [their turn] life [5, 3] | 5 options -> PassPriority
-  T17 DeclareBlockers [their turn] life [5, 3] | 5 options -> PassPriority
-=== result: LOSS after 251 decisions ===
+  T5 CombatDamage [our turn] life [21, 20] | 6 options -> AssignCombatDamage
+  T7 Upkeep [our turn] life [21, 13] | 4 options -> PassPriority
+  T7 Draw [our turn] life [21, 13] | 4 options -> PassPriority
+  T7 PrecombatMain [our turn] life [21, 13] | 8 options -> Tap Mountain for mana
+  T7 PrecombatMain [our turn] life [21, 13] | 7 options -> Cast Ironclaw Orcs
+  T7 PrecombatMain [our turn] life [21, 13] | 2 options -> PassPriority
+  T7 PrecombatMain [our turn] life [21, 13] | 5 options -> PassPriority
+  T7 BeginningOfCombat [our turn] life [21, 13] | 2 options -> Tap Mountain for mana
+  T7 DeclareAttackers [our turn] life [21, 13] | 2 options -> Attack with Ironclaw Orcs -> p2
+  T7 PostcombatMain [our turn] life [20, 11] | 3 options -> PlayLand Mountain
+  T7 PostcombatMain [our turn] life [20, 11] | 3 options -> PassPriority
+  T7 End [our turn] life [20, 11] | 2 options -> PassPriority
+  T8 Upkeep [their turn] life [20, 11] | 2 options -> Tap Mountain for mana
+  T9 Upkeep [our turn] life [19, 11] | 5 options -> PassPriority
+  T9 Draw [our turn] life [19, 11] | 5 options -> PassPriority
+  T9 PrecombatMain [our turn] life [19, 11] | 8 options -> PassPriority
+  T9 BeginningOfCombat [our turn] life [19, 11] | 5 options -> PassPriority
+  T9 DeclareAttackers [our turn] life [19, 11] | 3 options -> Attack with Ironclaw Orcs -> p2
+  T9 DeclareAttackers [our turn] life [19, 11] | 2 options -> Attack with Ironclaw Orcs -> p2
+  T9 DeclareAttackers [our turn] life [19, 11] | 5 options -> PassPriority
+  T9 DeclareBlockers [our turn] life [19, 11] | 5 options -> PassPriority
+  T9 CombatDamage [our turn] life [19, 7] | 5 options -> PassPriority
+  T9 EndOfCombat [our turn] life [19, 7] | 5 options -> PassPriority
+  T9 PostcombatMain [our turn] life [19, 7] | 8 options -> PlayLand Mountain
+  T9 PostcombatMain [our turn] life [19, 7] | 7 options -> PassPriority
+  T9 End [our turn] life [19, 7] | 6 options -> PassPriority
+  T10 Upkeep [their turn] life [19, 7] | 6 options -> Tap Mountain for mana
+  T10 Upkeep [their turn] life [19, 7] | 5 options -> PassPriority
+  T10 Draw [their turn] life [19, 7] | 5 options -> PassPriority
+  T10 PrecombatMain [their turn] life [18, 7] | 5 options -> PassPriority
+  T10 PrecombatMain [their turn] life [18, 7] | 5 options -> Tap Mountain for mana
+  T10 PrecombatMain [their turn] life [18, 7] | 4 options -> PassPriority
+  T10 PrecombatMain [their turn] life [18, 7] | 4 options -> PassPriority
+  T10 BeginningOfCombat [their turn] life [17, 7] | 4 options -> PassPriority
+  T10 DeclareAttackers [their turn] life [17, 7] | 4 options -> PassPriority
+  T10 DeclareBlockers [their turn] life [17, 7] | 4 options -> PassPriority
+  T10 CombatDamage [their turn] life [16, 7] | 4 options -> PassPriority
+  T10 EndOfCombat [their turn] life [16, 7] | 4 options -> PassPriority
+  T10 PostcombatMain [their turn] life [16, 7] | 4 options -> PassPriority
+  T10 End [their turn] life [16, 7] | 4 options -> PassPriority
+  T11 Upkeep [our turn] life [16, 7] | 5 options -> PassPriority
+  T11 Draw [our turn] life [16, 7] | 5 options -> PassPriority
+  T11 PrecombatMain [our turn] life [16, 7] | 8 options -> PassPriority
+  T11 BeginningOfCombat [our turn] life [16, 7] | 5 options -> PassPriority
+  T11 DeclareAttackers [our turn] life [16, 7] | 3 options -> Attack with Ironclaw Orcs -> p2
+  T11 DeclareAttackers [our turn] life [16, 7] | 2 options -> Attack with Ironclaw Orcs -> p2
+  T11 DeclareAttackers [our turn] life [16, 7] | 5 options -> PassPriority
+  T11 DeclareBlockers [our turn] life [16, 7] | 5 options -> PassPriority
+  T11 CombatDamage [our turn] life [16, 3] | 5 options -> PassPriority
+  T11 EndOfCombat [our turn] life [16, 3] | 5 options -> PassPriority
+  T11 PostcombatMain [our turn] life [16, 3] | 8 options -> PlayLand Mishra's Factory
+  T11 PostcombatMain [our turn] life [16, 3] | 8 options -> Cast Goblins of the Flarg
+  T11 PostcombatMain [our turn] life [16, 3] | 6 options -> PassPriority
+  T11 PostcombatMain [our turn] life [16, 3] | 6 options -> PassPriority
+  T11 End [our turn] life [16, 3] | 6 options -> PassPriority
+  T12 Upkeep [their turn] life [16, 3] | 6 options -> PassPriority
+  T12 Upkeep [their turn] life [16, 3] | 6 options -> Activate Mishra's Factory
+  T12 Upkeep [their turn] life [16, 3] | 5 options -> Activate Mishra's Factory
+  T12 Upkeep [their turn] life [16, 3] | 4 options -> Activate Mishra's Factory
+  T12 Upkeep [their turn] life [16, 3] | 3 options -> PassPriority
+  T13 Upkeep [our turn] life [16, 3] | 7 options -> PassPriority
+  T13 Draw [our turn] life [16, 3] | 14 options -> Cast Lightning Bolt -> player p2
+  T13 Draw [our turn] life [16, 3] | 6 options -> PassPriority
+=== result: WIN after 181 decisions ===

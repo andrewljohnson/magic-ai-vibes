@@ -140,9 +140,16 @@ def play_room(server, room, token, policy, move_budget, max_room_secs=900):
             try:
                 view = _request(f"{server}/_game/{room}/opponent",
                                 headers=headers)
-            except urllib.error.URLError as error:
+            except Exception as error:      # noqa: BLE001
+                # NOT just URLError: an SSL read timeout raises a bare
+                # TimeoutError (an OSError), which used to escape this loop
+                # entirely. The room loop then died mid-game, the bot went
+                # silent, and the server scored it "ran out of time" -- with
+                # no slow move anywhere in the log, because search was never
+                # the problem.
                 log.write(json.dumps({"t": "fetch-error",
-                                      "error": str(error)}) + "\n")
+                                      "error": f"{type(error).__name__}: "
+                                               f"{error}"}) + "\n")
                 time.sleep(1)
                 continue
             if view.get("result"):
@@ -200,6 +207,14 @@ def play_room(server, room, token, policy, move_budget, max_room_secs=900):
                 if error.code in (403, 404, 410):
                     return  # room gone or token invalid
                 time.sleep(0.5)
+            except Exception as error:      # noqa: BLE001
+                # A transient network failure here drops a MOVE. Retry the
+                # same decision rather than falling out of the room.
+                log.write(json.dumps({"t": "command-error",
+                                      "error": f"{type(error).__name__}: "
+                                               f"{error}"}) + "\n")
+                time.sleep(0.5)
+                continue
             moves += 1
 
 
@@ -329,9 +344,18 @@ def main():
                 with lock:
                     sid, tok = hb["state"]["id"], hb["state"]["token"]
                     done, hb["done"] = hb["done"], []
-                reply = _request(f"{args.server}/_bots/{sid}/heartbeat",
-                                 {"token": tok, "done": done,
-                                  "compatibility": compatibility(engine)})
+                try:
+                    reply = _request(f"{args.server}/_bots/{sid}/heartbeat",
+                                     {"token": tok, "done": done,
+                                      "compatibility": compatibility(engine)})
+                except Exception:
+                    # `done` was swapped out of hb BEFORE the request, so a
+                    # failed beat used to drop those room ids forever. The
+                    # server then never learns the game ended and leaves the
+                    # bot marked busy -- registered, online, and unjoinable.
+                    with lock:
+                        hb["done"] = done + hb["done"]
+                    raise
                 hb["beats"] += 1
                 last_ok, warned = time.time(), False
                 if hb["beats"] % 360 == 1:      # roughly hourly
@@ -388,6 +412,9 @@ def main():
         try:
             play_room(args.server, room, invite["token"], policy,
                       args.move_budget)
+        except Exception as error:      # noqa: BLE001
+            print(f"game {room} aborted ({type(error).__name__}: {error})",
+                  flush=True)
         finally:
             with lock:
                 hb["done"].append(room)

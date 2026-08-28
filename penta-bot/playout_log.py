@@ -392,6 +392,25 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                             turn_land_would_unlock[turn] = unl
                 if ctype == "CastSpell" and "PrecombatMain" in str(obs.get("step")):
                     turn_cast_precombat[turn] = True
+                # FLOATING MANA THAT CANNOT BE SPENT -> MANA BURN.
+                #
+                # Reported from hosted play: the bot tapped Mishra's Factory
+                # for colourless during its OWN UPKEEP and burned for 1.
+                # Mana burn is a live rule in this format, so producing mana
+                # with nothing to spend it on is not merely idle -- it deals
+                # damage to us. If the same decision offers no spell to cast
+                # and no ability with a mana cost, the mana has nowhere to go.
+                if ctype == "ActivateManaAbility":
+                    sinks = [a for a in acts
+                             if a.get("type") in ("CastSpell", "ActivateAbility")]
+                    if not sinks:
+                        flags["floated_mana_into_burn"] += 1
+                        if len(examples["floated_mana_into_burn"]) < 12:
+                            examples["floated_mana_into_burn"].append(
+                                f"game {g} T{turn} {obs.get('step')}: "
+                                f"{render_action(obs, chosen)} with nothing to "
+                                f"spend it on -- burns for that much")
+
                 # DISCARDING A LAND WITH THE LAND DROP STILL UNUSED.
                 #
                 # Reported from hosted play: the bot discarded Mishra's

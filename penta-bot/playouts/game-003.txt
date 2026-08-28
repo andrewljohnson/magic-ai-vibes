@@ -1,34 +1,70 @@
 === game 3: Sligh (us, p2) vs Goblins ===
   T1 Upkeep [their turn] life [20, 20] | 2 options -> KeepHand
   T2 PrecombatMain [our turn] life [20, 20] | 5 options -> PlayLand Mountain
-  T2 PrecombatMain [our turn] life [20, 20] | 12 options -> Cast Black Vise
-  T4 Upkeep [our turn] life [20, 16] | 7 options -> Cast Lightning Bolt -> Goblins of the Flarg
-  T4 PrecombatMain [our turn] life [20, 16] | 4 options -> PlayLand Mountain
-  T4 PrecombatMain [our turn] life [20, 16] | 7 options -> Cast Fireball
-  T6 Upkeep [our turn] life [20, 12] | 2 options -> PassPriority
-  T6 Draw [our turn] life [20, 12] | 2 options -> PassPriority
-  T6 PrecombatMain [our turn] life [20, 12] | 5 options -> PlayLand Mishra's Factory
-  T6 PrecombatMain [our turn] life [20, 12] | 4 options -> PassPriority
-  T6 BeginningOfCombat [our turn] life [20, 12] | 4 options -> PassPriority
-  T6 DeclareAttackers [our turn] life [20, 12] | 4 options -> PassPriority
-  T6 DeclareBlockers [our turn] life [20, 12] | 4 options -> PassPriority
-  T6 CombatDamage [our turn] life [20, 12] | 4 options -> PassPriority
-  T6 EndOfCombat [our turn] life [20, 12] | 4 options -> Activate Mishra's Factory
-  T6 EndOfCombat [our turn] life [20, 12] | 3 options -> PassPriority
-  T7 Upkeep [their turn] life [20, 12] | 3 options -> PassPriority
-  T7 Upkeep [their turn] life [20, 12] | 3 options -> PassPriority
-  T7 Draw [their turn] life [20, 12] | 3 options -> PassPriority
-  T7 Draw [their turn] life [20, 9] | 3 options -> PassPriority
-  T7 PrecombatMain [their turn] life [20, 9] | 3 options -> PassPriority
-  T7 BeginningOfCombat [their turn] life [20, 9] | 3 options -> PassPriority
-  T7 DeclareAttackers [their turn] life [20, 9] | 3 options -> PassPriority
-  T7 DeclareBlockers [their turn] life [20, 9] | 3 options -> PassPriority
-  T7 CombatDamage [their turn] life [20, 3] | 3 options -> PassPriority
-  T7 EndOfCombat [their turn] life [20, 3] | 3 options -> PassPriority
-  T7 PostcombatMain [their turn] life [20, 3] | 3 options -> PassPriority
-  T7 End [their turn] life [20, 3] | 3 options -> PassPriority
-  T8 Upkeep [our turn] life [20, 3] | 4 options -> PassPriority
-  T8 Draw [our turn] life [20, 3] | 4 options -> PassPriority
-  T8 PrecombatMain [our turn] life [20, 3] | 6 options -> PlayLand Mountain
-  T8 PrecombatMain [our turn] life [20, 3] | 6 options -> Cast Wheel of Fortune
-=== result: LOSS after 125 decisions ===
+  T2 PrecombatMain [our turn] life [20, 20] | 12 options -> Cast Lightning Bolt -> Goblin King
+  T4 Upkeep [our turn] life [20, 19] | 2 options -> PassPriority
+  T4 Draw [our turn] life [20, 19] | 2 options -> PassPriority
+  T4 PrecombatMain [our turn] life [20, 19] | 11 options -> Cast Fireball -> Goblins of the Flarg
+  T4 PrecombatMain [our turn] life [20, 19] | 4 options -> PlayLand Mountain
+  T4 PrecombatMain [our turn] life [20, 19] | 3 options -> Cast Black Vise
+  T6 Upkeep [our turn] life [20, 17] | 2 options -> PassPriority
+  T6 Draw [our turn] life [20, 17] | 2 options -> PassPriority
+  T6 PrecombatMain [our turn] life [20, 17] | 5 options -> PlayLand Mountain
+  T6 PrecombatMain [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 BeginningOfCombat [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 DeclareAttackers [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 DeclareBlockers [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 CombatDamage [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 EndOfCombat [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 PostcombatMain [our turn] life [20, 17] | 3 options -> PassPriority
+  T6 End [our turn] life [20, 17] | 3 options -> PassPriority
+  T7 Upkeep [their turn] life [20, 17] | 3 options -> PassPriority
+  T7 Upkeep [their turn] life [20, 17] | 3 options -> PassPriority
+  T7 Draw [their turn] life [20, 17] | 3 options -> PassPriority
+  T7 Draw [their turn] life [20, 14] | 3 options -> PassPriority
+  T7 PrecombatMain [their turn] life [20, 14] | 3 options -> PassPriority
+  T7 BeginningOfCombat [their turn] life [20, 14] | 3 options -> PassPriority
+  T7 DeclareAttackers [their turn] life [20, 14] | 3 options -> Tap Mountain for mana
+  T7 DeclareAttackers [their turn] life [20, 14] | 2 options -> PassPriority
+  T7 DeclareBlockers [their turn] life [20, 14] | 2 options -> Tap Mountain for mana
+  T8 Upkeep [our turn] life [20, 9] | 3 options -> PassPriority
+  T8 Draw [our turn] life [20, 9] | 3 options -> PassPriority
+  T8 PrecombatMain [our turn] life [20, 9] | 5 options -> PlayLand Mountain
+  T8 PrecombatMain [our turn] life [20, 9] | 7 options -> Cast Ball Lightning
+  T8 DeclareAttackers [our turn] life [20, 9] | 2 options -> Attack with Ball Lightning -> p1
+  T10 Upkeep [our turn] life [14, 6] | 4 options -> PassPriority
+  T10 Draw [our turn] life [14, 6] | 4 options -> PassPriority
+  T10 PrecombatMain [our turn] life [14, 6] | 8 options -> Cast Ball Lightning
+  T10 PrecombatMain [our turn] life [14, 6] | 3 options -> PassPriority
+  T10 DeclareAttackers [our turn] life [14, 6] | 2 options -> Attack with Ball Lightning -> p1
+  T10 PostcombatMain [our turn] life [8, 6] | 3 options -> PlayLand Mishra's Factory
+  T10 PostcombatMain [our turn] life [8, 6] | 3 options -> PassPriority
+  T10 End [our turn] life [8, 6] | 3 options -> PassPriority
+  T10 End [our turn] life [8, 6] | 3 options -> PassPriority
+  T11 Upkeep [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 Upkeep [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 Draw [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 PrecombatMain [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 PrecombatMain [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 BeginningOfCombat [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 DeclareAttackers [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 DeclareBlockers [their turn] life [8, 6] | 3 options -> PassPriority
+  T11 CombatDamage [their turn] life [8, 3] | 3 options -> PassPriority
+  T11 EndOfCombat [their turn] life [8, 3] | 3 options -> Activate Mishra's Factory
+  T12 Upkeep [our turn] life [8, 3] | 6 options -> PassPriority
+  T12 Draw [our turn] life [8, 3] | 6 options -> PassPriority
+  T12 PrecombatMain [our turn] life [8, 3] | 87 options -> Cast Fireball X=3 -> player p1
+  T12 PrecombatMain [our turn] life [5, 3] | 2 options -> PlayLand Strip Mine
+  T12 PrecombatMain [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 BeginningOfCombat [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 DeclareAttackers [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 DeclareBlockers [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 CombatDamage [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 EndOfCombat [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 PostcombatMain [our turn] life [5, 3] | 10 options -> PassPriority
+  T12 End [our turn] life [5, 3] | 10 options -> PassPriority
+  T13 Upkeep [their turn] life [5, 3] | 10 options -> PassPriority
+  T13 Upkeep [their turn] life [5, 3] | 9 options -> PassPriority
+  T13 Upkeep [their turn] life [5, 3] | 9 options -> PassPriority
+  T13 Draw [their turn] life [5, 3] | 9 options -> Activate Mishra's Factory
+=== result: LOSS after 183 decisions ===

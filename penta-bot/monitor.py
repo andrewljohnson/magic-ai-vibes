@@ -420,6 +420,13 @@ def playout_report():
 # "bug" is never correct play, "suspect" is usually wrong, "judgement" is
 # often defensible and reported only so the RATE can be watched.
 FLAG_META = {
+    "floated_mana_into_burn": (
+        "bug", "Made mana it could not spend (mana burn)",
+        "Activated a mana ability when the same decision offered no spell to "
+        "cast and no ability with a mana cost. Mana burn is a live rule in "
+        "this format, so the unspent mana deals that much damage to us. "
+        "Reported from hosted play: Mishra's Factory tapped during our own "
+        "upkeep, burning for 1."),
     "discarded_a_playable_land": (
         "bug", "Discarded a land it could have played",
         "Discarding a land while the turn's land drop is still unused. The "
