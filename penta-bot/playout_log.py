@@ -392,6 +392,37 @@ def analyse(net, games, iters, deck, out_dir, verbose_games):
                             turn_land_would_unlock[turn] = unl
                 if ctype == "CastSpell" and "PrecombatMain" in str(obs.get("step")):
                     turn_cast_precombat[turn] = True
+                # PAYING MANA TO ANIMATE A LAND THAT IS ALREADY TAPPED.
+                #
+                # Observed in hosted play, in the SAME upkeep as the mana
+                # burn above: tap Mishra's Factory for colourless, then spend
+                # that mana animating the now-tapped Factory. A tapped 2/2
+                # cannot attack, and the animation ends at end of turn so it
+                # cannot block either -- the mana buys literally nothing.
+                #
+                # It is worth seeing this next to `floated_mana_into_burn`:
+                # spending the mana AVOIDS the burn, so the second action is
+                # locally correct. The error is the first one. Which means
+                # the burn rate UNDERCOUNTS wasted mana -- sometimes the
+                # waste hides in a null activation instead of showing up as
+                # lost life.
+                if ctype == "ActivateAbility":
+                    src = chosen.get("source")
+                    for perm in (obs.get("battlefield") or ()):
+                        if perm.get("objectId") != src or not perm.get("tapped"):
+                            continue
+                        kind = CARDS.get(perm.get("definition"),
+                                         ("", "", ""))[2]
+                        if kind == "Land":
+                            flags["animated_a_tapped_land"] += 1
+                            if len(examples["animated_a_tapped_land"]) < 12:
+                                examples["animated_a_tapped_land"].append(
+                                    f"game {g} T{turn} {obs.get('step')}: paid "
+                                    f"to animate {perm.get('name')} while it "
+                                    f"was already tapped -- it cannot attack "
+                                    f"or block")
+                        break
+
                 # FLOATING MANA THAT CANNOT BE SPENT -> MANA BURN.
                 #
                 # Reported from hosted play: the bot tapped Mishra's Factory

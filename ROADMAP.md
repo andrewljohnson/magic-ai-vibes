@@ -1,16 +1,23 @@
 # Roadmap
 
-## The problem, in one paragraph
+## Where it stands
 
-Search beats our policy — **55.8% ± 3.5** in a mirror match at 32 sims
-against the raw policy, and that measurement is sound (it varies only the
-iteration count on one net, which is what the old `az_h2h` could actually
-do). What we do NOT know is whether the policy absorbs it. The mirror gate
-that appeared to answer "no" over 182 rounds was broken: it never played
-the two nets against each other, and returned ~50% by construction. It is
-fixed; the corrected current-vs-warm-start number is being measured. What
-is certain is that the handcrafted gate declined across those rounds and
-every reading sat below the warm-start floor.
+The target-quality problem is FIXED and the loop now climbs. Self-play was
+generating its targets with a 25% Dirichlet search that scores 44.2% against
+the raw policy it teaches, and add-k=1 made the target flatter than the
+prior, so the policy was trained toward a blurred copy of itself. With noise
+at 0.05 (teacher 54.3%) and add-k 0, the run has taken four promotions and
+zero reverts, and the gate moved 44.2 -> 49.2% against a 45.0% floor.
+
+Two things now matter more than anything else:
+
+1. **Round 124 diverged**: the handcrafted gate fell 8.4 points while the
+   mirror promoted. The mirror compares against the MOVING best, so a chain
+   of "beats its predecessor" does not prove absolute improvement. A
+   fixed-anchor measurement against the original warm start is the test.
+2. **The largest rule-level defect is a delayed self-inflicted cost**:
+   making mana it cannot spend, 1.33/game, and that undercounts it because
+   the waste sometimes hides in a null activation instead of a burn.
 
 ## The open problem, and how to split it
 

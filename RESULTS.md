@@ -135,6 +135,38 @@ never paired: it compared 1-sim play of one net (`az_best`, 39.3%) with
 protocol 29" was an artifact of measuring at 16 sims. And "self-play distils
 a weaker teacher" is withdrawn, as above.
 
+## The loop climbs locally and goes nowhere absolutely
+
+After the target fixes (noise 0.05, add-k 0) the run promoted four times in
+124 rounds with zero reverts, and each promotion was a genuine paired win
+over the previous best:
+
+| round | gate | mirror vs previous best | |
+|---|---|---|---|
+| 24 | 44.2% | 56.3% | promoted |
+| 49 | 45.8% | 54.7% | promoted |
+| 74 | 47.5% | 58.9% | promoted |
+| 99 | 49.2% | 51.1% | kept |
+| 124 | 40.8% | 57.7% | promoted |
+
+Against a FIXED anchor — the original warm start the run began from, 200
+paired games, seats swapped, no noise — the round-124 best scores:
+
+> **45.9% ± 3.8**
+
+Not measurably better than where it started. The interval includes 50% and
+the point estimate is below it, while the mirrors that promoted it read 56.3
+through 58.9.
+
+**Each net beats its predecessor; the lineage does not improve.** The
+promotion rule compares against the MOVING best, so it only ever asks a
+local question and cannot see this. It is the cycling that
+best-response-to-current-policy is prone to, and it is why the handcrafted
+gate could fall 8.4 points at round 124 while the mirror promoted.
+
+Two lessons, both general: a ratchet needs a fixed reference somewhere in
+it, and "beats its predecessor" is not a measurement of progress.
+
 ## Ruled out, with evidence
 
 Instrumented counters (`spz_core.search_stats()`) over 105k determinizations

@@ -420,6 +420,14 @@ def playout_report():
 # "bug" is never correct play, "suspect" is usually wrong, "judgement" is
 # often defensible and reported only so the RATE can be watched.
 FLAG_META = {
+    "animated_a_tapped_land": (
+        "bug", "Paid to animate a land that was already tapped",
+        "A tapped creature-land cannot attack, and the animation ends at end "
+        "of turn so it cannot block either -- the mana buys nothing. Seen in "
+        "hosted play in the same upkeep as a mana-burn: tap Mishra's Factory, "
+        "then spend that mana animating the tapped Factory. Spending avoids "
+        "the burn, so this HIDES wasted mana that would otherwise show as "
+        "lost life."),
     "floated_mana_into_burn": (
         "bug", "Made mana it could not spend (mana burn)",
         "Activated a mana ability when the same decision offered no spell to "
