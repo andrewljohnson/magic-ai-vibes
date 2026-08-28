@@ -80,6 +80,28 @@ count moved.
 places 40 lines apart. `git grep` for the surrounding pattern (here
 `first_visit`) rather than trusting the first match a search returns.
 
+## The one named deviation
+
+No handcrafted play knowledge in training — except this, deliberately:
+
+**`--mask-mana` removes `ActivateManaAbility` from the search's options.**
+It encodes the strategic prior "never float mana". It is here because the
+engine auto-pays costs (75% of CastSpell offers appear with an empty pool,
+so nothing becomes uncastable), because mana burn makes floating close to
+always wrong in this format, and because it measured **+7.2 ± 3.8** in a
+paired mirror while also cutting branching 29%.
+
+It was taken only after the principled fix failed: play-the-turn-out was
+built so search could SEE the burn land, and it changed nothing, because the
+cost is one point of life and the value head cannot resolve that.
+
+**Roll it back if** the format changes to one where floating mana matters
+(no mana burn, storage lands that carry value, mana abilities with side
+effects), or if the value head ever becomes sharp enough to learn the rule
+itself. Any number produced with the mask on is not comparable to one
+produced with it off; the flag is a single env switch precisely so a run
+cannot half-apply it.
+
 ## Invariants
 
 * `aac_lockstep.py` holds native rows bit-identical to the Python path.

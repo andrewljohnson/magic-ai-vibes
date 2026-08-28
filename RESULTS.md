@@ -212,6 +212,32 @@ burn, the other half is that the consequence is tiny. That is an argument for
 removing the action rather than waiting for the loop to learn it — the
 credit-assignment fix is real but does not reach this defect.
 
+## Masking mana abilities is worth +7.2 points
+
+Paired mirror, same net both seats, 32 sims each, seats swapped, no noise.
+One seat may not choose `ActivateManaAbility`; the other may:
+
+> **57.2% ± 3.8** (167/200 finished, 33 dropped)
+
+At the SAME simulation count, and the masked search is also ~29% cheaper per
+decision, so at a fixed wall clock it is better still. This is the largest
+single search improvement measured on the project since the value-head
+sigmoid fix.
+
+Why it works: the engine AUTO-PAYS costs — 75% of CastSpell offers appear
+with an empty mana pool — so mana abilities are never needed to cast
+anything. They exist only for deliberately floating mana, which in a format
+with mana burn is close to always wrong. Removing them deletes a whole class
+of losing move AND returns 29% of the branching factor to the search.
+
+**This is a deliberate deviation from the no-handcrafted-play-knowledge
+rule.** "Never float mana" is a strategic prior, not plumbing. It is named,
+flagged (`--mask-mana`), and its rollback condition is a format where
+floating matters. It was taken only after the principled fix was tried
+first: play-the-turn-out was built to let search SEE the burn, and it did
+not help, because the cost is one point of life and the value head cannot
+resolve it.
+
 ## Ruled out, with evidence
 
 Instrumented counters (`spz_core.search_stats()`) over 105k determinizations
