@@ -219,10 +219,28 @@ One seat may not choose `ActivateManaAbility`; the other may:
 
 > **57.2% ± 3.8** (167/200 finished, 33 dropped)
 
-At the SAME simulation count, and the masked search is also ~29% cheaper per
-decision, so at a fixed wall clock it is better still. This is the largest
-single search improvement measured on the project since the value-head
-sigmoid fix.
+at the SAME simulation count, and the masked search is also ~29% cheaper per
+decision.
+
+**But the handcrafted gate says the opposite, and the two are not
+reconcilable by noise.** The gate is exactly deterministic, so gating one net
+with and without the mask is a paired comparison on identical games:
+
+| same net (`deploy_p29`), same 120-game gate | score |
+|---|---|
+| no mask | 45.0% (2 capped) |
+| **mask** | **39.2%** (3 capped) |
+
+−5.8 points. So masking wins a head-to-head against its own unmasked self
+and LOSES to the built-in bot. Both measurements are sound; they disagree
+because they ask different questions, which is Fable's Q4 in concrete form.
+Until that is resolved the mask is **not** an established gain, and the +7.2
+should not be quoted on its own.
+
+A first hypothesis — that masking mana abilities also disables mana-COSTED
+activated abilities, because only spell costs are auto-paid — was tested and
+does not hold: 52% of `ActivateAbility` offers appear with an empty pool, so
+those are auto-paid too.
 
 Why it works: the engine AUTO-PAYS costs — 75% of CastSpell offers appear
 with an empty mana pool — so mana abilities are never needed to cast

@@ -92,12 +92,45 @@ AZ_GATE_RE = re.compile(
 # beat THIS, not merely its own first gate, so the chart draws it as a floor.
 AZ_FLOOR_RE = re.compile(
     r"GATE warm-start baseline: ([0-9.]+)%(?:\s*\+/-\s*([0-9.]+))?")
-# KNOWN BROKEN as of 2026-08-26: the comparison behind this line did not
-# actually play the two nets against each other, so the percentage means
-# nothing yet. Parsed and shown so the repair can be watched, but never
-# presented as a measurement -- see the "suspect" styling in the page.
+# HISTORY ONLY. The MIRROR line was broken: the comparison never actually
+# played the two nets against each other, so every MIRROR percentage in the
+# older logs measures nothing (it read ~50% by construction). The bug is
+# FIXED -- the gate is now the POOL gate below -- but the old numbers are
+# still bogus, so they are kept, labelled, and never fed into a headline.
 AZ_MIRROR_RE = re.compile(
     r"MIRROR round (\d+): current vs best ([0-9.]+)% over (\d+) games")
+# --- POOL gate (replaced MIRROR) ---------------------------------------
+#   POOL round 24: 57.3% over 288 games (32 unfinished, dropped)
+#     [anchor 61%(80), champ-3 55%(72), ...] [1840s]
+# The candidate plays the ANCHOR (the net the run started from) plus the
+# last few champions. Promotion needs the POOLED score above the bar. The
+# anchor share is the only ABSOLUTE reading in the line: beating champ-N
+# only says the net beats its own recent past, which is exactly the local
+# signal that let an earlier run walk in a circle (four winning mirrors,
+# then 45.9% against its own warm start).
+AZ_POOL_RE = re.compile(
+    r"POOL round (\d+): ([0-9.]+)% over (\d+) games"
+    r"(?:\s*\((\d+) unfinished, dropped\))?"
+    r"(?:\s*\[([^\]]*)\])?"
+    r"(?:\s*\[(\d+)s\])?")
+# one "name 61%(80)" entry of the bracketed per-opponent breakdown
+AZ_POOL_PART_RE = re.compile(r"([A-Za-z0-9_.+-]+) ([0-9.]+)%\((\d+)\)")
+# The promotion decision that follows a POOL line.
+AZ_PROMOTED_RE = re.compile(r"PROMOTED: new best ([0-9.]+)%\s*(.*)")
+AZ_REVERTED_RE = re.compile(r"REVERTED to round (-?\d+) \(([0-9.]+)%\): (.*)")
+AZ_KEPT_RE = re.compile(r"kept \(best ([0-9.]+)% @ round (-?\d+)\)")
+# Pool composition on the per-round line:
+#   drop=1016 (pool 9/12 games, 1016 opp records)
+# Half the generated games are played against a pool opponent, and a pooled
+# game contributes only the LEARNER's decisions -- so those games donate
+# roughly half their records. Surfaced because a games/round count alone
+# overstates how much data the round actually produced.
+AZ_POOLCOMP_RE = re.compile(
+    r"drop=(\d+)(?:\s*\(pool (\d+)/(\d+) games, (\d+) opp records\))?")
+# The bar a pooled score must clear to promote (az_train.py --promote-bar),
+# and the pooled score below which the candidate is reverted.
+PROMOTE_BAR = 55.0
+REVERT_FLOOR = 45.0
 DONE_RE = re.compile(r"PAR-AAC complete: (\d+) games \(([^)]*)\)")
 
 
@@ -138,7 +171,8 @@ def parse_log(path):
     gates, config, done = [], "", None
     az, az_games, az_last = False, 0, {}
     az_hist = []
-    floor, mirror = None, []
+    floor, mirror, pool = None, [], []
+    pool_counts = {"promoted": 0, "reverted": 0, "kept": 0}
     stamps = []
     matchups = []
     try:
@@ -164,6 +198,17 @@ def parse_log(path):
                             "vmse": float(m.group(7)),
                             "vbase": float(m.group(8)),
                         }
+                        # Composition of the round: how many of its games
+                        # were played against a pool opponent, and how many
+                        # records the guard threw away. A rate without its
+                        # drop count is not trustworthy here.
+                        c = AZ_POOLCOMP_RE.search(line)
+                        if c:
+                            az_last["drop"] = int(c.group(1))
+                            if c.group(2):
+                                az_last["pool_games"] = int(c.group(2))
+                                az_last["round_games"] = int(c.group(3))
+                                az_last["opp_records"] = int(c.group(4))
                         ts = TS_RE.match(line)
                         if ts:
                             h, mi, sec = (int(x) for x in ts.groups())
@@ -192,6 +237,55 @@ def parse_log(path):
                         mirror.append({"round": int(m.group(1)),
                                        "pct": float(m.group(2)),
                                        "games": int(m.group(3))})
+                        continue
+                    m = AZ_POOL_RE.search(line)
+                    if m:
+                        parts = [{"name": q.group(1),
+                                  "pct": float(q.group(2)),
+                                  "games": int(q.group(3))}
+                                 for q in
+                                 AZ_POOL_PART_RE.finditer(m.group(5) or "")]
+                        pool.append({
+                            "round": int(m.group(1)),
+                            "pct": float(m.group(2)),
+                            "games": int(m.group(3)),
+                            # ALWAYS carried next to the percentage: this
+                            # project has been misled before by a wall-clock
+                            # guard silently removing part of the sample.
+                            "dropped": (int(m.group(4)) if m.group(4)
+                                        else None),
+                            "parts": parts,
+                            "anchor": next((x for x in parts
+                                            if x["name"] == "anchor"), None),
+                            "secs": int(m.group(6)) if m.group(6) else None,
+                            "outcome": None, "detail": None})
+                        continue
+                    m = AZ_PROMOTED_RE.search(line)
+                    if m:
+                        pool_counts["promoted"] += 1
+                        if pool:
+                            pool[-1]["outcome"] = "promoted"
+                            pool[-1]["detail"] = (
+                                f"new best {m.group(1)}% "
+                                f"{m.group(2)}").strip()
+                        continue
+                    m = AZ_REVERTED_RE.search(line)
+                    if m:
+                        pool_counts["reverted"] += 1
+                        if pool:
+                            pool[-1]["outcome"] = "reverted"
+                            pool[-1]["detail"] = (
+                                f"back to round {m.group(1)} "
+                                f"({m.group(2)}%) — {m.group(3)}")
+                        continue
+                    m = AZ_KEPT_RE.search(line)
+                    if m:
+                        pool_counts["kept"] += 1
+                        if pool:
+                            pool[-1]["outcome"] = "kept"
+                            pool[-1]["detail"] = (
+                                f"best stays {m.group(1)}% "
+                                f"@ round {m.group(2)}")
                         continue
                     m = AZ_GATE_RE.search(line)
                     if m:
@@ -383,10 +477,14 @@ def parse_log(path):
         "gate_games": next((g["n"] for g in reversed(scored)
                             if g.get("n")), None),
         "floor": floor,
-        # Deliberately last and deliberately unused by any headline: the
-        # mirror comparison is broken upstream, so the page shows it only
-        # under a "suspect" label.
+        # HISTORY ONLY, never fed into a headline: the mirror comparison
+        # was broken (it played each net against itself), so these numbers
+        # measure nothing. Kept so the record is not lost.
         "mirror": mirror[-12:],
+        # The POOL gate that replaced it. This IS a measurement.
+        "pool": pool[-12:],
+        "pool_last": pool[-1] if pool else None,
+        "pool_counts": pool_counts,
         "entropy": next((g["entropy"] for g in reversed(scored)
                          if g["entropy"] is not None), None),
         "gps": next((g["gps"] for g in reversed(scored)
@@ -751,7 +849,8 @@ def collect():
     # live first, then stopped, then finished; biggest first within a group
     runs.sort(key=lambda r: (r["done"] is None and not r["stale"],
                              r["games"]), reverse=True)
-    return {"runs": runs, "baseline": BASELINE, "target": TARGET}
+    return {"runs": runs, "baseline": BASELINE, "target": TARGET,
+            "promote_bar": PROMOTE_BAR, "revert_floor": REVERT_FLOOR}
 
 
 PAGE = r"""<!doctype html>
@@ -848,6 +947,24 @@ tr:last-child td{border-bottom:none}
   font-weight:600;line-height:1.1}
 .suspect{border:1px dashed var(--s4);border-radius:8px;padding:10px 12px;
   background:color-mix(in oklab,var(--s4) 7%,transparent)}
+.callout{border:1px solid var(--rule);border-radius:8px;padding:10px 12px;
+  margin:10px 0 0;background:color-mix(in oklab,var(--s1) 5%,transparent)}
+.callout.neg{border-color:var(--s8);
+  background:color-mix(in oklab,var(--s8) 10%,transparent)}
+.callout .n{font-size:30px;font-variant-numeric:tabular-nums;font-weight:600;
+  line-height:1.1}
+.callout.neg .n{color:var(--s8)}
+.big{font-size:34px;font-variant-numeric:tabular-nums;font-weight:600;
+  line-height:1.05;letter-spacing:-.02em}
+.meter{position:relative;height:12px;border-radius:6px;background:var(--grid);
+  border:1px solid var(--border);margin:8px 0 6px;max-width:520px}
+.meter .fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+.meter .bar{position:absolute;top:-4px;bottom:-4px;width:2px;
+  background:var(--text-primary)}
+.meter .bar.rev{background:var(--s8);opacity:.7}
+.pill{display:inline-block;border:1px solid var(--border);border-radius:999px;
+  padding:1px 9px;font-size:12px;margin-right:6px}
+.drops{color:var(--text-muted);font-size:12px}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
   color:var(--text-secondary);white-space:pre-wrap;word-break:break-all}
 </style></head><body><div class="wrap">
@@ -884,8 +1001,13 @@ gate.</p>
   the misplays it found — a win rate cannot tell you the bot aimed Fireball
   at its own face.</p>
 </div>
-<div class="card"><h2>Current vs best (mirror) — <span style="color:var(--s4)">suspect, under repair</span></h2>
-  <div id="mirror"></div>
+<div class="card"><h2>Promotion gate — candidate vs the pool</h2>
+  <p class="foot" style="margin:0 0 10px">Every gate round the candidate
+  plays a <b>pool</b>: the <b>anchor</b> (the net this run started from,
+  which never leaves the pool) plus the last few promoted champions. It is
+  promoted only if the <b>pooled</b> score clears the bar. This replaced the
+  MIRROR comparison, which was broken — see the bottom of the page.</p>
+  <div id="pool"></div>
 </div>
 <div class="card"><h2>Win rate by opponent deck</h2>
   <p class="foot" style="margin:0 0 10px">Our bot pilots <b>Sligh</b> in
@@ -895,9 +1017,13 @@ gate.</p>
   everything that matters here.<br>
   The <b>Sligh mirror is absent by construction</b>: the gate builds its
   opponent list as every deck EXCEPT the one we pilot, so no number for it
-  appears below. Any mirror figure has to come from a separate run, and the
-  one this loop logs is currently broken — see the panel above.</p>
+  appears below. Any Sligh-vs-Sligh figure has to come from a separate run;
+  the pool gate above plays exactly that match, but against our own earlier
+  nets rather than the built-in bot.</p>
   <div id="grid"></div>
+</div>
+<div class="card"><h2>MIRROR history — <span style="color:var(--s4)">broken comparison, kept for the record</span></h2>
+  <div id="mirror"></div>
 </div>
 <div class="card"><h2>Runs <span id="hint" style="font-weight:400;color:var(--text-muted)"></span></h2>
   <table><thead><tr>
@@ -1210,31 +1336,31 @@ function now(runs){
   }).join("<hr style='border:0;border-top:1px solid var(--border);margin:14px 0'>");
 }
 
-// The MIRROR line (current net vs the best net) is KNOWN BROKEN as of
-// 2026-08-26: the comparison did not actually play the two nets against
-// each other, so the percentage is not a measurement of anything. It is
-// shown anyway -- deleting the display would hide the repair -- but it is
-// fenced off, never fed into a headline tile, and never plotted next to a
-// real gate where it could be mistaken for one.
+// The MIRROR line (current net vs the best net) was BROKEN: it played each
+// net against itself, so it returned ~50% regardless and measured nothing.
+// The bug is FIXED -- the POOL gate above replaced it -- but the numbers
+// already in the old logs are still bogus, so they stay here, labelled,
+// never fed into a headline tile, and never plotted next to a real gate.
 function mirror(runs){
   const box=document.getElementById("mirror");
   const rs=(runs||[]).filter(r=>r.mirror&&r.mirror.length);
   const warn=`<p class="foot" style="margin:0"><b style="color:var(--s4)">
-    Do not read these as results.</b> The comparison behind the MIRROR line
-    did not actually play the current net against the best net, so the
-    percentages below measure nothing. They are parsed and displayed only so
-    the fix can be seen landing — the values should start moving once the
-    underlying match is repaired.</p>`;
+    Historical only — these numbers measure nothing.</b> The MIRROR gate
+    accidentally played each net against ITSELF, so it returned ~50%
+    whatever the nets were. The bug is <b>fixed</b>: the promotion gate is
+    now the POOL gate at the top of this page, and those numbers are real.
+    The rows below are the old runs' readings, kept so the record is not
+    lost. Do not compare them with a pooled score.</p>`;
   if(!rs.length){box.innerHTML=`<div class="suspect">${warn}
-    <p class="empty" style="margin:6px 0 0">No MIRROR lines in the current
-    log.</p></div>`;return;}
+    <p class="empty" style="margin:6px 0 0">No MIRROR lines in these logs —
+    the runs shown are all on the POOL gate.</p></div>`;return;}
   box.innerHTML=`<div class="suspect">${warn}
     <table class="mu" style="margin-top:8px"><tr><th>run</th><th>round</th>
     <th>reported</th><th>games</th></tr>
     ${rs.flatMap(r=>r.mirror.slice(-6).reverse().map(m=>
       `<tr><td>${r.name}</td><td>${m.round}</td>
        <td class="v" style="color:var(--text-muted)">${m.pct.toFixed(1)}%
-       <span class="cfg">(suspect)</span></td>
+       <span class="cfg">(bogus — net vs itself)</span></td>
        <td class="v">${m.games}</td></tr>`)).join("")}
     </table></div>`;
 }

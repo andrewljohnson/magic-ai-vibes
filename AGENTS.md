@@ -91,6 +91,13 @@ so nothing becomes uncastable), because mana burn makes floating close to
 always wrong in this format, and because it measured **+7.2 ± 3.8** in a
 paired mirror while also cutting branching 29%.
 
+**It is NOT yet an established gain.** The same net gated with the mask
+scores 39.2% against the built-in bot where the unmasked net scores 45.0% --
+a paired, deterministic comparison. Masking beats its own unmasked self head
+to head and loses to a third party. Do not turn this on for a run whose
+numbers you intend to compare against unmasked history until that is
+resolved.
+
 It was taken only after the principled fix failed: play-the-turn-out was
 built so search could SEE the burn land, and it changed nothing, because the
 cost is one point of life and the value head cannot resolve that.
