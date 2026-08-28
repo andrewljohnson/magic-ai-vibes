@@ -154,6 +154,15 @@ paired games, seats swapped, no noise — the round-124 best scores:
 
 > **45.9% ± 3.8**
 
+**How the unfinished games were scored** (Fable asked, correctly, and this is
+the sixth time a guard has shaped a number here): the 29 games that did not
+finish inside the 900s budget were **dropped**, not counted as draws or
+losses. 45.9% is over the 171 that finished. The bound that matters: if every
+dropped game had been a win the figure would be 53.8%, if every one a loss
+39.3%. So the exclusion cannot by itself manufacture the result — but it also
+cannot rule out parity, which is the honest reading either way.
+
+
 Not measurably better than where it started. The interval includes 50% and
 the point estimate is below it, while the mirrors that promoted it read 56.3
 through 58.9.
