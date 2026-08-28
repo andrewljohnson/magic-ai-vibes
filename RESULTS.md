@@ -190,7 +190,15 @@ sims, raw counts (16 games is a small sample — read these as directional):
 | **makes mana it cannot spend** | **16** | **20** |
 | skips a land drop | 20 | 21 |
 
-Record was 7-9 both ways, so no strength change is visible at this sample.
+Record was 7-9 both ways. The paired strength mirror, 200 games at 32 sims
+with the play-out verified running (636,947 expansion calls, 2.5M plies
+played), came back:
+
+> **50.3% ± 4.0** (157/200 finished, 43 dropped — the play-out makes games
+> slower, so more hit the budget)
+
+**Strength-neutral, at three times the search cost.** It changes behaviour
+without changing outcomes, so it does not earn a place in training.
 
 **The combat defect moved and the mana defect did not**, which is the
 informative part. Combat consequences are LARGE in value terms — a creature
