@@ -266,6 +266,17 @@ def main():
                          "back more than 2 SE below best. No training metric "
                          "predicted the 39.2%% -> 27.0%% regression, so "
                          "strength has to be measured and acted on.")
+    ap.add_argument("--pool-opponent-frac", type=float, default=0.0,
+                    help="fraction of each round's self-play games in which "
+                         "the OPPONENT seat is a past champion rather than a "
+                         "copy of the learner. Only the learner's decisions "
+                         "are trained on. This is the fictitious-play remedy "
+                         "for the cycling that pool promotion alone cannot "
+                         "prevent.")
+    ap.add_argument("--mask-mana", type=int, default=0,
+                    help="drop ActivateManaAbility from what the search may "
+                         "choose. A DELIBERATE deviation from the no-"
+                         "handcrafted-knowledge rule -- see AGENTS.md.")
     ap.add_argument("--pool-champions", type=int, default=3,
                     help="how many recent champions join the anchor in the "
                          "promotion pool")
@@ -332,6 +343,14 @@ def main():
     spz = AN.load_spz_core()
     if not hasattr(spz, "az_stream_episodes"):
         raise SystemExit("spz_core lacks az_stream_episodes; rebuild it")
+    # ONE switch for the mana mask, set in the environment before anything
+    # searches. Threading a flag through generation, the handcrafted gate and
+    # the pool gate by hand is how they end up disagreeing -- the first
+    # attempt at it patched one of the two gate call sites and left the
+    # other. A mask applied in self-play but not in a gate makes every number
+    # in the run incomparable.
+    if args.mask_mana:
+        os.environ["AZ_MASK_MANA"] = "1"
     ex = Extractor(version=2, belief=True)
     catalog = json.dumps(pinned_catalog())
     decks = list(load_decklists())
@@ -480,6 +499,18 @@ def main():
     # next net learns from. We keep the best-gated weights, and revert to
     # them when a gate comes back clearly below best.
     best = {"rate": None, "policy": None, "value": None, "round": None}
+    # The promotion POOL. `anchor_paths` is the net this run started from and
+    # never leaves the pool -- it is the fixed reference that stops the
+    # champion chain from walking in a circle. `champions` accumulates each
+    # promoted net; only the most recent `--pool-champions` are played.
+    champions = []
+    anchor_paths = None
+    if args.init_from:
+        _src = args.init_from if os.path.isabs(args.init_from) else \
+            os.path.join(HERE, args.init_from)
+        _av, _ap = f"{_src}_value.spzw", f"{_src}_policy.azp"
+        if os.path.exists(_av) and os.path.exists(_ap):
+            anchor_paths = (_av, _ap)
     # Gates that came back below best, for logging only.
     #
     # The gate is EXACTLY DETERMINISTIC: fixed seeds (900_000 + g), fixed
@@ -548,11 +579,25 @@ def main():
             specs.append((d1, d2, seed * 1000 + g))
         seed += 1
         t0 = time.time()
+        # POOL OPPONENT for a fraction of each round's games: the learner
+        # faces a past champion instead of a copy of itself. Promoting
+        # against the previous best alone made each net a best response to
+        # its predecessor, and the chain walked in a circle -- four
+        # promotions reading 54-59% ended at 45.9% against the net the run
+        # started from. Sampling the opponent is the fictitious-play remedy.
+        opp_v, opp_p = "", ""
+        if args.pool_opponent_frac > 0.0 and (champions or anchor_paths):
+            pool = ([anchor_paths] if anchor_paths else []) + \
+                champions[-args.pool_champions:]
+            opp_v, opp_p = pool[rnd % len(pool)]
         out = spz.az_stream_episodes(
             catalog, val_path, pol_path, args.iters, 1.5,
             "builtin-decklists.json", args.max_actions, args.threads,
-            args.root_noise, specs, args.expand_plies)
-        (cand_b, rec, vis_b, priv_b, seat, ep_rec, ep_res, feat) = out
+            args.root_noise, specs, args.expand_plies,
+            bool(args.mask_mana),
+            opp_v, opp_p, args.pool_opponent_frac)
+        (cand_b, rec, vis_b, priv_b, seat, ep_rec, ep_res, feat,
+         ep_owner) = out
         gen = time.time() - t0
 
         n = len(rec) // 3
@@ -587,12 +632,30 @@ def main():
         # gives the trunk a reason to encode tempo.
         frac_left = np.zeros(n, dtype=np.float32)
         i = 0
+        pooled_games = 0
+        dropped_opp = 0
         for e, k in enumerate(ep_rec):
             r = int(ep_res[e])
             k = int(k)
             for j in range(k):
                 frac_left[i + j] = (k - j) / max(k, 1)
+            owner = int(ep_owner[e]) if e < len(ep_owner) else 2
+            if owner != 2:
+                pooled_games += 1
             for _ in range(k):
+                # A POOLED game contributes only the LEARNER's decisions.
+                # The other seat is a past champion, and training on its
+                # moves would distil an old net back into the current one --
+                # the opposite of what playing against the pool is for.
+                #
+                # `i` advances once per record at the bottom of this loop,
+                # so it IS the current record index -- do not add an offset.
+                if owner != 2 and int(seat[i]) != owner:
+                    keep[i] = False
+                    z[i] = 0.5
+                    dropped_opp += 1
+                    i += 1
+                    continue
                 if r == -2:
                     # OUR CLOCK ran out, not the game. Drop it: we do not
                     # know who was winning and the position is not at fault.
@@ -826,7 +889,10 @@ def main():
             f"fin={100*fin:.0f}% pol_ce={float(ploss):.4f} "
             f"pol_ent={pol_ent:.3f} tgt_ent={tgt_ent:.3f} "
             f"vmse={vmse:.4f}/{base:.4f} vmag={vmag:.1f} "
-            f"drop={dropped}", args.log)
+            f"drop={dropped}"
+            + (f" (pool {pooled_games}/{len(ep_rec)} games, "
+               f"{dropped_opp} opp records)" if pooled_games else ""),
+            args.log)
 
         # Strength check against the engine's built-in bot, with search --
         # the only number that says whether the loop is actually improving.

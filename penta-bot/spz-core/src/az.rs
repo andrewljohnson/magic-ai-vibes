@@ -76,9 +76,41 @@ pub struct Episode {
 
 /// Play one self-play game with search on both seats.
 #[allow(clippy::too_many_arguments)]
+/// Play one self-play game. `opp_policy` drives the seat that is NOT
+/// `learner_seat`; pass the same policy for ordinary self-play.
+///
+/// Why a separate opponent net: promoting against the previous champion
+/// makes each net a best response to its predecessor's specific play, and a
+/// chain of those walks in a circle -- measured, a run took four promotions
+/// whose mirrors read 54-59% and still scored 45.9% against the net it
+/// started from. Sampling the opponent from a POOL of past champions is the
+/// fictitious-play remedy, and it matters more here than in AlphaZero
+/// because our in-tree opponent model never branches: the diversity of the
+/// actual opponent is the only thing stopping the search from over-fitting
+/// to one policy.
+#[allow(clippy::too_many_arguments)]
+pub fn play_episode_vs(policy: &Policy, opp_policy: &Policy,
+                       learner_seat: PlayerId,
+                       tables: &Tables, decks: &Decks,
+                       book: &DeckBook, d1: &str, d2: &str, seed: u64,
+                       cfg: &MctsConfig, max_actions: usize) -> Episode {
+    play_episode_inner(policy, opp_policy, learner_seat, tables, decks, book,
+                       d1, d2, seed, cfg, max_actions)
+}
+
 pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
                     book: &DeckBook, d1: &str, d2: &str, seed: u64,
                     cfg: &MctsConfig, max_actions: usize) -> Episode {
+    play_episode_inner(policy, policy, PlayerId::One, tables, decks, book,
+                       d1, d2, seed, cfg, max_actions)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn play_episode_inner(policy: &Policy, opp_policy: &Policy,
+                      learner_seat: PlayerId,
+                      tables: &Tables, decks: &Decks,
+                      book: &DeckBook, d1: &str, d2: &str, seed: u64,
+                      cfg: &MctsConfig, max_actions: usize) -> Episode {
     // A WALL-CLOCK BUDGET, not just a decision cap.
     //
     // MAX_DECISIONS bounds how many decisions a game may take, but says
@@ -136,8 +168,12 @@ pub fn play_episode(policy: &Policy, tables: &Tables, decks: &Decks,
         deck_slots[mi] = tables.deck_slots(book.counts(my_deck));
         deck_slots[1 - mi] = tables.deck_slots(book.counts(opp_deck));
 
+        // The learner searches with its own net; the other seat searches
+        // with whatever came out of the pool. Identical for ordinary
+        // self-play, where both are the same policy.
+        let acting = if seat == learner_seat { policy } else { opp_policy };
         let search = Ismcts {
-            policy, decks, deck_slots: &deck_slots,
+            policy: acting, decks, deck_slots: &deck_slots,
             my_deck, opp_deck, our_seat: seat, cfg: cfg.clone(),
         };
         let (best, visits) = if wide {

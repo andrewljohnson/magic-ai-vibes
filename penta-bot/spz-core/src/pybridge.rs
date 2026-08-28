@@ -1242,7 +1242,9 @@ fn az_action_dim(catalog_json: String, belief: bool) -> PyResult<usize> {
 #[allow(clippy::needless_pass_by_value, clippy::too_many_arguments)]
 #[pyo3(signature = (catalog_json, value_path, policy_path, iters, c_puct,
                    decklists_path, max_actions, threads, root_noise, specs,
-                   expand_plies = 0, mask_mana = false))]
+                   expand_plies = 0, mask_mana = false,
+                   opp_value_path = String::new(), opp_policy_path = String::new(),
+                   opp_frac = 0.0))]
 fn az_stream_episodes(
     py: Python<'_>,
     catalog_json: String, value_path: String, policy_path: String,
@@ -1250,10 +1252,11 @@ fn az_stream_episodes(
     max_actions: usize, threads: usize, root_noise: f64,
     specs: Vec<(String, String, u64)>,
     expand_plies: usize, mask_mana: bool,
+    opp_value_path: String, opp_policy_path: String, opp_frac: f64,
 ) -> PyResult<(pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u32>,
                pyo3::Bound<'_, pyo3::types::PyBytes>,
                pyo3::Bound<'_, pyo3::types::PyBytes>, Vec<u8>, Vec<u32>,
-               Vec<i8>, usize)> {
+               Vec<i8>, usize, Vec<u8>)> {
     use pyo3::types::PyBytes;
     let mut policy = build_policy(&catalog_json, &value_path, &value_path,
                                   0.0, 0, 1, 400, 999, 999)
@@ -1289,27 +1292,74 @@ fn az_stream_episodes(
         mask_mana,
         max_actions: 0,
     };
+    // Optional POOL OPPONENT for the non-learner seat. Empty paths mean
+    // ordinary self-play, where both seats are the same net.
+    let opp_policy = if opp_value_path.is_empty() || opp_policy_path.is_empty() {
+        None
+    } else {
+        let base = build_policy(&catalog_json, &opp_value_path, &opp_value_path,
+                                0.0, 0, 1, 400, 999, 999)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let fh = crate::action_feat::PolicyHead::load(&opp_policy_path)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+                format!("pool opponent head {opp_policy_path}: {e}")))?;
+        Some(crate::policy::Policy { fast_head: Some(fh), ..base })
+    };
     let n_threads = thread_count(threads, specs.len());
     let policy = std::sync::Arc::new(policy);
+    let opp_policy = std::sync::Arc::new(opp_policy);
     let decks = std::sync::Arc::new(decks);
     let book = std::sync::Arc::new(book);
     let cfg = std::sync::Arc::new(cfg);
     let specs = std::sync::Arc::new(specs);
     let cursor = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
-    let mut episodes: Vec<(usize, crate::az::Episode)> = py.detach(|| {
+    let mut episodes: Vec<(usize, crate::az::Episode, u8)> = py.detach(|| {
         let mut handles = Vec::new();
         for _ in 0..n_threads {
-            let (policy, decks, book, cfg, specs, cursor) =
-                (policy.clone(), decks.clone(), book.clone(), cfg.clone(),
-                 specs.clone(), cursor.clone());
+            let (policy, opp_policy, decks, book, cfg, specs, cursor) =
+                (policy.clone(), opp_policy.clone(), decks.clone(),
+                 book.clone(), cfg.clone(), specs.clone(), cursor.clone());
             handles.push(std::thread::spawn(move || {
                 let mut out = Vec::new();
                 while let Some(i) = next_index(&cursor, specs.len()) {
                     let (d1, d2, seed) = &specs[i];
-                    out.push((i, crate::az::play_episode(
-                        &policy, &policy.tables, &decks, &book, d1, d2,
-                        *seed, &cfg, max_actions)));
+                    // Deterministic per index so a round is reproducible,
+                    // via a hash rather than `i % 100`: with fewer than 100
+                    // games a modulo rule puts EVERY index under the
+                    // threshold, so a 50% setting pooled 100% of an 8-game
+                    // round. A hash honours the fraction at any round size.
+                    let pooled = opp_policy.is_some() && {
+                        let mut x = (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                        x ^= x >> 31;
+                        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+                        x ^= x >> 27;
+                        ((x >> 11) as f64) / ((1u64 << 53) as f64) < opp_frac
+                    };
+                    // Alternate which seat the learner takes, so its records
+                    // are not all from one side of the table.
+                    let learner_seat = if i % 2 == 0 {
+                        penta::PlayerId::One
+                    } else {
+                        penta::PlayerId::Two
+                    };
+                    let ep = if pooled {
+                        let opp = opp_policy.as_ref().as_ref()
+                            .expect("pooled implies an opponent policy");
+                        crate::az::play_episode_vs(
+                            &policy, opp, learner_seat, &policy.tables,
+                            &decks, &book, d1, d2, *seed, &cfg, max_actions)
+                    } else {
+                        crate::az::play_episode(
+                            &policy, &policy.tables, &decks, &book, d1, d2,
+                            *seed, &cfg, max_actions)
+                    };
+                    // Learner seat as u8, or 2 for "both" (ordinary
+                    // self-play, where every record is the learner's).
+                    let owner: u8 = if pooled {
+                        if learner_seat == penta::PlayerId::One { 0 } else { 1 }
+                    } else { 2 };
+                    out.push((i, ep, owner));
                 }
                 out
             }));
@@ -1318,7 +1368,7 @@ fn az_stream_episodes(
         for h in handles { all.extend(h.join().expect("az thread panicked")); }
         all
     });
-    episodes.sort_by_key(|(i, _)| *i);
+    episodes.sort_by_key(|(i, _, _)| *i);
 
     let mut cand: Vec<f32> = Vec::new();
     let mut rec: Vec<u32> = Vec::new();
@@ -1329,9 +1379,15 @@ fn az_stream_episodes(
     let mut seat: Vec<u8> = Vec::new();
     let mut ep_records: Vec<u32> = Vec::new();
     let mut ep_result: Vec<i8> = Vec::new();
-    for (_, ep) in episodes {
+    // Whose decisions each episode contributes: 0 = learner was p1,
+    // 1 = learner was p2, 2 = ordinary self-play (both seats are the
+    // learner). The trainer drops the pool opponent's records rather than
+    // distilling a past champion back into the current net.
+    let mut ep_owner: Vec<u8> = Vec::new();
+    for (_, ep, owner) in episodes {
         ep_records.push(ep.records.len() as u32);
         ep_result.push(ep.result);
+        ep_owner.push(owner);
         for r in ep.records {
             cand.extend_from_slice(&r.cand);
             rec.push(r.m as u32);
@@ -1348,7 +1404,7 @@ fn az_stream_episodes(
     rec.extend(chosen);
     Ok((PyBytes::new(py, &f32_bytes(&cand)), rec, PyBytes::new(py, &vb),
         PyBytes::new(py, &f32_bytes(&privileged)), seat, ep_records,
-        ep_result, feat))
+        ep_result, feat, ep_owner))
 }
 
 #[pymodule]
