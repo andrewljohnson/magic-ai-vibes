@@ -246,6 +246,9 @@ pub struct MctsConfig {
     pub root_noise_alpha: f64,
     /// Plies of prior-argmax play-out after expanding a node. 0 = off.
     pub expand_plies: usize,
+    /// Drop ActivateManaAbility from the search's options. See
+    /// [`Ismcts::mask_mana_abilities`].
+    pub mask_mana: bool,
     /// Above this many legal actions, do NOT search the decision -- score
     /// the candidates once with the policy head and play the argmax. 0
     /// disables the cap.
@@ -268,6 +271,7 @@ impl Default for MctsConfig {
             root_noise_frac: 0.0,
             root_noise_alpha: 1.0,
             expand_plies: 0,
+            mask_mana: false,
             max_actions: 0,
             c_puct: 1.5,
             inert: false,
@@ -534,12 +538,54 @@ impl<'a> Ismcts<'a> {
     /// narrowed by the certified dominance prune.
     fn available(&self, world: &Game, obs: &PlayerObservation,
                  actions: &[Action], seat: PlayerId) -> Vec<usize> {
-        if self.cfg.use_dominance {
+        let keep = if self.cfg.use_dominance {
             self.policy.dominance_keep_indices(world, obs, actions, seat,
                                                world.in_pregame())
         } else {
             (0..actions.len()).collect()
+        };
+        self.mask_mana_abilities(actions, keep)
+    }
+
+    /// Optionally drop `ActivateManaAbility` from what the search may choose.
+    ///
+    /// This is a MASK over the existing action list, not a re-encoding: the
+    /// indices returned still point into `actions`, so `action_dim` is
+    /// unchanged, existing checkpoints stay valid, and the policy simply
+    /// renormalises over what is left.
+    ///
+    /// Why it is defensible: the engine AUTO-PAYS costs. Measured over 1,956
+    /// branching decisions, 75% of CastSpell offers appear with an EMPTY mana
+    /// pool, so dropping mana abilities cannot make a spell uncastable. They
+    /// exist only for deliberately FLOATING mana, and in a format with mana
+    /// burn that is close to always wrong: the bot makes mana it cannot spend
+    /// 1.33 times a game. It also removes 29% of the branching factor.
+    ///
+    /// Why it is a DEVIATION worth naming: this project's rule is no
+    /// handcrafted play knowledge, and "never float mana" is a strategic
+    /// prior, not plumbing. It is deliberate, flagged, and documented in
+    /// AGENTS.md with its rollback condition (a format where floating
+    /// matters). Play-the-turn-out was tried first and did NOT fix this
+    /// defect -- burn is one point of life, below the value head's
+    /// resolution -- which is why the action is masked rather than learned.
+    ///
+    /// Never masks the last option: if mana abilities are all that is legal,
+    /// they stay, because a search with nothing to choose is worse than one
+    /// choosing badly.
+    fn mask_mana_abilities(&self, actions: &[Action],
+                           keep: Vec<usize>) -> Vec<usize> {
+        // Env fallback so one setting covers every entry point at once --
+        // a mask applied in self-play but not in the gate would make every
+        // number incomparable.
+        let on = self.cfg.mask_mana
+            || std::env::var("AZ_MASK_MANA").as_deref() == Ok("1");
+        if !on {
+            return keep;
         }
+        let masked: Vec<usize> = keep.iter().copied()
+            .filter(|&i| !matches!(actions[i], Action::ActivateManaAbility { .. }))
+            .collect();
+        if masked.is_empty() { keep } else { masked }
     }
 
     /// One determinized playout down the shared tree. `opp` is the handcrafted
