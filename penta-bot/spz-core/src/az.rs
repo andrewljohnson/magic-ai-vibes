@@ -305,6 +305,7 @@ pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
 
     while game.result().is_none() && n < MAX_DECISIONS {
         if budget > 0 && started.elapsed().as_secs() >= budget {
+            crate::mcts::stats::bump(crate::mcts::stats::H2H_CLOCK);
             return -1.0;
         }
         let Some(seat) = game.decision_seat() else { break };
@@ -346,7 +347,14 @@ pub fn play_h2h(policy_p1: &Policy, policy_p2: &Policy,
     }
 
     match game.result() {
-        None => -1.0,
+        None => {
+            // Reached here without a result and without tripping the clock,
+            // so it was MAX_DECISIONS. Counted separately: a censored sample
+            // biases every mirror toward short games, and knowing WHICH
+            // limit binds decides whether to raise the clock or the cap.
+            crate::mcts::stats::bump(crate::mcts::stats::H2H_CAP);
+            -1.0
+        }
         Some(penta::GameResult::Draw) => 0.5,
         Some(penta::GameResult::Winner { winner, .. }) =>
             if winner == PlayerId::One { 1.0 } else { 0.0 },

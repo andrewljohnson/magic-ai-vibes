@@ -345,12 +345,13 @@ pub mod stats {
     use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
     use std::sync::Mutex;
 
-    pub const N: usize = 12;
+    pub const N: usize = 14;
     pub const NAMES: [&str; N] = [
         "det_ok", "det_err", "iters_started", "iters_reached_opponent",
         "opp_action_none", "opp_apply_fail", "our_apply_fail",
         "max_depth_hits", "terminal_leaves", "our_nodes",
         "expand_plies_played", "expand_calls",
+        "h2h_clock_timeouts", "h2h_decision_caps",
     ];
     pub const DET_OK: usize = 0;
     pub const DET_ERR: usize = 1;
@@ -364,12 +365,15 @@ pub mod stats {
     pub const OUR_NODES: usize = 9;
     pub const EXPAND_PLIES: usize = 10;
     pub const EXPAND_CALLS: usize = 11;
+    pub const H2H_CLOCK: usize = 12;
+    pub const H2H_CAP: usize = 13;
 
     static C: [AtomicU64; N] = [
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
         AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0),
+        AtomicU64::new(0), AtomicU64::new(0),
     ];
     static ERRS: Mutex<Option<std::collections::HashMap<String, u64>>> =
         Mutex::new(None);
