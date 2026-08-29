@@ -1,3 +1,51 @@
+# 2026-08-28 — rulings on the four questions
+
+1. **The "direction disagreement" is two flat lines.** Anchor 46→49 on
+   ±3.2 per read and gate 45.0→39.2 on ±4.5 (which returned to its own
+   floor) — neither series moved outside its bar. Report the paired SE from
+   the per-game `per` vector, not `sqrt(p(1-p)/n)`. The pool eval dropped
+   69/320 games and the mask mirror 33/200: the guard still binds on the
+   longest games. Raise `AZ_H2H_SECS` until drops <5% before any other
+   measurement.
+2. **Mask: not on the mirror alone.** Masked-vs-masked cancels every
+   symmetric cost; the auto-payer (which land the engine taps) is the
+   obvious one and only the gate can see it. Settle with a `playout_log`
+   audit of masked gate games (City of Brass damage, Factory tapped with a
+   land available, colour-failed casts) plus an own-model gate masked vs
+   unmasked, 300 games. Ship only on that, and flip the hosted bot at the
+   same moment.
+3. **add-k / entropy.** `tgt_ent` 0.23 with a 2.8-action mean is sharp,
+   not collapse. The collapse metric is search-argmax ≠ prior-argmax rate
+   per round; above ~90% agreement the search teaches nothing. Noise is not
+   the lever (0.10 already eats the teacher's margin); sims are.
+4. **3 points / 25 rounds is what this teacher gives, and 80% of compute is
+   discarded.** Stop the waste: `AZ_GAME_SECS` so truncation never binds,
+   pool frac 0.5→0.25, gate every 50 rounds. Raise the teacher: measure
+   noise-free 64-sim vs 1-sim once; if ≈+10, generate at 64.
+5. Play-the-turn-out: accept the null (neutral at 3x cost). Keep off.
+
+Order: guards → mask audit → 64-sim h2h → restart `az_pool` with the above
+and argmax-agreement logged → 50 clean rounds before anything structural.
+
+---
+
+# 2026-08-27 — rulings on the round-124 drift, mana burn, the mask, the gate
+
+* Round 124 is real drift plus winner's curse: promotion on a >50% read of
+  120 games biases every promoted delta upward, and best-response-to-
+  predecessor cycles. Promote against a pool (anchor + last 3, ≥300 games,
+  >55%) and put pool opponents in generation.
+* Mana burn is the delayed-consequence case: play the turn out on
+  expansion, then evaluate. (Measured next day: neutral; helped combat
+  only.)
+* Mask mana abilities as a flag, applied identically in generation, both
+  gates and the hosted bot; mask, don't re-encode; verify the auto-payer;
+  measure separately from the turn-out.
+* Report three numbers: anchor mirror (progress), own-model gate
+  (portable), handcrafted-model gate (exploit, diagnostic).
+
+---
+
 # 2026-08-26 (evening) — the mirror result changes the picture
 
 The mirror result changes the picture and the truncation hypothesis does not

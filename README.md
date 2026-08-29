@@ -22,11 +22,13 @@ The strong net plays protocol 22. **The public server requires protocol 29
 and refuses to register anything else**, so the deployable net is the weaker
 one.
 
-**The open problem is that the loop does not climb.** Search beats our
-policy — 55.8% ± 3.5 in a mirror match at 32 sims, measured in exactly the
-configuration self-play trains on — but 180 rounds and ~8600 games produced
-zero promotions and left the best net byte-identical to its warm start. The
-teacher is good; the student does not learn from it. See ROADMAP.
+**The open problem is that the loop climbs slowly.** Search beats the
+policy in self-play — +5.8 noise-free at 32 sims, ~+4 with the root noise
+generation uses — and a fixed-anchor promotion gate now shows real but slow
+progress (46% → 49% against the warm start over 25 rounds). The rate is
+bounded by how little the teacher beats the student and by ~80% of
+generated decisions being discarded. See ROADMAP for the order of work,
+AGENTS for how to measure without fooling yourself.
 
 A bot is deployed and playing on the public server at 512 sims per move.
 Hosted play needs `SPZ_ACCEPT_FINGERPRINT` set to the server's advertised
